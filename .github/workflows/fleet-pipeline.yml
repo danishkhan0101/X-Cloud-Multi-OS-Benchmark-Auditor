@@ -48,11 +48,20 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
 
-      - name: 🛠️ Install Ansible & OpenSCAP
+      - name: 🛠️ Install Ansible, OpenSCAP & InSpec
         run: |
           sudo apt-get update
           sudo apt-get install -y ansible openscap-scanner
+          
+          # Install InSpec via official Chef Omnitruck script
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -p inspec
+          
+          # Configuration for automation
           export ANSIBLE_HOST_KEY_CHECKING=False
+          export CHEF_LICENSE="accept"
+          
+          # Verify installation (Optional but recommended for logs)
+          inspec --version
 
       - name: 🚀 Execute Fleet Commander
         run: |
