@@ -56,5 +56,5 @@ jobs:
 
       - name: 🚀 Execute Fleet Commander
         run: |
-          chmod +x tm_fleet_commander.sh
-          ./tm_fleet_commander.sh --headless --profile ${{ github.event.inputs.profile }} --mode ${{ github.event.inputs.mode }} --targets "${{ github.event.inputs.targets }}"
+          chmod +x tm_multi_os_benchmark.sh
+          ./tm_multi_os_benchmark.sh --headless --profile ${{ github.event.inputs.profile }} --mode ${{ github.event.inputs.mode }} --targets "${{ github.event.inputs.targets }}"
