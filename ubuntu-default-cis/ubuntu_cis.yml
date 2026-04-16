@@ -1,0 +1,24 @@
+---
+- name: Default Ubuntu CIS Hardening
+  hosts: ubuntu_servers
+  become: yes
+
+  tasks:
+    - name: Pre-fix SSH Kex and MACs for OpenSCAP compatibility
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        line: "{{ item }}"
+        state: present
+      loop:
+        - "KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512"
+        - "MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256"
+
+    - name: Run Official Dev-Sec Hardening Roles
+      include_role:
+        name: "{{ item }}"
+      loop:
+        - devsec.hardening.os_hardening
+        - devsec.hardening.ssh_hardening
+      vars:
+        ssh_allow_tcp_forwarding: "no"
+        ssh_gateway_ports: "no"

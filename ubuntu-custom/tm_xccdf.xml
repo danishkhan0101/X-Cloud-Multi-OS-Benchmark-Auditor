@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.2" id="xccdf_com.tm_benchmark_lsb" resolved="1">
+  <status date="2026-04-08">accepted</status>
+  <title>Telekom Malaysia (TM) Unified Baseline</title>
+  <description>Official XCCDF Benchmark for TM LSB compliance. Validated for Ubuntu.</description>
+  <version>1.0</version>
+  
+  <Profile id="xccdf_com.tm_profile_lsb">
+    <title>TM LSB Complete Profile</title>
+    <description>Evaluates exactly 20 Technical LSB rules.</description>
+    <select idref="xccdf_com.tm_rule_14" selected="true"/>
+    <select idref="xccdf_com.tm_rule_15" selected="true"/>
+    <select idref="xccdf_com.tm_rule_19" selected="true"/>
+    <select idref="xccdf_com.tm_rule_20" selected="true"/>
+    <select idref="xccdf_com.tm_rule_25" selected="true"/>
+    <select idref="xccdf_com.tm_rule_27" selected="true"/>
+    <select idref="xccdf_com.tm_rule_28" selected="true"/>
+    <select idref="xccdf_com.tm_rule_29" selected="true"/>
+    <select idref="xccdf_com.tm_rule_30" selected="true"/>
+    <select idref="xccdf_com.tm_rule_31" selected="true"/>
+    <select idref="xccdf_com.tm_rule_32" selected="true"/>
+    <select idref="xccdf_com.tm_rule_33" selected="true"/>
+    <select idref="xccdf_com.tm_rule_34" selected="true"/>
+    <select idref="xccdf_com.tm_rule_35" selected="true"/>
+    <select idref="xccdf_com.tm_rule_36" selected="true"/>
+    <select idref="xccdf_com.tm_rule_37" selected="true"/>
+    <select idref="xccdf_com.tm_rule_38" selected="true"/>
+    <select idref="xccdf_com.tm_rule_39" selected="true"/>
+    <select idref="xccdf_com.tm_rule_41" selected="true"/>
+  </Profile>
+
+  <Group id="xccdf_com.tm_group_all">
+    <title>TM Hardening Rules</title>
+    <description>Detailed technical checks.</description>
+    
+    <Rule id="xccdf_com.tm_rule_14" selected="true" severity="low"><title>LSB14: Patch Status Validated</title><description>Verify trace file for system patches.</description><ident system="http://cce.mitre.org">CCE-TM-14</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:14"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_25" selected="true" severity="high"><title>LSB25/26: AppArmor Enforced</title><description>Ensure AppArmor (Ubuntu SELinux equivalent) is installed.</description><rationale>Mandatory Access Control (MAC) limits privileges.</rationale><ident system="http://cce.mitre.org">CCE-TM-25</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:25"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_27" selected="true" severity="high"><title>LSB27: UFW Firewall Enabled</title><description>Ensure Uncomplicated Firewall (UFW) is active.</description><rationale>Host-based firewalls protect against internal lateral movement.</rationale><ident system="http://cce.mitre.org">CCE-TM-27</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:27"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_29" selected="true" severity="high"><title>LSB29: Firewall Default DROP</title><description>Ensure UFW drops unauthorized inbound traffic.</description><rationale>A default deny posture is required by TM policy.</rationale><ident system="http://cce.mitre.org">CCE-TM-29</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:29"/></check></Rule>
+
+    <Rule id="xccdf_com.tm_rule_15" selected="true" severity="medium"><title>LSB15: Set Timezone</title><description>Set MYT timezone.</description><ident system="http://cce.mitre.org">CCE-TM-15</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:15"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_19" selected="true" severity="low"><title>LSB19: SSH Banner</title><description>Configure TM banner.</description><ident system="http://cce.mitre.org">CCE-TM-19</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:19"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_20" selected="true" severity="medium"><title>LSB20: Disable Filesystems</title><description>Disable cramfs, etc.</description><ident system="http://cce.mitre.org">CCE-TM-20</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:20"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_28" selected="true" severity="high"><title>LSB28: Disable Root SSH</title><description>PermitRootLogin no.</description><ident system="http://cce.mitre.org">CCE-TM-28</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:28"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_30" selected="true" severity="high"><title>LSB30: Remove Squid</title><description>No proxy.</description><ident system="http://cce.mitre.org">CCE-TM-30</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:30"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_31" selected="true" severity="high"><title>LSB31: Remove Dovecot</title><description>No mail.</description><ident system="http://cce.mitre.org">CCE-TM-31</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:31"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_32" selected="true" severity="high"><title>LSB32: Remove FTP</title><description>No FTP.</description><ident system="http://cce.mitre.org">CCE-TM-32</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:32"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_33" selected="true" severity="medium"><title>LSB33: Remove DNS</title><description>No bind9.</description><ident system="http://cce.mitre.org">CCE-TM-33</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:33"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_34" selected="true" severity="medium"><title>LSB34: Remove DHCP</title><description>No DHCP.</description><ident system="http://cce.mitre.org">CCE-TM-34</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:34"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_35" selected="true" severity="high"><title>LSB35: Remove Telnet</title><description>No Telnet.</description><ident system="http://cce.mitre.org">CCE-TM-35</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:35"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_36" selected="true" severity="high"><title>LSB36: Remove RSH</title><description>No RSH.</description><ident system="http://cce.mitre.org">CCE-TM-36</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:36"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_37" selected="true" severity="low"><title>LSB37: Remove LDAP</title><description>No LDAP.</description><ident system="http://cce.mitre.org">CCE-TM-37</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:37"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_38" selected="true" severity="medium"><title>LSB38: Remove SNMP</title><description>No SNMP.</description><ident system="http://cce.mitre.org">CCE-TM-38</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:38"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_39" selected="true" severity="high"><title>LSB39: Install Auditd</title><description>Install auditd.</description><ident system="http://cce.mitre.org">CCE-TM-39</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:39"/></check></Rule>
+    <Rule id="xccdf_com.tm_rule_41" selected="true" severity="high"><title>LSB41: Rsyslog Forwarding</title><description>Rsyslog NGSIEM.</description><ident system="http://cce.mitre.org">CCE-TM-41</ident><check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"><check-content-ref href="/tmp/tm_ubuntu_rules.xml" name="oval:tm.ubuntu:def:41"/></check></Rule>
+  </Group>
+</Benchmark>

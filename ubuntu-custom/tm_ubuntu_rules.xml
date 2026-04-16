@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<oval_definitions xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5" xmlns:oval="http://oval.mitre.org/XMLSchema/oval-common-5" xmlns:linux="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux" xmlns:ind="http://oval.mitre.org/XMLSchema/oval-definitions-5#independent" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <generator>
+    <oval:product_name>TM Automated OVAL Engine</oval:product_name>
+    <oval:schema_version>5.11</oval:schema_version>
+    <oval:timestamp>2026-04-08T08:00:00</oval:timestamp>
+  </generator>
+  
+  <definitions>
+    <definition id="oval:tm.ubuntu:def:15" version="1" class="compliance"><metadata><title>LSB15</title><affected family="unix"><platform>Ubuntu</platform></affected><description>Timezone</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:15" comment="Check Timezone"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:19" version="1" class="compliance"><metadata><title>LSB19</title><affected family="unix"><platform>Ubuntu</platform></affected><description>Banner</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:19" comment="Check SSH Banner"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:20" version="1" class="compliance"><metadata><title>LSB20</title><affected family="unix"><platform>Ubuntu</platform></affected><description>Filesystems</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:20" comment="Check Filesystems"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:28" version="1" class="compliance"><metadata><title>LSB28</title><affected family="unix"><platform>Ubuntu</platform></affected><description>Root Login</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:28" comment="Check Root Login"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:39" version="1" class="compliance"><metadata><title>LSB39</title><affected family="unix"><platform>Ubuntu</platform></affected><description>Auditd</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:39" comment="Check Auditd"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:41" version="1" class="compliance"><metadata><title>LSB41</title><affected family="unix"><platform>Ubuntu</platform></affected><description>Rsyslog</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:41" comment="Check Rsyslog"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:14" version="1" class="compliance"><metadata><title>LSB14</title><affected family="unix"><platform>Ubuntu</platform></affected><description>Patch</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:14" comment="Check Patch"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:25" version="1" class="compliance"><metadata><title>LSB25</title><affected family="unix"><platform>Ubuntu</platform></affected><description>AppArmor</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:25" comment="Check AppArmor"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:27" version="1" class="compliance"><metadata><title>LSB27</title><affected family="unix"><platform>Ubuntu</platform></affected><description>UFW Active</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:27" comment="Check UFW"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:29" version="1" class="compliance"><metadata><title>LSB29</title><affected family="unix"><platform>Ubuntu</platform></affected><description>UFW Drop</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:29" comment="Check UFW Drop"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:30" version="1" class="compliance"><metadata><title>LSB30</title><affected family="unix"><platform>Ubuntu</platform></affected><description>Squid</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:30" comment="Check Squid"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:31" version="1" class="compliance"><metadata><title>LSB31</title><affected family="unix"><platform>Ubuntu</platform></affected><description>Dovecot</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:31" comment="Check Dovecot"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:32" version="1" class="compliance"><metadata><title>LSB32</title><affected family="unix"><platform>Ubuntu</platform></affected><description>FTP</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:32" comment="Check FTP"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:33" version="1" class="compliance"><metadata><title>LSB33</title><affected family="unix"><platform>Ubuntu</platform></affected><description>DNS</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:33" comment="Check DNS"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:34" version="1" class="compliance"><metadata><title>LSB34</title><affected family="unix"><platform>Ubuntu</platform></affected><description>DHCP</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:34" comment="Check DHCP"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:35" version="1" class="compliance"><metadata><title>LSB35</title><affected family="unix"><platform>Ubuntu</platform></affected><description>Telnet</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:35" comment="Check Telnet"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:36" version="1" class="compliance"><metadata><title>LSB36</title><affected family="unix"><platform>Ubuntu</platform></affected><description>RSH</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:36" comment="Check RSH"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:37" version="1" class="compliance"><metadata><title>LSB37</title><affected family="unix"><platform>Ubuntu</platform></affected><description>LDAP</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:37" comment="Check LDAP"/></criteria></definition>
+    <definition id="oval:tm.ubuntu:def:38" version="1" class="compliance"><metadata><title>LSB38</title><affected family="unix"><platform>Ubuntu</platform></affected><description>SNMP</description></metadata><criteria><criterion test_ref="oval:tm.ubuntu:tst:38" comment="Check SNMP"/></criteria></definition>
+  </definitions>
+
+  <tests>
+    <ind:textfilecontent54_test id="oval:tm.ubuntu:tst:15" version="1" check="all" comment="Check Timezone"><ind:object object_ref="oval:tm.ubuntu:obj:15"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.ubuntu:tst:19" version="1" check="all" comment="Check SSH Banner"><ind:object object_ref="oval:tm.ubuntu:obj:19"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.ubuntu:tst:20" version="1" check="all" comment="Check Filesystems"><ind:object object_ref="oval:tm.ubuntu:obj:20"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.ubuntu:tst:28" version="1" check="all" comment="Check Root Login"><ind:object object_ref="oval:tm.ubuntu:obj:28"/></ind:textfilecontent54_test>
+    <linux:dpkginfo_test id="oval:tm.ubuntu:tst:39" version="1" check="all" check_existence="at_least_one_exists" comment="Check Auditd"><linux:object object_ref="oval:tm.ubuntu:obj:39"/></linux:dpkginfo_test>
+    <ind:textfilecontent54_test id="oval:tm.ubuntu:tst:41" version="1" check="all" comment="Check Rsyslog"><ind:object object_ref="oval:tm.ubuntu:obj:41"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.ubuntu:tst:14" version="1" check="all" comment="Check Patch"><ind:object object_ref="oval:tm.ubuntu:obj:14"/></ind:textfilecontent54_test>
+    <linux:dpkginfo_test id="oval:tm.ubuntu:tst:25" version="1" check="all" check_existence="at_least_one_exists" comment="Check AppArmor"><linux:object object_ref="oval:tm.ubuntu:obj:25"/></linux:dpkginfo_test>
+    <ind:textfilecontent54_test id="oval:tm.ubuntu:tst:27" version="1" check="all" comment="Check UFW"><ind:object object_ref="oval:tm.ubuntu:obj:27"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.ubuntu:tst:29" version="1" check="all" comment="Check UFW Drop"><ind:object object_ref="oval:tm.ubuntu:obj:29"/></ind:textfilecontent54_test>
+    <linux:dpkginfo_test id="oval:tm.ubuntu:tst:30" version="1" check="all" check_existence="none_exist" comment="Check Squid"><linux:object object_ref="oval:tm.ubuntu:obj:30"/></linux:dpkginfo_test>
+    <linux:dpkginfo_test id="oval:tm.ubuntu:tst:31" version="1" check="all" check_existence="none_exist" comment="Check Dovecot"><linux:object object_ref="oval:tm.ubuntu:obj:31"/></linux:dpkginfo_test>
+    <linux:dpkginfo_test id="oval:tm.ubuntu:tst:32" version="1" check="all" check_existence="none_exist" comment="Check FTP"><linux:object object_ref="oval:tm.ubuntu:obj:32"/></linux:dpkginfo_test>
+    <linux:dpkginfo_test id="oval:tm.ubuntu:tst:33" version="1" check="all" check_existence="none_exist" comment="Check DNS"><linux:object object_ref="oval:tm.ubuntu:obj:33"/></linux:dpkginfo_test>
+    <linux:dpkginfo_test id="oval:tm.ubuntu:tst:34" version="1" check="all" check_existence="none_exist" comment="Check DHCP"><linux:object object_ref="oval:tm.ubuntu:obj:34"/></linux:dpkginfo_test>
+    <linux:dpkginfo_test id="oval:tm.ubuntu:tst:35" version="1" check="all" check_existence="none_exist" comment="Check Telnet"><linux:object object_ref="oval:tm.ubuntu:obj:35"/></linux:dpkginfo_test>
+    <linux:dpkginfo_test id="oval:tm.ubuntu:tst:36" version="1" check="all" check_existence="none_exist" comment="Check RSH"><linux:object object_ref="oval:tm.ubuntu:obj:36"/></linux:dpkginfo_test>
+    <linux:dpkginfo_test id="oval:tm.ubuntu:tst:37" version="1" check="all" check_existence="none_exist" comment="Check LDAP"><linux:object object_ref="oval:tm.ubuntu:obj:37"/></linux:dpkginfo_test>
+    <linux:dpkginfo_test id="oval:tm.ubuntu:tst:38" version="1" check="all" check_existence="none_exist" comment="Check SNMP"><linux:object object_ref="oval:tm.ubuntu:obj:38"/></linux:dpkginfo_test>
+  </tests>
+
+  <objects>
+    <ind:textfilecontent54_object id="oval:tm.ubuntu:obj:15" version="1"><ind:filepath>/etc/timezone</ind:filepath><ind:pattern>^Asia/Kuala_Lumpur</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.ubuntu:obj:19" version="1"><ind:filepath>/etc/ssh/sshd_config</ind:filepath><ind:pattern>^\s*Banner\s+/etc/sshbanner\.txt</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.ubuntu:obj:20" version="1"><ind:path>/etc/modprobe.d</ind:path><ind:filename operation="pattern match">^.*\.conf$</ind:filename><ind:pattern>^\s*install\s+cramfs\s+/bin/true</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.ubuntu:obj:28" version="1"><ind:filepath>/etc/ssh/sshd_config</ind:filepath><ind:pattern>^\s*PermitRootLogin\s+no</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <linux:dpkginfo_object id="oval:tm.ubuntu:obj:39" version="1"><linux:name>auditd</linux:name></linux:dpkginfo_object>
+    <ind:textfilecontent54_object id="oval:tm.ubuntu:obj:41" version="1"><ind:filepath>/etc/rsyslog.conf</ind:filepath><ind:pattern>^\*\.\*\s+@@?</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.ubuntu:obj:14" version="1"><ind:filepath>/var/log/tm_patch_status.log</ind:filepath><ind:pattern>^PATCH_STATUS=COMPLIANT</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <linux:dpkginfo_object id="oval:tm.ubuntu:obj:25" version="1"><linux:name>apparmor</linux:name></linux:dpkginfo_object>
+    <ind:textfilecontent54_object id="oval:tm.ubuntu:obj:27" version="1"><ind:filepath>/etc/ufw/ufw.conf</ind:filepath><ind:pattern>^ENABLED=yes</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.ubuntu:obj:29" version="1"><ind:filepath>/etc/default/ufw</ind:filepath><ind:pattern>^DEFAULT_INPUT_POLICY="DROP"</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <linux:dpkginfo_object id="oval:tm.ubuntu:obj:30" version="1"><linux:name>squid</linux:name></linux:dpkginfo_object>
+    <linux:dpkginfo_object id="oval:tm.ubuntu:obj:31" version="1"><linux:name>dovecot-core</linux:name></linux:dpkginfo_object>
+    <linux:dpkginfo_object id="oval:tm.ubuntu:obj:32" version="1"><linux:name>vsftpd</linux:name></linux:dpkginfo_object>
+    <linux:dpkginfo_object id="oval:tm.ubuntu:obj:33" version="1"><linux:name>bind9</linux:name></linux:dpkginfo_object>
+    <linux:dpkginfo_object id="oval:tm.ubuntu:obj:34" version="1"><linux:name>isc-dhcp-server</linux:name></linux:dpkginfo_object>
+    <linux:dpkginfo_object id="oval:tm.ubuntu:obj:35" version="1"><linux:name>telnet</linux:name></linux:dpkginfo_object>
+    <linux:dpkginfo_object id="oval:tm.ubuntu:obj:36" version="1"><linux:name>rsh-client</linux:name></linux:dpkginfo_object>
+    <linux:dpkginfo_object id="oval:tm.ubuntu:obj:37" version="1"><linux:name>ldap-utils</linux:name></linux:dpkginfo_object>
+    <linux:dpkginfo_object id="oval:tm.ubuntu:obj:38" version="1"><linux:name>snmp</linux:name></linux:dpkginfo_object>
+  </objects>
+</oval_definitions>

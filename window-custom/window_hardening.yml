@@ -1,0 +1,28 @@
+---
+- name: Emergency Hardening Test
+  hosts: windows_servers
+  tasks:
+    - name: WSB54-56 - Force Clear NullSession Registry
+      ansible.windows.win_shell: |
+        reg add "HKLM\System\CurrentControlSet\Services\LanmanServer\Parameters" /v NullSessionPipes /t REG_MULTI_SZ /d "" /f
+        reg add "HKLM\System\CurrentControlSet\Services\LanmanServer\Parameters" /v NullSessionShares /t REG_MULTI_SZ /d "" /f
+      args:
+        executable: cmd
+
+    - name: WSB63 - Restrict RDP Remote Addresses
+      ansible.windows.win_shell: |
+        Get-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue | Get-NetFirewallAddressFilter | Set-NetFirewallAddressFilter -RemoteAddress "10.0.0.50"
+      vars:
+        ansible_shell_type: powershell
+
+    - name: WSB38 - Deny Guest Logons
+      ansible.windows.win_user_right:
+        name: "{{ item }}"
+        users:
+          - "S-1-5-32-546"
+        action: set
+      loop:
+        - SeDenyServiceLogonRight
+        - SeDenyBatchLogonRight
+        - SeDenyInteractiveLogonRight
+        - SeDenyRemoteInteractiveLogonRight

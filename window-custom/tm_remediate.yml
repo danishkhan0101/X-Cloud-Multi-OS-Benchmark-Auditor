@@ -1,0 +1,453 @@
+---
+- name: Telekom Malaysia (TM) Windows Server Baseline Remediation
+  hosts: all
+  gather_facts: yes
+
+  tasks:
+    # =======================================================
+    # SECTION 1: System Initialization & Core
+    # =======================================================
+
+    # ====================================================================
+    # WSB12 - ACTIVE DIRECTORY INTEGRATION
+    # ====================================================================
+
+    - name: WSB12 - Join TM Active Directory Domain
+      microsoft.ad.membership:
+        dns_domain_name: "tm.com.my"             # <--- Change to actual TM domain
+        domain_admin_user: "DOMAIN_JOIN_USER"    # <--- E.g., admin@tm.com.my
+        domain_admin_password: "YOUR_PASSWORD"   # <--- Keep this secure!
+        state: domain
+      register: ad_join_status
+      tags: wsb12
+      ignore_errors: yes
+
+    - name: WSB12 - Reboot Server to apply Domain Join
+      ansible.windows.win_reboot:
+        msg: "Ansible is rebooting the server to finalize Active Directory integration."
+        reboot_timeout: 600
+      when: ad_join_status.reboot_required
+      tags: wsb12
+
+
+    # ====================================================================
+    # WSB23 - NTFS VOLUMES
+    # ====================================================================
+    - name: WSB23 - Ensure all volumes use NTFS (Non-Destructive)
+      win_shell: |
+        # Find any drive that has a letter and is NOT already NTFS or ReFS
+        $badVolumes = Get-Volume | Where-Object { 
+            $_.FileSystemType -notmatch "NTFS|ReFS|Unknown" -and 
+            $_.DriveLetter -ne $null 
+        }
+        
+        foreach ($vol in $badVolumes) {
+            $drive = $($vol.DriveLetter) + ":"
+            
+            # Use the native Windows convert.exe tool. 
+            # /FS:NTFS specifies the format. /X forces a dismount if needed.
+            cmd.exe /c "echo Y | convert.exe $drive /FS:NTFS /X"
+        }
+      ignore_errors: yes
+      tags: wsb23
+ 
+    - name: WSB13 - Step 1 - Force create the SCCM folder
+      ansible.windows.win_file:
+        path: C:\Temp\SCCM_Client
+        state: directory
+
+    - name: WSB13 - Step 2 - Upload ONLY the installer (Direct File Copy)
+      ansible.windows.win_copy:
+        src: /home/ubuntu/window-custom/CLIENT/ccmsetup.exe
+        dest: C:\Temp\SCCM_Client\ccmsetup.exe
+        force: yes # This forces a re-upload even if Ansible thinks it's there
+
+    - name: WSB13 - Step 3 - Upload supporting files
+      ansible.windows.win_copy:
+        src: /home/ubuntu/window-custom/CLIENT/
+        dest: C:\Temp\SCCM_Client\
+        force: yes
+
+    - name: WSB13 - Step 4 - Verify file exists on Windows before installing
+      ansible.windows.win_stat:
+        path: C:\Temp\SCCM_Client\ccmsetup.exe
+      register: exe_check
+
+    - name: WSB13 - Step 5 - Install ONLY if file is found
+      ansible.windows.win_package:
+        path: C:\Temp\SCCM_Client\ccmsetup.exe
+        arguments: '/source:"C:\Temp\SCCM_Client" /install'
+        state: present
+      when: exe_check.stat.exists
+
+    - name: WSB14 - Force GUI Update and Configure Engine
+      win_shell: |
+        # 1. Install AND Load the Module in the SAME session
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ErrorAction SilentlyContinue
+        Install-Module -Name PolicyFileEditor -Force -Scope CurrentUser -ErrorAction SilentlyContinue
+        Import-Module PolicyFileEditor
+
+        # 2. Target the hidden GUI file
+        $PolPath = "$env:windir\System32\GroupPolicy\Machine\Registry.pol"
+        if (!(Test-Path (Split-Path $PolPath))) { New-Item -ItemType Directory -Force -Path (Split-Path $PolPath) }
+
+        # 3. Write the exact GUI settings
+        Set-PolicyFileEntry -Path $PolPath -Key 'SOFTWARE\Policies\Microsoft\W32Time\TimeProviders\NtpClient' -ValueName 'Enabled' -Data 1 -Type DWord
+        Set-PolicyFileEntry -Path $PolPath -Key 'SOFTWARE\Policies\Microsoft\W32Time\TimeProviders\NtpClient' -ValueName 'NtpServer' -Data '10.14.6.51,0x9 10.43.10.51,0x9' -Type String
+        Set-PolicyFileEntry -Path $PolPath -Key 'SOFTWARE\Policies\Microsoft\W32Time\Parameters' -ValueName 'Type' -Data 'NTP' -Type String
+
+        # 4. Force Windows to reload the GUI rules
+        gpupdate /force
+
+        # 5. Fix the core engine & disconnect VM Host clock
+        Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\VMICTimeProvider' -Name 'Enabled' -Value 0 -Type DWord
+        w32tm /config /manualpeerlist:"10.14.6.51,0x9 10.43.10.51,0x9" /syncfromflags:manual /update
+        Restart-Service w32time
+      tags: wsb14
+
+    - name: WSB21 - Place TM warning banner for users attempting to log on
+      win_regedit:
+        path: HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System
+        name: "{{ item.name }}"
+        data: "{{ item.data }}"
+        type: string
+      loop:
+        - { name: 'legalnoticecaption', data: 'TM Authorized Access Only' }
+        - { name: 'legalnoticetext', data: 'By logging into this system, you agree to TM Information Security Policies. Unauthorized access is prohibited.' }
+
+    - name: WSB76 & WSB90 - Uninstall WSL and SNMP Services
+      win_feature:
+        name: "{{ item }}"
+        state: absent
+      loop:
+        - Microsoft-Windows-Subsystem-Linux
+        - SNMP-Service
+
+    # =======================================================
+    # SECTION 2: User Account & Password Policies
+    # =======================================================
+    # ====================================================================
+    # WSB24 - CREATE NEW ADMIN & DISABLE DEFAULT ADMIN (GUI SYNC)
+    # ====================================================================
+
+    - name: WSB24 (Part 1) - Create fallback Admin to bypass Windows lockout failsafe
+      win_user:
+        name: TM_Admin
+        password: "TM_Secure_P@ssw0rd!"
+        state: present
+        groups: Administrators
+      tags: wsb24
+
+    - name: WSB24 (Part 2) - Ensure your current 'window' user is safely in the Admin group
+      win_user:
+        name: window
+        state: present
+        groups: Administrators
+      tags: wsb24
+
+    - name: WSB24 (Part 3) - Disable the physical default Administrator account
+      win_user:
+        name: Administrator
+        account_disabled: yes
+      tags: wsb24
+
+    - name: WSB24 (Part 4) - Force Security Policy GUI (Native Ansible Module)
+      community.windows.win_security_policy:
+        section: System Access
+        key: EnableAdminAccount
+        value: 0
+      tags: wsb24
+
+    - name: WSB24 (Part 5) - Apply Policy
+      win_shell: gpupdate /force
+      tags: wsb24
+
+    - name: WSB24 & WSB40 - Disable default Administrator and Guest accounts
+      win_user:
+        name: "{{ item }}"
+        account_disabled: yes
+      loop:
+        - Administrator
+        - Guest
+
+    - name: WSB28 to WSB35 - Enforce TM Password and Lockout Policies
+      win_security_policy:
+        section: System Access
+        key: "{{ item.key }}"
+        value: "{{ item.value }}"
+      loop:
+        - { key: 'MinimumPasswordLength', value: '10' }
+        - { key: 'PasswordHistorySize', value: '5' }
+        - { key: 'PasswordComplexity', value: '1' }
+        - { key: 'ClearTextPassword', value: '0' }
+        - { key: 'LockoutBadCount', value: '3' }
+        - { key: 'LockoutDuration', value: '30' }
+        - { key: 'ResetLockoutCount', value: '15' }
+        - { key: 'MaximumPasswordAge', value: '90' }
+
+    # =======================================================
+    # SECTION 3: Local Policies & User Rights
+    # =======================================================
+    # WSB27: Limit Network Access
+    - name: WSB27 - Restrict network access to Admins and Auth Users
+      win_user_right:
+        name: SeNetworkLogonRight
+        users:
+          - Administrators
+          - Authenticated Users
+        action: set
+
+    - name: WSB36 - Do not grant 'act as part of the operating system' right
+      win_user_right:
+        name: SeTcbPrivilege
+        users: []
+        action: set
+
+    # WSB37: Restrict Local Logon
+    - name: WSB37 - Restrict local logon to Administrators
+      win_user_right:
+        name: SeInteractiveLogonRight
+        users:
+          - Administrators
+        action: set
+
+    - name: WSB38 - Deny Guest logons using raw SID
+      ansible.windows.win_user_right:
+        name: "{{ item }}"
+        users:
+          - "S-1-5-32-546"  # Removed the '*' prefix
+        action: set
+      loop:
+        - SeDenyServiceLogonRight
+        - SeDenyBatchLogonRight
+        - SeDenyInteractiveLogonRight
+        - SeDenyRemoteInteractiveLogonRight
+
+    - name: WSB41, WSB42- Interactive Logon and Inactivity Policies
+      win_regedit:
+        path: HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System
+        name: "{{ item.name }}"
+        data: "{{ item.data }}"
+        type: dword
+      loop:
+        - { name: 'DisableCAD', data: 0 }
+        - { name: 'InactivityTimeoutSecs', data: 600 }
+        - { name: 'ShutdownWithoutLogon', data: 0 }
+
+    # =======================================================
+    # SECTION 4: Network Security & Cryptography
+    # =======================================================
+    - name: WSB39 - Configure RDP Encryption (GUI + Registry Master Fix)
+      win_shell: |
+        # 1. Guarantee the Editor Module is loaded in THIS session
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ErrorAction SilentlyContinue
+        Install-Module -Name PolicyFileEditor -Force -Scope CurrentUser -ErrorAction SilentlyContinue
+        Import-Module PolicyFileEditor
+
+        # 2. Set Paths
+        $PolPath = "$env:windir\System32\GroupPolicy\Machine\Registry.pol"
+        $RegKey = 'SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
+
+        # 3. Update the GUI Policy File (Flips the radio button)
+        Set-PolicyFileEntry -Path $PolPath -Key $RegKey -ValueName 'MinEncryptionLevel' -Data 3 -Type DWord
+
+        # 4. Update the Actual Registry (Engine fix)
+        if (!(Test-Path "HKLM:\$RegKey")) { New-Item -Path "HKLM:\$RegKey" -Force }
+        Set-ItemProperty -Path "HKLM:\$RegKey" -Name "MinEncryptionLevel" -Value 3 -Type DWord
+
+        # 5. Force Windows to reload the GUI rules
+        gpupdate /force
+      tags: wsb39
+
+    - name: WSB43 to WSB47 - SMB Client and Server Digital Signing
+      win_regedit:
+        path: "HKLM:\\System\\CurrentControlSet\\Services\\{{ item.path }}\\Parameters"
+        name: "{{ item.name }}"
+        data: "{{ item.data }}"
+        type: dword
+      loop:
+        - { path: 'LanmanWorkstation', name: 'RequireSecuritySignature', data: 1 }
+        - { path: 'LanmanWorkstation', name: 'EnableSecuritySignature', data: 1 }
+        - { path: 'LanmanWorkstation', name: 'EnablePlainTextPassword', data: 0 }
+        - { path: 'LanmanServer', name: 'RequireSecuritySignature', data: 1 }
+        - { path: 'LanmanServer', name: 'EnableSecuritySignature', data: 1 }
+
+    - name: WSB50 - Disable anonymous SID/Name translation
+      win_regedit:
+        path: HKLM:\System\CurrentControlSet\Control\Lsa
+        name: LsaAnonymousNameLookup
+        data: 0
+        type: dword
+
+    - name: WSB51 to WSB61 - LSA and LAN Manager Cryptography Policies
+      win_regedit:
+        path: "HKLM:\\System\\CurrentControlSet\\Control\\Lsa{{ item.subpath | default('') }}"
+        name: "{{ item.name }}"
+        data: "{{ item.data }}"
+        type: dword
+      loop:
+        - { name: 'RestrictAnonymousSAM', data: 1 }
+        - { name: 'RestrictAnonymous', data: 1 }
+        - { name: 'EveryoneIncludesAnonymous', data: 0 }
+        - { name: 'ForceGuest', data: 0 }
+        - { name: 'UseMachineId', data: 1 }
+        - { subpath: '\MSV1_0', name: 'allownullsessionfallback', data: 0 }
+        - { name: 'NoLMHash', data: 1 }
+        - { name: 'LmCompatibilityLevel', data: 5 }
+
+    - name: WSB54-56 - Restrict Anonymous Pipes
+      ansible.windows.win_regedit:
+        path: HKLM:\System\CurrentControlSet\Services\LanmanServer\Parameters
+        name: NullSessionPipes
+        data: "" # We will try a different value here
+        type: multistring
+      tags: test_fix
+
+    # =======================================================
+    # SECTION 5: Active Directory Domain Member Settings
+    # =======================================================
+    - name: WSB64 to WSB67 - Secure Channel and Strong Keys
+      win_regedit:
+        path: HKLM:\System\CurrentControlSet\Services\Netlogon\Parameters
+        name: "{{ item }}"
+        data: 1
+        type: dword
+      loop:
+        - RequireSignOrSeal
+        - SealSecureChannel
+        - SignSecureChannel
+        - RequireStrongKey
+
+    - name: WSB68 - Configure the number of previous logons to cache
+      win_regedit:
+        path: HKLM:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon
+        name: CachedLogonsCount
+        data: 2
+        type: string
+
+    # =======================================================
+    # SECTION 6: Firewall & Auditing
+    # =======================================================
+    - name: WSB62 - Configure Windows Firewall (GUI + Engine Master Fix)
+      win_shell: |
+        # 1. Guarantee Editor Module is loaded
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ErrorAction SilentlyContinue
+        Install-Module -Name PolicyFileEditor -Force -Scope CurrentUser -ErrorAction SilentlyContinue
+        Import-Module PolicyFileEditor -ErrorAction SilentlyContinue
+
+        $PolPath = "$env:windir\System32\GroupPolicy\Machine\Registry.pol"
+
+        # 2. Update GUI Policy File (Flips the settings in wf.msc / gpedit.msc)
+        Set-PolicyFileEntry -Path $PolPath -Key 'SOFTWARE\Policies\Microsoft\WindowsFirewall\DomainProfile' -ValueName 'EnableFirewall' -Data 1 -Type DWord
+        Set-PolicyFileEntry -Path $PolPath -Key 'SOFTWARE\Policies\Microsoft\WindowsFirewall\DomainProfile' -ValueName 'DefaultInboundAction' -Data 1 -Type DWord
+        
+        Set-PolicyFileEntry -Path $PolPath -Key 'SOFTWARE\Policies\Microsoft\WindowsFirewall\PrivateProfile' -ValueName 'EnableFirewall' -Data 1 -Type DWord
+        Set-PolicyFileEntry -Path $PolPath -Key 'SOFTWARE\Policies\Microsoft\WindowsFirewall\PrivateProfile' -ValueName 'DefaultInboundAction' -Data 1 -Type DWord
+        
+        Set-PolicyFileEntry -Path $PolPath -Key 'SOFTWARE\Policies\Microsoft\WindowsFirewall\StandardProfile' -ValueName 'EnableFirewall' -Data 1 -Type DWord
+        Set-PolicyFileEntry -Path $PolPath -Key 'SOFTWARE\Policies\Microsoft\WindowsFirewall\StandardProfile' -ValueName 'DefaultInboundAction' -Data 1 -Type DWord
+
+        # 3. Update Engine directly (Your original fix, just combined here for safety)
+        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True -DefaultInboundAction Block
+
+        # 4. Force Windows to reload the GUI rules
+        gpupdate /force
+      tags: wsb62
+
+    # ====================================================================
+    # WSB69 to WSB73 - ADVANCED AUDIT POLICIES
+    # ====================================================================
+
+    - name: WSB69-73 - Configure Advanced Audit Policies (Engine + GUI + Encoding Fix)
+      win_shell: |
+        # 1. Update the active Windows Auditing Engine
+        auditpol /set /subcategory:"Credential Validation" /success:disable /failure:enable
+        auditpol /set /subcategory:"User Account Management" /success:enable /failure:disable
+        auditpol /set /subcategory:"Other Logon/Logoff Events" /success:enable /failure:disable
+        auditpol /set /subcategory:"Audit Policy Change" /success:disable /failure:enable
+        auditpol /set /subcategory:"Sensitive Privilege Use" /success:enable /failure:disable
+        
+        # 2. Sync the Engine to the GUI (secpol.msc)
+        $auditDir = "$env:windir\System32\GroupPolicy\Machine\Microsoft\Windows NT\Audit"
+        if (!(Test-Path $auditDir)) { New-Item -ItemType Directory -Force -Path $auditDir }
+        
+        # 3. The Encoding Fix: Backup to a raw file, then convert to UTF8 for InSpec
+        auditpol /backup /file:"$auditDir\audit_raw.csv"
+        Get-Content "$auditDir\audit_raw.csv" | Out-File "$auditDir\audit.csv" -Encoding UTF8
+        Remove-Item "$auditDir\audit_raw.csv" -Force
+        
+        # 4. Force Windows to reload the Local Security Policy
+        gpupdate /force
+      tags: ['wsb69', 'wsb70', 'wsb71', 'wsb72', 'wsb73']
+
+
+    # ==========================================
+    # SECTION: Newly Added WSB Rules
+    # ==========================================
+
+    - name: WSB11 - Ensure Windows Update Service is Enabled
+      win_service:
+        name: wuauserv
+        start_mode: auto
+        state: started
+
+    - name: WSB16 - Force Enable Defender Real-Time Protection
+      win_shell: Set-MpPreference -DisableRealtimeMonitoring $false
+      register: av_result
+      ignore_errors: yes
+
+    - name: WSB16 - Verify Defender Status (Safe Check)
+      win_shell: Get-MpComputerStatus | Select-Object -ExpandProperty RealTimeProtectionEnabled
+      register: av_verify
+      # Use the 'default' filter to prevent crashing if the previous task skipped
+      when: av_result.failed | default(false) or (av_result.rc | default(0) != 0)
+
+    - name: WSB16 - Acknowledge Compliance
+      debug:
+        msg: "WSB16 Status: Defender is active or protected by Tamper Protection."
+      # Check if EITHER the first attempt worked OR the verification check returned True
+      when: >
+        (av_result.rc | default(1) == 0) or 
+        (av_verify.stdout is defined and 'True' in av_verify.stdout)
+
+    - name: WSB63 - Restrict RDP Remote Addresses (Remove 'Any')
+      ansible.windows.win_shell: |
+        # 1. Get all rules in the Remote Desktop group
+        # 2. Get the specific Address Filters for those rules
+        # 3. Set the RemoteAddress to ONLY your Jumphost
+        Get-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue | 
+        Get-NetFirewallAddressFilter | 
+        Set-NetFirewallAddressFilter -RemoteAddress "10.0.0.50"
+
+    - name: WSB74 - Configure Event Log Size (1GB minimum for 1-year retention)
+      win_regedit:
+        path: "{{ item }}"
+        name: MaxSize
+        data: 1048576000
+        type: dword
+      loop:
+        - HKLM:\System\CurrentControlSet\Services\EventLog\Security
+        - HKLM:\System\CurrentControlSet\Services\EventLog\System
+
+    # ====================================================================
+    # WSB79 & WSB81 - SECURITY OPTIONS (SHUTDOWN & SCREENSAVER)
+    # ====================================================================
+
+    - name: WSB79 & WSB81 - Configure Security Options (secpol.msc Master Fix)
+      win_shell: |
+        # These are Security Options, so we must use SecEdit!
+        $cfgFile = "$env:TEMP\wsb79_81.inf"
+        
+        # '4' tells Windows this is a DWORD registry key. 
+        # So '4,600' means 'Set to 600 seconds' and '4,0' means 'Set to Disabled'
+        $secInf = "[Unicode]`r`n[Version]`r`nsignature=`"`$CHICAGO`$`"`r`nRevision=1`r`n[Registry Values]`r`nMACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\ShutdownWithoutLogon=4,0`r`nMACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\InactivityTimeoutSecs=4,600"
+        
+        $secInf | Out-File $cfgFile -Encoding Unicode
+        secedit /configure /db $env:windir\security\local.sdb /cfg $cfgFile /areas REGVALUES
+        Remove-Item $cfgFile -Force
+        
+        gpupdate /force
+      tags: ['wsb79', 'wsb81']

@@ -1,0 +1,12 @@
+*.html
+*.json
+.tm_injected_vms.log
+inventory.ini
+*.html
+*.json
+.tm_injected_vms.log
+inventory.ini
+*.msi
+*.MSI
+*.zip
+*.exe
