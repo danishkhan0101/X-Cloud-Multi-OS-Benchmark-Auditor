@@ -10,3 +10,7 @@ inventory.ini
 *.MSI
 *.zip
 *.exe
+# Security: Ignore local environment variables
+.env
+.env.local
+.env.*
