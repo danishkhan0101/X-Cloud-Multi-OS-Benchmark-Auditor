@@ -39,8 +39,17 @@ This pipeline is fully parameter-driven. You must provide your own Azure infrast
 3. Run the script: `./tm_fleet_commander.sh`
 
 ### For CI/CD Execution (GitHub Actions)
-If you fork this repository to run in your own environment, go to **Settings -> Secrets and variables -> Actions -> Variables** and add the following:
+If you fork this repository to run in your own environment, you must configure both **Variables** and **Secrets** in your GitHub repository.
+
+#### 1. Repository Variables (Non-Sensitive)
+Go to **Settings -> Secrets and variables -> Actions -> Variables** and add the following:
 * `AZURE_RG_NAME` (e.g., Prod_Servers_RG)
 * `AZURE_KV_NAME` (e.g., Corp-Security-Vault)
 * `AZURE_KV_SECRET` (e.g., WindowsAdminPass)
 * `WINDOWS_ADMIN_USER` (e.g., svc_audit_admin)
+
+#### 2. Repository Secrets (Authentication)
+Go to **Settings -> Secrets and variables -> Actions -> Secrets** and add the following:
+* `AZURE_CREDENTIALS`: Your Azure Service Principal JSON block (used by the pipeline to authenticate with your Azure Cloud).
+* `UBUNTU_SSH_KEY`: Your private SSH key (e.g., the contents of your `~/.ssh/id_rsa` or `id_ed25519` file).
+  > **⚠️ Linux Authentication Note:** This pipeline adheres to Zero-Trust principles and does not use plain-text passwords for Linux nodes. The GitHub runner uses this private `UBUNTU_SSH_KEY` for agentless OpenSCAP and Ansible connections. You must ensure the corresponding **public key** is already present in the `~/.ssh/authorized_keys` file on all target Ubuntu VMs before running the pipeline.
