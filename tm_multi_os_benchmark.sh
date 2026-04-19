@@ -1,12 +1,24 @@
 #!/bin/bash
 
 # ======================================================
-# CONFIGURATION - TM UNIFIED SECURITY PIPELINE
+# CONFIGURATION - DYNAMIC ENVIRONMENT VARIABLES
 # ======================================================
-RG_NAME="Packer_RG"  
+# Load local .env file if it exists (for manual terminal runs)
+if [ -f ".env" ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
 
-# --- UBUNTU SETTINGS ---
-UBUNTU_USER="ubuntu"
+# --- AZURE TARGET INFRASTRUCTURE ---
+RG_NAME="${AZURE_RG_NAME:-Packer_RG}"
+KV_NAME="${AZURE_KV_NAME:-TM-Vault-Danish}"
+SECRET_NAME="${AZURE_KV_SECRET:-AuditPassword}"
+
+# --- FLEET CREDENTIALS ---
+UBUNTU_USER="${LINUX_ADMIN_USER:-ubuntu}"
+AUDIT_USER="${WINDOWS_ADMIN_USER:-TM_Admin}"
+AUDIT_HOST_NAME="${EXCLUDE_HOST_NAME:-Audit-Host}"
+
+# --- DIRECTORY MAPPINGS (Static) ---
 UBUNTU_DIR="ubuntu-custom"
 XCCDF_FILE="${UBUNTU_DIR}/tm_xccdf.xml"
 OVAL_RULES="${UBUNTU_DIR}/tm_ubuntu_rules.xml"
@@ -14,10 +26,6 @@ UBUNTU_PLAYBOOK="${UBUNTU_DIR}/ubuntu_custom_playbook.yml"
 UBUNTU_DEF_DIR="ubuntu-default-cis"
 XCCDF_DEF_FILE="${UBUNTU_DEF_DIR}/ssg-ubuntu2404-ds.xml"
 
-# --- WINDOWS SETTINGS ---
-AUDIT_USER="TM_Admin"
-KV_NAME="TM-Vault-Danish"
-SECRET_NAME="AuditPassword"
 WIN_DIR="window-custom"
 WIN_BENCHMARK="${WIN_DIR}/tm_baseline.rb"
 WIN_PLAYBOOK="${WIN_DIR}/tm_remediate.yml"
