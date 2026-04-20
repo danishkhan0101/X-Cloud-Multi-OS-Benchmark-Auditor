@@ -65,65 +65,47 @@ if [ "$HEADLESS" == true ]; then
 fi
 
 # ======================================================
-# PHASE 0: AUTODISCOVERY & INTELLIGENT INJECTION
+# PHASE 0: ZERO-TRUST DISCOVERY (TAG-AWARE)
 # ======================================================
-echo -e "${CYAN}${BOLD}======================================================"
-echo -e "🔍 PHASE 0: AZURE HEALTH, OS DISCOVERY & INJECTION"
-echo -e "======================================================${NC}"
+echo -e "${CYAN}📡 Querying Azure for VMs in [$RG_NAME]...${NC}"
 
-echo -n "🤖 Determining Audit-Host Identity... "
-MY_IP=$(curl -s ifconfig.me)
-echo -e "${YELLOW}$MY_IP${NC}"
-
-echo -e "📡 Querying Azure for VMs and Identity Tags in [${BOLD}$RG_NAME${NC}]..."
-VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[?powerState=='VM running'].[name, publicIps]" -o tsv 2>/dev/null)
-if [ -z "$VM_DATA" ]; then
-    echo -e "${RED}❌ ERROR: No VMs found in '$RG_NAME'.${NC}"; exit 1
+# 1. Query Azure using an ORDERED ARRAY [ ] instead of a Dictionary { }
+if [ "$H_TARGETS" == "all" ] || [ -z "$H_TARGETS" ]; then
+    echo "🔍 Target Mode: ALL VMs"
+    VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[].[publicIps, storageProfile.osDisk.osType]" -o tsv)
+else
+    echo "🔍 Target Mode: Environment Tag -> $H_TARGETS"
+    VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[?tags.Environment=='$H_TARGETS'].[publicIps, storageProfile.osDisk.osType]" -o tsv)
 fi
 
-declare -a MASTER_UBUNTU
-declare -a MASTER_WINDOWS
-COUNT=0
-KV_FETCHED=false
+if [ -z "$VM_DATA" ]; then
+    echo -e "${RED}❌ ERROR: No VMs found matching Environment tag '$H_TARGETS' in '$RG_NAME'.${NC}"
+    exit 1
+fi
 
-TRACKING_FILE=".tm_injected_vms.log"
-touch "$TRACKING_FILE"
+UBUNTU_MACHINES=()
+WINDOWS_MACHINES=()
 
-echo -e "✅ Data retrieved. Processing nodes..."
-while read -r VM_NAME IP; do
+while IFS=$'\t' read -r raw_ip raw_os; do
+    # 2. Scrub invisible carriage returns (\r) and trailing spaces
+    ip=$(echo "$raw_ip" | tr -d '\r' | xargs)
+    os=$(echo "$raw_os" | tr -d '\r' | xargs)
     
-    if [ "$VM_NAME" == "$AUDIT_HOST_NAME" ] || [ "$IP" == "$MY_IP" ]; then 
-        echo -e "   [-] ${YELLOW}Skipping $VM_NAME (Audit-Host Exception)${NC}"
-        continue
-    fi
-
-    ((COUNT++))
+    if [ -z "$ip" ] || [ "$ip" == "None" ]; then continue; fi
     
-    if ! grep -q "^${VM_NAME}$" "$TRACKING_FILE"; then
-        echo -e "   ${YELLOW}[$COUNT] 🔐 Injecting TM_Admin into $VM_NAME...${NC}"
-        
-        if [ "$KV_FETCHED" == false ]; then
-            az login --identity --allow-no-subscriptions > /dev/null 2>&1
-            AUDIT_PASS=$(az keyvault secret show --name "$SECRET_NAME" --vault-name "$KV_NAME" --query value -o tsv | tr -d '\r\n')
-            KV_FETCHED=true
-        fi
-
-        az vm user update -g "$RG_NAME" -n "$VM_NAME" -u "$AUDIT_USER" -p "$AUDIT_PASS" > /dev/null 2>&1
-        echo "$VM_NAME" >> "$TRACKING_FILE"
+    # 3. Strict OS Routing
+    if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
+        UBUNTU_MACHINES+=("$ip")
+        echo -e "${GREEN}🐧 Mapped Ubuntu Node: $ip${NC}"
+    elif [[ "$os" == *"Windows"* ]]; then
+        WINDOWS_MACHINES+=("$ip")
+        echo -e "${BLUE}🪟 Mapped Windows Node: $ip${NC}"
     else
-        echo -e "   ${GREEN}[$COUNT] ⚡ Identity already injected for $VM_NAME (Skipping).${NC}"
-    fi
-
-    echo -n "        Scanning OS for $IP... "
-    IS_LINUX=$(ssh -o ConnectTimeout=5 -o BatchMode=yes ${UBUNTU_USER}@${IP} "uname" 2>/dev/null)
-    if [ "$IS_LINUX" == "Linux" ]; then
-        echo -e "${GREEN}🐧 Ubuntu${NC}"
-        MASTER_UBUNTU+=("$IP")
-    else
-        echo -e "${CYAN}🪟 Windows${NC}"
-        MASTER_WINDOWS+=("$IP")
+        echo -e "${YELLOW}⚠️ Warning: Unrecognized OS ($os) for IP $ip. Skipping.${NC}"
     fi
 done <<< "$VM_DATA"
+
+echo -e "${GREEN}✅ Discovery Complete: Found ${#UBUNTU_MACHINES[@]} Linux and ${#WINDOWS_MACHINES[@]} Windows targets.${NC}"
 
 # ======================================================
 # PHASE 0.5: TARGET SCOPE SELECTION
