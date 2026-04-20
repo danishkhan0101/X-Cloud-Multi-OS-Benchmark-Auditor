@@ -54,7 +54,7 @@ jobs:
       - name: 🛠️ Install Ansible & InSpec
         run: |
           sudo apt-get update
-          sudo apt-get install -y ansible openscap-scanner
+          sudo apt-get install -y ansible openscap-scanner openscap-utils
           curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -p inspec
           
           # Fix for InSpec command not found
