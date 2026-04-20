@@ -102,4 +102,4 @@ jobs:
           echo "📋 Running Profile: $PROFILE in Mode: $MODE"
           
           chmod +x tm_multi_os_benchmark.sh
-          ./tm_fleet_commander.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV"
+          ./tm_multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV"
