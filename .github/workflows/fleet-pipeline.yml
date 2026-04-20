@@ -53,9 +53,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ansible openscap-scanner
-          
-          # Install InSpec
           curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -p inspec
+          
+          # THE FIX: Tell Linux exactly where InSpec lives so bash can find it
+          sudo ln -s /opt/inspec/bin/inspec /usr/local/bin/inspec || true
           
           export ANSIBLE_HOST_KEY_CHECKING=False
           export CHEF_LICENSE="accept"
@@ -74,3 +75,14 @@ jobs:
           
           chmod +x tm_multi_os_benchmark.sh
           ./tm_multi_os_benchmark.sh --headless --profile ${{ github.event.inputs.profile }} --mode ${{ github.event.inputs.mode }} --targets "${{ github.event.inputs.targets }}"
+        
+      # Add this to the VERY BOTTOM of your steps:
+      - name: 💾 Save Compliance Reports
+        if: always() # This forces it to upload even if the scan finds vulnerabilities!
+        uses: actions/upload-artifact@v4
+        with:
+          name: TM-Compliance-Reports
+          path: |
+            *.html
+            *.json
+            **/*.html 
