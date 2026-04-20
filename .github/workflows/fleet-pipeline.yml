@@ -22,13 +22,16 @@ on:
           - remediate
           - rescan
           - full
-      targets:
-        description: 'Targets (Type "all" or comma-separated IPs)'
+      environment_tag:
+        description: 'Target Environment Tag (e.g., Prod, Dev, Staging, or type "all")'
         required: true
-        default: 'all'
+        default: 'Prod'
 
   schedule:
     - cron: '0 18 * * 5'
+
+  repository_dispatch:
+    types: [new_vm_provisioned]
 
 jobs:
   run-audit:
@@ -38,7 +41,6 @@ jobs:
       - name: 📥 Pull Repository Code
         uses: actions/checkout@v4
 
-      # 🚨 THE FIX: Re-authenticating Azure CLI for your Bash Script using the new separate secrets!
       - name: 🔐 Login to Azure CLI
         uses: azure/login@v2
         with:
@@ -55,7 +57,7 @@ jobs:
           sudo apt-get install -y ansible openscap-scanner
           curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -p inspec
           
-          # THE FIX: Tell Linux exactly where InSpec lives so bash can find it
+          # Fix for InSpec command not found
           sudo ln -s /opt/inspec/bin/inspec /usr/local/bin/inspec || true
           
           export ANSIBLE_HOST_KEY_CHECKING=False
@@ -70,19 +72,24 @@ jobs:
           WINDOWS_ADMIN_USER: ${{ vars.WINDOWS_ADMIN_USER }}
           EXCLUDE_HOST_NAME: ${{ vars.EXCLUDE_HOST_NAME }}
           
+          # Dynamically choose human input OR API payload
+          TARGET_ENV: ${{ github.event.client_payload.target_env || github.event.inputs.environment_tag || 'Prod' }}
+          PROFILE: ${{ github.event.inputs.profile || 'both' }}
+          MODE: ${{ github.event.inputs.mode || 'scan' }}
+          
         run: |
-          echo "📋 Running Profile: ${{ github.event.inputs.profile }} in Mode: ${{ github.event.inputs.mode }}"
+          echo "🎯 Targeting Environment: $TARGET_ENV"
+          echo "📋 Running Profile: $PROFILE in Mode: $MODE"
           
           chmod +x tm_multi_os_benchmark.sh
-          ./tm_multi_os_benchmark.sh --headless --profile ${{ github.event.inputs.profile }} --mode ${{ github.event.inputs.mode }} --targets "${{ github.event.inputs.targets }}"
-        
-      # Add this to the VERY BOTTOM of your steps:
+          ./tm_multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV"
+
       - name: 💾 Save Compliance Reports
-        if: always() # This forces it to upload even if the scan finds vulnerabilities!
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: TM-Compliance-Reports
           path: |
             *.html
             *.json
-            **/*.html 
+            **/*.html
