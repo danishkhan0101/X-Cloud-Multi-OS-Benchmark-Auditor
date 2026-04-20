@@ -63,9 +63,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ansible python3-pip openscap-scanner
           
-          # Install Azure Dynamic Inventory Dependencies
-          ansible-galaxy collection install azure.azcollection --force
-          pip3 install -r ~/.ansible/collections/ansible_collections/azure/azcollection/requirements-azure.txt
+          # 1. Create the exact directory we want to use
+          mkdir -p ~/.ansible/collections
+          
+          # 2. Force the installation into that exact path
+          ansible-galaxy collection install azure.azcollection -p ~/.ansible/collections --force
+          
+          # 3. Pip install from our guaranteed path (with modern Ubuntu safeguards bypassed)
+          pip3 install -r ~/.ansible/collections/ansible_collections/azure/azcollection/requirements-azure.txt --break-system-packages
           
           # Install InSpec via official Chef Omnitruck script
           curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -p inspec
