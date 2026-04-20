@@ -60,6 +60,11 @@ jobs:
           # Fix for InSpec command not found
           sudo ln -s /opt/inspec/bin/inspec /usr/local/bin/inspec || true
           
+          # Fix for OpenSCAP "Host key verification failed" (Bypass Strict Host Checking)
+          mkdir -p ~/.ssh
+          echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null" >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+          
           export ANSIBLE_HOST_KEY_CHECKING=False
           export CHEF_LICENSE="accept"
 
