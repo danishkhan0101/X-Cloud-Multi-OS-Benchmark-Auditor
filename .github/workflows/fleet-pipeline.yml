@@ -63,16 +63,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ansible python3-pip openscap-scanner
           
-          # 1. Create the exact directory we want to use
-          mkdir -p ~/.ansible/collections
+          # 1. Install the collection normally (forcing overwrite)
+          ansible-galaxy collection install azure.azcollection --force
           
-          # 2. Force the installation into that exact path
-          ansible-galaxy collection install azure.azcollection -p ~/.ansible/collections --force
+          # 2. Dynamically hunt down the requirements file, wherever GitHub put it
+          REQ_PATH=$(find /home/runner /usr/share /usr/local /opt -name "requirements-azure.txt" 2>/dev/null | head -n 1)
+          echo "🎯 Found requirements file at: $REQ_PATH"
           
-          # 3. Pip install from our guaranteed path (with modern Ubuntu safeguards bypassed)
-          pip3 install -r ~/.ansible/collections/ansible_collections/azure/azcollection/requirements-azure.txt --break-system-packages
+          # 3. Pip install using the dynamic path
+          pip3 install -r "$REQ_PATH" --break-system-packages
           
-          # Install InSpec via official Chef Omnitruck script
+          # 4. Install InSpec via official Chef Omnitruck script
           curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -p inspec
           
           # Configuration for automation
