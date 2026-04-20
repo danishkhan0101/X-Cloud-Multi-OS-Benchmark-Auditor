@@ -1,10 +1,6 @@
 name: 🛡️ Fleet Commander Pipeline
 
-# ======================================================
-# 1. PIPELINE TRIGGERS
-# ======================================================
 on:
-  # A. The User Interface (Manual Execution)
   workflow_dispatch:
     inputs:
       profile:
@@ -26,65 +22,46 @@ on:
           - remediate
           - rescan
           - full
-      environment_tag:
-        description: 'Target Environment Tag (e.g., Prod, Dev, Staging)'
+      targets:
+        description: 'Targets (Type "all" or comma-separated IPs)'
         required: true
-        default: 'Prod'
+        default: 'all'
 
-  # B. The Scheduled Trigger (Friday Night Audit at 2:00 AM MYT / 18:00 UTC)
   schedule:
     - cron: '0 18 * * 5'
 
-  # C. The Provisioning Webhook (Triggered by Terraform/Packer)
-  repository_dispatch:
-    types: [new_vm_provisioned]
-
-# ======================================================
-# 2. THE CLOUD RUNNER
-# ======================================================
 jobs:
   run-audit:
     runs-on: ubuntu-latest
 
-    # ======================================================
-    # 3. THE EXECUTION STEPS
-    # ======================================================
     steps:
       - name: 📥 Pull Repository Code
         uses: actions/checkout@v4
+
+      # 🚨 THE FIX: Re-authenticating Azure CLI for your Bash Script using the new separate secrets!
+      - name: 🔐 Login to Azure CLI
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
       - name: 🔑 Setup SSH Key for Ubuntu Targets
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
 
-      - name: 🛠️ Install Ansible, Azure API & InSpec
+      - name: 🛠️ Install Ansible & InSpec
         run: |
           sudo apt-get update
-          sudo apt-get install -y ansible python3-pip openscap-scanner
+          sudo apt-get install -y ansible openscap-scanner
           
-          # 1. Install the collection
-          ansible-galaxy collection install azure.azcollection --force
-          
-          # 2. Pip install using the NEW file name (requirements.txt)
-          pip3 install -r ~/.ansible/collections/ansible_collections/azure/azcollection/requirements.txt --break-system-packages
-          
-          # 3. Install InSpec via official Chef Omnitruck script
+          # Install InSpec
           curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -p inspec
           
-          # Configuration for automation
           export ANSIBLE_HOST_KEY_CHECKING=False
           export CHEF_LICENSE="accept"
 
       - name: 🚀 Execute Fleet Commander
         env:
-          # Azure Service Principal variables for Ansible Dynamic Inventory
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_TENANT: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          
-          # GitHub Repository Variables (Non-Sensitive Configs)
           AZURE_RG_NAME: ${{ vars.AZURE_RG_NAME }}
           AZURE_KV_NAME: ${{ vars.AZURE_KV_NAME }}
           AZURE_KV_SECRET: ${{ vars.AZURE_KV_SECRET }}
@@ -92,14 +69,8 @@ jobs:
           WINDOWS_ADMIN_USER: ${{ vars.WINDOWS_ADMIN_USER }}
           EXCLUDE_HOST_NAME: ${{ vars.EXCLUDE_HOST_NAME }}
           
-          # Dynamically choose between the Human UI input OR the API Payload/Defaults
-          TARGET_ENV: ${{ github.event.client_payload.target_env || github.event.inputs.environment_tag || 'Prod' }}
-          PROFILE: ${{ github.event.inputs.profile || 'both' }}
-          MODE: ${{ github.event.inputs.mode || 'full' }}
-          
         run: |
-          echo "🎯 Targeting Environment: $TARGET_ENV"
-          echo "📋 Running Profile: $PROFILE in Mode: $MODE"
+          echo "📋 Running Profile: ${{ github.event.inputs.profile }} in Mode: ${{ github.event.inputs.mode }}"
           
           chmod +x tm_multi_os_benchmark.sh
-          ./tm_multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV"
+          ./tm_multi_os_benchmark.sh --headless --profile ${{ github.event.inputs.profile }} --mode ${{ github.event.inputs.mode }} --targets "${{ github.event.inputs.targets }}"
