@@ -117,5 +117,5 @@ jobs:
             
             Click the individual `.html` or `.json` files below to view the raw reports.
           files: |
-            *.html
-            *.json
+            **/*.html
+            **/*.json
