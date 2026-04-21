@@ -57,10 +57,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ansible openscap-scanner openscap-utils
-          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -p inspec
           
-          # The Bulletproof Path Fix: Force link into the core system binaries
-          sudo ln -sf /opt/inspec/bin/inspec /usr/bin/inspec
+          # THE FIX: Capital -P for Project!
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P inspec
           
           # Global Fix for OpenSCAP "Host key verification failed" (Bypass Strict Host Checking)
           sudo sh -c 'echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null" >> /etc/ssh/ssh_config'
