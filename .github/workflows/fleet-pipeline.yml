@@ -53,17 +53,16 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
 
-      - name: 🛠️ Install Ansible & InSpec
+      - name: 🛠️ Install Ansible & InSpec (Cinc Auditor)
         run: |
           sudo apt-get update
           sudo apt-get install -y ansible openscap-scanner openscap-utils
           
-          # Install InSpec
-          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P inspec
+          # THE FIX: Bypass the Corporate Paywall using Cinc Auditor
+          curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-auditor
           
-          # THE FIX: Forge the system-wide Chef License acceptance file
-          sudo mkdir -p /etc/chef/accepted_licenses
-          sudo touch /etc/chef/accepted_licenses/inspec
+          # Secretly alias Cinc to InSpec so your bash script works perfectly
+          sudo ln -sf /usr/bin/cinc-auditor /usr/bin/inspec
           
           # Global Fix for OpenSCAP "Host key verification failed"
           sudo sh -c 'printf "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null\n" >> /etc/ssh/ssh_config'
