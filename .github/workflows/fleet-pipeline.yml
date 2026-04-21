@@ -39,6 +39,12 @@ jobs:
   run-audit:
     runs-on: ubuntu-latest
 
+    # Add this global block so ALL steps can see these variables
+    env:
+      TARGET_ENV: ${{ github.event.client_payload.target_env || github.event.inputs.environment_tag || 'Prod' }}
+      PROFILE: ${{ github.event.inputs.profile || 'tm' }}
+      MODE: ${{ github.event.inputs.mode || 'scan' }}
+
     steps:
       - name: 📥 Pull Repository Code
         uses: actions/checkout@v4
