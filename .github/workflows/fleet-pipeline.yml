@@ -58,13 +58,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ansible openscap-scanner openscap-utils
           
-          # THE FIX: Capital -P for Project!
+          # Install InSpec
           curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P inspec
           
-          # Global Fix for OpenSCAP "Host key verification failed" (Bypass Strict Host Checking)
-          sudo sh -c 'printf "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null\n" >> /etc/ssh/ssh_config'          
+          # THE FIX: Forge the system-wide Chef License acceptance file
+          sudo mkdir -p /etc/chef/accepted_licenses
+          sudo touch /etc/chef/accepted_licenses/inspec
+          
+          # Global Fix for OpenSCAP "Host key verification failed"
+          sudo sh -c 'printf "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null\n" >> /etc/ssh/ssh_config'
+          
           export ANSIBLE_HOST_KEY_CHECKING=False
-          export CHEF_LICENSE="accept"
 
       - name: 🚀 Execute Fleet Commander
         env:
