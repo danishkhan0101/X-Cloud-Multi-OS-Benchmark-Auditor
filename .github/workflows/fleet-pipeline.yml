@@ -64,7 +64,8 @@ jobs:
           
           # Fix for OpenSCAP "Host key verification failed" (Bypass Strict Host Checking)
           mkdir -p ~/.ssh
-          echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null" >> ~/.ssh/config
+          # Global Fix for OpenSCAP "Host key verification failed"
+          sudo sh -c 'echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null" >> /etc/ssh/ssh_config'
           chmod 600 ~/.ssh/config
           
           export ANSIBLE_HOST_KEY_CHECKING=False
