@@ -167,11 +167,11 @@ run_phase_1() {
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - CIS] Scanning $IP...${NC}"
-            /usr/bin/inspec exec $WIN_DEF_BENCHMARK -t ssh://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_CIS_${IP}.json --chef-license accept-silent
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_DEF_BENCHMARK -t ssh://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_CIS_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - TM] Scanning $IP...${NC}"
-            /usr/bin/inspec exec $WIN_BENCHMARK -t ssh://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_${IP}.json --chef-license accept-silent
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_BENCHMARK -t ssh://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_${IP}.json
         fi
     done
 }
@@ -224,11 +224,11 @@ run_phase_4() {
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - CIS] Verifying $IP...${NC}"
-            /usr/bin/inspec exec $WIN_DEF_BENCHMARK -t ssh://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_CIS_${IP}.json --chef-license accept-silent
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_DEF_BENCHMARK -t ssh://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_CIS_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - TM] Verifying $IP...${NC}"
-            /usr/bin/inspec exec $WIN_BENCHMARK -t ssh://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_TM_${IP}.json --chef-license accept-silent
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_BENCHMARK -t ssh://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_TM_${IP}.json
         fi
     done
 }
