@@ -6,12 +6,11 @@ on:
       profile:
         description: 'Compliance Profile'
         required: true
-        default: 'both'
+        default: 'tm'
         type: choice
         options:
           - tm
           - cis
-          - both
       mode:
         description: 'Execution Mode'
         required: true
@@ -20,7 +19,6 @@ on:
         options:
           - scan
           - remediate
-          - rescan
           - full
       environment_tag:
         description: 'Target Environment Tag (e.g., Prod, Dev, Staging, or type "all")'
