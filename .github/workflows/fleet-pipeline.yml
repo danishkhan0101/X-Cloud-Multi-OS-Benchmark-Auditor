@@ -62,11 +62,8 @@ jobs:
           # The Bulletproof Path Fix: Force link into the core system binaries
           sudo ln -sf /opt/inspec/bin/inspec /usr/bin/inspec
           
-          # Fix for OpenSCAP "Host key verification failed" (Bypass Strict Host Checking)
-          mkdir -p ~/.ssh
-          # Global Fix for OpenSCAP "Host key verification failed"
+          # Global Fix for OpenSCAP "Host key verification failed" (Bypass Strict Host Checking)
           sudo sh -c 'echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null" >> /etc/ssh/ssh_config'
-          chmod 600 ~/.ssh/config
           
           export ANSIBLE_HOST_KEY_CHECKING=False
           export CHEF_LICENSE="accept"
