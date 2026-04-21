@@ -62,8 +62,7 @@ jobs:
           curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P inspec
           
           # Global Fix for OpenSCAP "Host key verification failed" (Bypass Strict Host Checking)
-          sudo sh -c 'echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null" >> /etc/ssh/ssh_config'
-          
+          sudo sh -c 'printf "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null\n" >> /etc/ssh/ssh_config'          
           export ANSIBLE_HOST_KEY_CHECKING=False
           export CHEF_LICENSE="accept"
 
