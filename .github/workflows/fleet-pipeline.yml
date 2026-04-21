@@ -84,11 +84,6 @@ jobs:
           WINDOWS_ADMIN_USER: ${{ vars.WINDOWS_ADMIN_USER }}
           EXCLUDE_HOST_NAME: ${{ vars.EXCLUDE_HOST_NAME }}
           
-          # Dynamically choose human input OR API payload
-          TARGET_ENV: ${{ github.event.client_payload.target_env || github.event.inputs.environment_tag || 'Prod' }}
-          PROFILE: ${{ github.event.inputs.profile || 'tm' }} # Changed fallback to 'tm'
-          MODE: ${{ github.event.inputs.mode || 'scan' }}
-          
         run: |
           echo "🎯 Targeting Environment: $TARGET_ENV"
           echo "📋 Running Profile: $PROFILE in Mode: $MODE"
