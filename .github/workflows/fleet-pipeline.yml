@@ -91,7 +91,7 @@ jobs:
           chmod +x tm_multi_os_benchmark.sh
           ./tm_multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV"
 
-      # --- 🚨 NEW: AUTOMATED RELEASE PUBLISHING ---
+      # --- 🚨 AUTOMATED RELEASE PUBLISHING (NO ZIPS) ---
 
       - name: 🏷️ Generate Version Tag
         if: always()
@@ -99,12 +99,6 @@ jobs:
         run: |
           # Create a dynamic timestamp (e.g., 2026-04-21-0945)
           echo "TIMESTAMP=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
-
-      - name: 📦 Archive Compliance Data
-        if: always()
-        run: |
-          # Zip all HTML reports and JSON raw data
-          zip -r TM-Audit-Reports-${{ env.TIMESTAMP }}.zip *.html *.json 2>/dev/null || true
 
       - name: 📢 Publish to GitHub Releases
         if: always()
@@ -121,5 +115,7 @@ jobs:
             * **Compliance Profile:** `${{ env.PROFILE }}`
             * **Execution Mode:** `${{ env.MODE }}`
             
-            Download the attached `.zip` file below to view the full HTML OpenSCAP and InSpec reports.
-          files: TM-Audit-Reports-${{ env.TIMESTAMP }}.zip
+            Click the individual `.html` or `.json` files below to view the raw reports.
+          files: |
+            *.html
+            *.json
