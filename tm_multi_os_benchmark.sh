@@ -115,6 +115,14 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
         echo -e "${GREEN}🐧 Mapped Ubuntu Node: $ip (Status: ON)${NC}"
         
     elif [[ "$os" == *"Windows"* ]]; then
+        # 🛡️ THE AUTO-HEALER (WINDOWS): Test if we have password access
+        if ! sshpass -p "$AUDIT_PASS" ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${WINDOWS_USER}@${ip} "echo ok" > /dev/null 2>&1; then
+            echo -e "${YELLOW}   ⚠️ Access denied for Windows node $ip. Auto-injecting KeyVault Password via Azure...${NC}"
+            # Force Azure to inject the Admin Username and Password
+            az vm user update -g "$RG_NAME" -n "$vm_name" -u "$WINDOWS_USER" --password "$AUDIT_PASS" -o none
+            echo -e "${GREEN}   ✅ Password injected!${NC}"
+        fi
+        
         WINDOWS_MACHINES+=("$ip")
         echo -e "${CYAN}🪟 Mapped Windows Node: $ip (Status: ON)${NC}"
     else
