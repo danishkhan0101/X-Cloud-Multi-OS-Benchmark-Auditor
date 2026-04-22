@@ -101,7 +101,10 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
     os=$(echo "$raw_os" | tr -d '\r' | xargs)
     power=$(echo "$raw_power" | tr -d '\r' | xargs)
     
-    if [ -z "$ip" ] || [ "$ip" == "None" ]; then echo -e "${RED}🚫 Skipping Node: $vm_name (Error: Azure CLI cannot see the Public IP!)${NC}" continue; fi
+    if [ -z "$ip" ] || [ "$ip" == "None" ]; then 
+        echo -e "${RED}🚫 Skipping Node: $vm_name (Error: Azure CLI cannot see the Public IP!)${NC}"
+        continue
+    fi
     
     # 3. The Power Check
     if [[ "$power" != *"VM running"* ]]; then
