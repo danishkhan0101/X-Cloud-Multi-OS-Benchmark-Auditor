@@ -163,7 +163,7 @@ if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
     echo -e "======================================================${NC}"
     for IP in "${UBUNTU_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP engine on Ubuntu Node: $IP...${NC}"
-        ssh -t ${UBUNTU_USER}@${IP} "sudo apt-get update -qq && sudo apt-get install -y libopenscap8" > /dev/null 2>&1
+        ssh -t ${UBUNTU_USER}@${IP} "sudo apt-get update -qq && sudo apt-get install -y openscap-scanner && sudo apt-get install -y libopenscap25t64" > /dev/null 2>&1
     done
     echo -e "${GREEN}✅ All Ubuntu nodes bootstrapped and ready.${NC}"
 fi
