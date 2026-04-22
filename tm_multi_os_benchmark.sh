@@ -133,29 +133,24 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
         echo -e "${GREEN}🐧 Mapped Ubuntu Node: $ip (Status: ON)${NC}"
         
     elif [[ "$os" == *"Windows"* ]]; then
-        # 🛡️ THE AUTO-HEALER (WINDOWS): Test if we have password/SSH access
+        # 🛡️ THE AUTO-HEALER (WINDOWS)
         if ! sshpass -p "$AUDIT_PASS" ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${WINDOWS_USER}@${ip} "echo ok" > /dev/null 2>&1; then
-            echo -e "${YELLOW}   ⚠️ Access denied or SSH offline for Windows node $ip.${NC}"
+            echo -e "${YELLOW}   ⚠️ Access denied for Windows node $ip.${NC}"
             
             echo -e "${YELLOW}   💉 1/2: Auto-injecting KeyVault Password via Azure...${NC}"
             az vm user update -g "$RG_NAME" -n "$vm_name" -u "$WINDOWS_USER" --password "$AUDIT_PASS" -o none
             
-            echo -e "${YELLOW}   🛠️ 2/2: Silently installing OpenSSH & opening Port 22 (This takes ~60 seconds)...${NC}"
-            az vm open-port --resource-group "$RG_NAME" --name "$vm_name" --port 22 -o none > /dev/null 2>&1 || true
+            echo -e "${YELLOW}   🛠️ 2/2: Enabling WinRM (Native Windows Remote Management)...${NC}"
+            az vm open-port --resource-group "$RG_NAME" --name "$vm_name" --port 5985 -o none > /dev/null 2>&1 || true
             
-            # THE FIX: Added 'Restart-Service sshd' to force Windows to recognize the new user
             az vm run-command invoke \
                 --resource-group "$RG_NAME" \
                 --name "$vm_name" \
                 --command-id RunPowerShellScript \
-                --scripts "Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; Start-Service sshd; Set-Service -Name sshd -StartupType 'Automatic'; Restart-Service sshd; New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22" \
+                --scripts "Enable-PSRemoting -SkipNetworkProfileCheck -Force; Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' -Enabled True -Profile Any; Set-Item WSMan:\localhost\Client\TrustedHosts -Value * -Force" \
                 -o none
                 
-            # THE FIX: Give Windows 20 seconds to process the new security policies
-            echo -e "${YELLOW}   ⏳ Waiting 20 seconds for Windows security policies to apply...${NC}"
-            sleep 20
-                
-            echo -e "${GREEN}   ✅ Windows Node fully healed and ready for SSH!${NC}"
+            echo -e "${GREEN}   ✅ Windows Node fully healed and ready for WinRM!${NC}"
         fi
         
         WINDOWS_MACHINES+=("$ip")
@@ -173,8 +168,8 @@ echo -e "${GREEN}✅ Discovery Complete: Found ${#UBUNTU_MACHINES[@]} Linux and 
 # Fetch Windows Password from Azure KeyVault if needed
 
 # BUILD THE FINAL ANSIBLE INVENTORY
-echo "[ubuntu_nodes]" > inventory.ini
-for ip in "${UBUNTU_MACHINES[@]}"; do echo "${ip} ansible_user=${UBUNTU_USER}" >> inventory.ini; done
+echo "[windows_nodes]" >> inventory.ini
+for ip in "${WINDOWS_MACHINES[@]}"; do echo "${ip} ansible_user=${AUDIT_USER} ansible_password=\"${AUDIT_PASS}\" ansible_connection=winrm ansible_winrm_transport=basic ansible_winrm_server_cert_validation=ignore" >> inventory.ini; done
 echo "" >> inventory.ini
 echo "[windows_nodes]" >> inventory.ini
 for ip in "${WINDOWS_MACHINES[@]}"; do echo "${ip} ansible_user=${AUDIT_USER} ansible_password=\"${AUDIT_PASS}\" ansible_connection=ssh ansible_shell_type=powershell ansible_shell_executable=None" >> inventory.ini; done
@@ -293,12 +288,12 @@ run_phase_4() {
     done
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${CYAN}✅ [WINDOWS - CIS] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_DEF_BENCHMARK -t ssh://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_CIS_${IP}.json
+            echo -e "${CYAN}🔍 [WINDOWS - CIS] Scanning $IP...${NC}"
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_DEF_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_CIS_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
-            echo -e "${CYAN}✅ [WINDOWS - TM] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_BENCHMARK -t ssh://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_TM_${IP}.json
+            echo -e "${CYAN}🔍 [WINDOWS - TM] Scanning $IP...${NC}"
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_${IP}.json
         fi
     done
 }
