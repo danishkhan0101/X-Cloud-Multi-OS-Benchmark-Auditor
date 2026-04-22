@@ -122,7 +122,8 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
     if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
         
         # 🛡️ THE AUTO-HEALER: Test if we have SSH access
-        if ! ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${UBUNTU_USER}@${ip} "echo ok" > /dev/null 2>&1; then
+        # THE FIX: Added '-n' so SSH stops eating the while loop's data!
+        if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${UBUNTU_USER}@${ip} "echo ok" > /dev/null 2>&1; then
             echo -e "${YELLOW}   ⚠️ Access denied for $ip. Auto-injecting SSH key via Azure...${NC}"
             # Force Azure to inject the public key we extracted in the GitHub YAML
             az vm user update -g "$RG_NAME" -n "$vm_name" -u "$UBUNTU_USER" --ssh-key-value "$(cat ~/.ssh/id_rsa.pub)" -o none
