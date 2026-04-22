@@ -31,7 +31,7 @@ on:
   repository_dispatch:
     types: [new_vm_provisioned]
 
-# 🚨 NEW: Required permissions to allow the pipeline to publish a Release
+# 🚨 Required permissions to allow the pipeline to publish a Release
 permissions:
   contents: write
 
@@ -39,7 +39,7 @@ jobs:
   run-audit:
     runs-on: ubuntu-latest
 
-    # Add this global block so ALL steps can see these variables
+    # Global block so ALL steps can see these variables
     env:
       TARGET_ENV: ${{ github.event.client_payload.target_env || github.event.inputs.environment_tag || 'Prod' }}
       PROFILE: ${{ github.event.inputs.profile || 'tm' }}
@@ -59,7 +59,6 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
           
-      # --- ADD THIS NEW BLOCK ---
       - name: 🔓 Extract Public Key for Auto-Healing
         run: |
           mkdir -p ~/.ssh
@@ -70,7 +69,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ansible openscap-scanner openscap-utils
           
-          # THE FIX: Bypass the Corporate Paywall using Cinc Auditor
+          # Bypass the Corporate Paywall using Cinc Auditor
           curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-auditor
           
           # Secretly alias Cinc to InSpec so your bash script works perfectly
@@ -97,16 +96,14 @@ jobs:
           chmod +x tm_multi_os_benchmark.sh
           ./tm_multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV"
 
-      # --- 🚨 AUTOMATED RELEASE PUBLISHING (NO ZIPS) ---
+      # --- 🚨 AUTOMATED RELEASE PUBLISHING ---
 
       - name: 🏷️ Generate Version Tag
-        if: always()
         id: versioning
         run: |
-          # Create a dynamic timestamp (e.g., 2026-04-21-0945)
-          echo "TIMESTAMP=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
+          # THE FIX: Standardized the variable name to DATE_TAG
+          echo "DATE_TAG=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
 
-      # --- THE UPGRADED GATEKEEPER STEP ---
       - name: 🔎 Verify Report Generation
         id: check_reports
         run: |
@@ -121,7 +118,6 @@ jobs:
             echo "has_reports=false" >> $GITHUB_OUTPUT
           fi
 
-      # --- UPDATED RELEASE STEP (Now with an 'if' condition) ---
       - name: 📢 Publish to GitHub Releases
         if: steps.check_reports.outputs.has_reports == 'true'
         uses: softprops/action-gh-release@v2
