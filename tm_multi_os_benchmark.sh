@@ -133,9 +133,9 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
         echo -e "${GREEN}🐧 Mapped Ubuntu Node: $ip (Status: ON)${NC}"
         
     elif [[ "$os" == *"Windows"* ]]; then
-        # 🛡️ THE AUTO-HEALER (WINDOWS)
-        if ! sshpass -p "$AUDIT_PASS" ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${WINDOWS_USER}@${ip} "echo ok" > /dev/null 2>&1; then
-            echo -e "${YELLOW}   ⚠️ Access denied for Windows node $ip.${NC}"
+        # 🛡️ THE AUTO-HEALER (WINDOWS): Test if WinRM (Port 5985) is open
+        if ! nc -z -w 5 $ip 5985 2>/dev/null; then
+            echo -e "${YELLOW}   ⚠️ WinRM offline for Windows node $ip.${NC}"
             
             echo -e "${YELLOW}   💉 1/2: Auto-injecting KeyVault Password via Azure...${NC}"
             az vm user update -g "$RG_NAME" -n "$vm_name" -u "$WINDOWS_USER" --password "$AUDIT_PASS" -o none
@@ -147,9 +147,11 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
                 --resource-group "$RG_NAME" \
                 --name "$vm_name" \
                 --command-id RunPowerShellScript \
-                --scripts "Enable-PSRemoting -SkipNetworkProfileCheck -Force; Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' -Enabled True -Profile Any; Set-Item WSMan:\localhost\Client\TrustedHosts -Value * -Force" \
+                --scripts "Enable-PSRemoting -SkipNetworkProfileCheck -Force; Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' -Enabled True -Profile Any; Set-Item WSMan:\localhost\Client\TrustedHosts -Value * -Force; Restart-Service WinRM" \
                 -o none
                 
+            echo -e "${YELLOW}   ⏳ Waiting 15 seconds for WinRM to bind...${NC}"
+            sleep 15
             echo -e "${GREEN}   ✅ Windows Node fully healed and ready for WinRM!${NC}"
         fi
         
@@ -232,11 +234,11 @@ run_phase_1() {
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - CIS] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_DEF_BENCHMARK -t ssh://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_CIS_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_DEF_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_CIS_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - TM] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_BENCHMARK -t ssh://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_${IP}.json
         fi
     done
 }
@@ -288,12 +290,12 @@ run_phase_4() {
     done
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${CYAN}🔍 [WINDOWS - CIS] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_DEF_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_CIS_${IP}.json
+            echo -e "${CYAN}✅ [WINDOWS - CIS] Verifying $IP...${NC}"
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_DEF_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_CIS_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
-            echo -e "${CYAN}🔍 [WINDOWS - TM] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_${IP}.json
+            echo -e "${CYAN}✅ [WINDOWS - TM] Verifying $IP...${NC}"
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_TM_${IP}.json
         fi
     done
 }
