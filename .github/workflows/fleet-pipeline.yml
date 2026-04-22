@@ -106,12 +106,15 @@ jobs:
           # Create a dynamic timestamp (e.g., 2026-04-21-0945)
           echo "TIMESTAMP=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
 
-      # --- THE NEW GATEKEEPER STEP ---
+      # --- THE UPGRADED GATEKEEPER STEP ---
       - name: 🔎 Verify Report Generation
         id: check_reports
         run: |
-          if ls *.html *.json 1> /dev/null 2>&1; then
-            echo "✅ Reports found on disk. Proceeding to publish."
+          # Safely count any HTML or JSON files in the current directory
+          REPORT_COUNT=$(find . -maxdepth 1 -type f \( -name "*.html" -o -name "*.json" \) | wc -l)
+          
+          if [ "$REPORT_COUNT" -gt 0 ]; then
+            echo "✅ Found $REPORT_COUNT report(s) on disk. Proceeding to publish."
             echo "has_reports=true" >> $GITHUB_OUTPUT
           else
             echo "⚠️ No reports found! The scan must have failed or skipped all VMs."
