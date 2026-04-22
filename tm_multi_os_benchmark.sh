@@ -115,12 +115,26 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
         echo -e "${GREEN}🐧 Mapped Ubuntu Node: $ip (Status: ON)${NC}"
         
     elif [[ "$os" == *"Windows"* ]]; then
-        # 🛡️ THE AUTO-HEALER (WINDOWS): Test if we have password access
+        # 🛡️ THE AUTO-HEALER (WINDOWS): Test if we have password/SSH access
         if ! sshpass -p "$AUDIT_PASS" ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${WINDOWS_USER}@${ip} "echo ok" > /dev/null 2>&1; then
-            echo -e "${YELLOW}   ⚠️ Access denied for Windows node $ip. Auto-injecting KeyVault Password via Azure...${NC}"
-            # Force Azure to inject the Admin Username and Password
+            echo -e "${YELLOW}   ⚠️ Access denied or SSH offline for Windows node $ip.${NC}"
+            
+            echo -e "${YELLOW}   💉 1/2: Auto-injecting KeyVault Password via Azure...${NC}"
             az vm user update -g "$RG_NAME" -n "$vm_name" -u "$WINDOWS_USER" --password "$AUDIT_PASS" -o none
-            echo -e "${GREEN}   ✅ Password injected!${NC}"
+            
+            echo -e "${YELLOW}   🛠️ 2/2: Silently installing OpenSSH & opening Port 22 (This takes ~60 seconds)...${NC}"
+            # Ensure the Azure Network Security Group allows Port 22
+            az vm open-port --resource-group "$RG_NAME" --name "$vm_name" --port 22 -o none > /dev/null 2>&1 || true
+            
+            # Use Azure RunCommand to force PowerShell to install OpenSSH natively inside the OS
+            az vm run-command invoke \
+                --resource-group "$RG_NAME" \
+                --name "$vm_name" \
+                --command-id RunPowerShellScript \
+                --scripts "Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; Start-Service sshd; Set-Service -Name sshd -StartupType 'Automatic'; New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22" \
+                -o none
+                
+            echo -e "${GREEN}   ✅ Windows Node fully healed and ready for SSH!${NC}"
         fi
         
         WINDOWS_MACHINES+=("$ip")
