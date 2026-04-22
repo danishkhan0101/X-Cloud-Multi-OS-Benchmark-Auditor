@@ -64,17 +64,17 @@ if [ "$HEADLESS" == true ]; then
 fi
 
 # ======================================================
-# PHASE 0: ZERO-TRUST DISCOVERY (TAG-AWARE & POWER-AWARE)
+# PHASE 0: ZERO-TRUST DISCOVERY (AUTO-HEALING)
 # ======================================================
 echo -e "${CYAN}📡 Querying Azure for VMs and Power States in [$RG_NAME]...${NC}"
 
-# 1. Query Azure for IPs, OS Type, AND Power State (-d flag is required for power status)
+# 1. Query Azure for Name, IPs, OS Type, AND Power State
 if [ "$H_TARGETS" == "all" ] || [ -z "$H_TARGETS" ]; then
     echo "🔍 Target Mode: ALL VMs"
-    VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[].[publicIps, storageProfile.osDisk.osType, powerState]" -o tsv)
+    VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[].[name, publicIps, storageProfile.osDisk.osType, powerState]" -o tsv)
 else
     echo "🔍 Target Mode: Environment Tag -> $H_TARGETS"
-    VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[?tags.Environment=='$H_TARGETS'].[publicIps, storageProfile.osDisk.osType, powerState]" -o tsv)
+    VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[?tags.Environment=='$H_TARGETS'].[name, publicIps, storageProfile.osDisk.osType, powerState]" -o tsv)
 fi
 
 if [ -z "$VM_DATA" ]; then
@@ -85,24 +85,35 @@ fi
 UBUNTU_MACHINES=()
 WINDOWS_MACHINES=()
 
-while IFS=$'\t' read -r raw_ip raw_os raw_power; do
+while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
     # 2. Scrub invisible carriage returns (\r) and trailing spaces
+    vm_name=$(echo "$raw_name" | tr -d '\r' | xargs)
     ip=$(echo "$raw_ip" | tr -d '\r' | xargs)
     os=$(echo "$raw_os" | tr -d '\r' | xargs)
     power=$(echo "$raw_power" | tr -d '\r' | xargs)
     
     if [ -z "$ip" ] || [ "$ip" == "None" ]; then continue; fi
     
-    # 3. 🛑 THE POWER CHECK 🛑
+    # 3. The Power Check
     if [[ "$power" != *"VM running"* ]]; then
         echo -e "${YELLOW}💤 Skipping Node: $ip (Status: OFF / $power)${NC}"
-        continue # Instantly skips to the next machine
+        continue
     fi
     
-    # 4. Strict OS Routing
+    # 4. Strict OS Routing & AUTO-HEALING
     if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
+        
+        # 🛡️ THE AUTO-HEALER: Test if we have SSH access
+        if ! ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${UBUNTU_USER}@${ip} "echo ok" > /dev/null 2>&1; then
+            echo -e "${YELLOW}   ⚠️ Access denied for $ip. Auto-injecting SSH key via Azure...${NC}"
+            # Force Azure to inject the public key we extracted in the GitHub YAML
+            az vm user update -g "$RG_NAME" -n "$vm_name" -u "$UBUNTU_USER" --ssh-key-value "$(cat ~/.ssh/id_rsa.pub)" -o none
+            echo -e "${GREEN}   ✅ Key injected!${NC}"
+        fi
+        
         UBUNTU_MACHINES+=("$ip")
         echo -e "${GREEN}🐧 Mapped Ubuntu Node: $ip (Status: ON)${NC}"
+        
     elif [[ "$os" == *"Windows"* ]]; then
         WINDOWS_MACHINES+=("$ip")
         echo -e "${CYAN}🪟 Mapped Windows Node: $ip (Status: ON)${NC}"
