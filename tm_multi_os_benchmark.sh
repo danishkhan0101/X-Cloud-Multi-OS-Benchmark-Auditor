@@ -64,12 +64,18 @@ if [ "$HEADLESS" == true ]; then
 fi
 
 # ======================================================
-# SECURE CREDENTIAL FETCH (Moved to top!)
+# SECURE CREDENTIAL FETCH
 # ======================================================
 if [ -z "$AUDIT_PASS" ]; then
     echo -e "${YELLOW}🔐 Fetching TM Credentials from Azure KeyVault...${NC}"
     az login --identity --allow-no-subscriptions > /dev/null 2>&1 || true
     AUDIT_PASS=$(az keyvault secret show --name "$SECRET_NAME" --vault-name "$KV_NAME" --query value -o tsv 2>/dev/null | tr -d '\r\n')
+fi
+
+# 🚨 THE NEW FAILSAFE
+if [ -z "$AUDIT_PASS" ]; then
+    echo -e "${RED}❌ ERROR: Failed to retrieve AuditPassword from KeyVault! Aborting to prevent SSH lockouts.${NC}"
+    exit 1
 fi
 
 # ======================================================
@@ -135,16 +141,19 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
             az vm user update -g "$RG_NAME" -n "$vm_name" -u "$WINDOWS_USER" --password "$AUDIT_PASS" -o none
             
             echo -e "${YELLOW}   🛠️ 2/2: Silently installing OpenSSH & opening Port 22 (This takes ~60 seconds)...${NC}"
-            # Ensure the Azure Network Security Group allows Port 22
             az vm open-port --resource-group "$RG_NAME" --name "$vm_name" --port 22 -o none > /dev/null 2>&1 || true
             
-            # Use Azure RunCommand to force PowerShell to install OpenSSH natively inside the OS
+            # THE FIX: Added 'Restart-Service sshd' to force Windows to recognize the new user
             az vm run-command invoke \
                 --resource-group "$RG_NAME" \
                 --name "$vm_name" \
                 --command-id RunPowerShellScript \
-                --scripts "Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; Start-Service sshd; Set-Service -Name sshd -StartupType 'Automatic'; New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22" \
+                --scripts "Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; Start-Service sshd; Set-Service -Name sshd -StartupType 'Automatic'; Restart-Service sshd; New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22" \
                 -o none
+                
+            # THE FIX: Give Windows 20 seconds to process the new security policies
+            echo -e "${YELLOW}   ⏳ Waiting 20 seconds for Windows security policies to apply...${NC}"
+            sleep 20
                 
             echo -e "${GREEN}   ✅ Windows Node fully healed and ready for SSH!${NC}"
         fi
