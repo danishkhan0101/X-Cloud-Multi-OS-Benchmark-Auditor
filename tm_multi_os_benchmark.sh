@@ -138,13 +138,12 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
             echo -e "${YELLOW}   ⚠️ WinRM offline for Windows node $ip.${NC}"
             
             echo -e "${YELLOW}   💉 1/2: Auto-injecting KeyVault Password via Azure...${NC}"
-            az vm user update -g "$RG_NAME" -n "$vm_name" -u "$WINDOWS_USER" --password "$AUDIT_PASS" -o none
+            # THE FIX: Changed WINDOWS_USER to AUDIT_USER
+            az vm user update -g "$RG_NAME" -n "$vm_name" -u "$AUDIT_USER" --password "$AUDIT_PASS" -o none
             
             echo -e "${YELLOW}   🛠️ 2/2: Enabling WinRM (Native Windows Remote Management)...${NC}"
             az vm open-port --resource-group "$RG_NAME" --name "$vm_name" --port 5985 -o none > /dev/null 2>&1 || true
             
-            # THE FIX: Single quotes prevent bash from destroying the $true variables!
-            # We explicitly enable Basic Auth and Unencrypted traffic so InSpec can connect.
             az vm run-command invoke \
                 --resource-group "$RG_NAME" \
                 --name "$vm_name" \
