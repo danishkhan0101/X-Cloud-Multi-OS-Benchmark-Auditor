@@ -58,6 +58,12 @@ jobs:
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
+          
+      # --- ADD THIS NEW BLOCK ---
+      - name: 🔓 Extract Public Key for Auto-Healing
+        run: |
+          mkdir -p ~/.ssh
+          ssh-add -L > ~/.ssh/id_rsa.pub
 
       - name: 🛠️ Install Ansible & InSpec (Cinc Auditor)
         run: |
