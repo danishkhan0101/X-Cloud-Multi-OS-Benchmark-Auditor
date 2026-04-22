@@ -23,7 +23,7 @@ on:
       environment_tag:
         description: 'Target Environment Tag (e.g., Prod, Dev, Staging, or type "all")'
         required: true
-        default: 'Prod'
+        default: 'all'
 
   schedule:
     - cron: '0 18 * * 5'
