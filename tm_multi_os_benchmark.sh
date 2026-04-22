@@ -144,11 +144,12 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
             echo -e "${YELLOW}   🛠️ 2/2: Enabling WinRM (Native Windows Remote Management)...${NC}"
             az vm open-port --resource-group "$RG_NAME" --name "$vm_name" --port 5985 -o none > /dev/null 2>&1 || true
             
+            # THE FIX: Added LocalAccountTokenFilterPolicy registry key to bypass UAC remote blocking
             az vm run-command invoke \
                 --resource-group "$RG_NAME" \
                 --name "$vm_name" \
                 --command-id RunPowerShellScript \
-                --scripts 'Enable-PSRemoting -SkipNetworkProfileCheck -Force; Set-Item WSMan:\localhost\Service\Auth\Basic -Value $true -Force; Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value $true -Force; Set-NetFirewallRule -DisplayGroup "Windows Remote Management" -Enabled True -Profile Any; Restart-Service WinRM' \
+                --scripts 'Enable-PSRemoting -SkipNetworkProfileCheck -Force; Set-Item WSMan:\localhost\Service\Auth\Basic -Value $true -Force; Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value $true -Force; New-ItemProperty -Name LocalAccountTokenFilterPolicy -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -PropertyType DWord -Value 1 -Force; Set-NetFirewallRule -DisplayGroup "Windows Remote Management" -Enabled True -Profile Any; Restart-Service WinRM' \
                 -o none
                 
             echo -e "${YELLOW}   ⏳ Waiting 30 seconds for WinRM to bind...${NC}"
