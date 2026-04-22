@@ -64,6 +64,15 @@ if [ "$HEADLESS" == true ]; then
 fi
 
 # ======================================================
+# SECURE CREDENTIAL FETCH (Moved to top!)
+# ======================================================
+if [ -z "$AUDIT_PASS" ]; then
+    echo -e "${YELLOW}🔐 Fetching TM Credentials from Azure KeyVault...${NC}"
+    az login --identity --allow-no-subscriptions > /dev/null 2>&1 || true
+    AUDIT_PASS=$(az keyvault secret show --name "$SECRET_NAME" --vault-name "$KV_NAME" --query value -o tsv 2>/dev/null | tr -d '\r\n')
+fi
+
+# ======================================================
 # PHASE 0: ZERO-TRUST DISCOVERY (AUTO-HEALING)
 # ======================================================
 echo -e "${CYAN}📡 Querying Azure for VMs and Power States in [$RG_NAME]...${NC}"
@@ -150,11 +159,6 @@ echo -e "${GREEN}✅ Discovery Complete: Found ${#UBUNTU_MACHINES[@]} Linux and 
 # INVENTORY BUILDER & AZURE KEYVAULT AUTH
 # ======================================================
 # Fetch Windows Password from Azure KeyVault if needed
-if [ -z "$AUDIT_PASS" ] && [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
-    # Try fetching via Managed Identity (if running on Azure VM)
-    az login --identity --allow-no-subscriptions > /dev/null 2>&1 || true
-    AUDIT_PASS=$(az keyvault secret show --name "$SECRET_NAME" --vault-name "$KV_NAME" --query value -o tsv 2>/dev/null | tr -d '\r\n')
-fi
 
 # BUILD THE FINAL ANSIBLE INVENTORY
 echo "[ubuntu_nodes]" > inventory.ini
