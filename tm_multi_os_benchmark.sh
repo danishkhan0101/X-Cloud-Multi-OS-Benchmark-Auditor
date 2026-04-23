@@ -33,6 +33,11 @@ WIN_DEF_DIR="window-default-cis"
 WIN_DEF_BENCHMARK="${WIN_DEF_DIR}/window-baseline"
 WIN_DEF_PLAYBOOK="${WIN_DEF_DIR}/cis_remediate.yml"
 
+RHEL_DIR="rhel-custom"
+RHEL_XCCDF="${RHEL_DIR}/tm_rhel_xccdf.xml"
+RHEL_OVAL="${RHEL_DIR}/tm_rhel_rules.xml"
+RHEL_PLAYBOOK="${RHEL_DIR}/rhel_custom_playbook.yml"
+
 # Global Settings
 export CHEF_LICENSE="accept-silent"
 export INSPEC_SSH_CONFIG_NO_SECURE=true
@@ -202,7 +207,6 @@ echo -e "${GREEN}✅ Discovery Complete: Found ${#UBUNTU_MACHINES[@]} Ubuntu, ${
 # ======================================================
 # INVENTORY BUILDER & AZURE KEYVAULT AUTH
 # ======================================================
-# THE FIX: Completely rebuilt this section to correctly map Ubuntu, RHEL, and Windows (WinRM)
 echo "[ubuntu_nodes]" > inventory.ini
 for ip in "${UBUNTU_MACHINES[@]}"; do echo "${ip} ansible_user=${UBUNTU_USER}" >> inventory.ini; done
 echo "" >> inventory.ini
@@ -258,7 +262,6 @@ if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
     echo -e "======================================================${NC}"
     for IP in "${RHEL_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP & SSG Baselines on RHEL Node: $IP...${NC}"
-        # RHEL uses dnf, and naturally hosts the SCAP security guide in its own repos!
         ssh -t azureuser@${IP} "sudo dnf install -y openscap-scanner scap-security-guide" > /dev/null 2>&1
     done
     echo -e "${GREEN}✅ All RHEL nodes bootstrapped and ready.${NC}"
@@ -283,11 +286,16 @@ run_phase_1() {
         fi
     done
     
+    # 🔴 THE FIX: Added TM Scanning logic for RHEL
     for IP in "${RHEL_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL 9 - CIS] Scanning $IP...${NC}"
-            # RHEL uses its natively installed SSG XML file
             oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_before_CIS_RHEL_${IP}.html /usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml
+        fi
+        if [ "$RUN_TM" == true ]; then
+            echo -e "${GREEN}🔴 [RHEL 9 - TM] Scanning $IP...${NC}"
+            scp "$RHEL_OVAL" azureuser@${IP}:/tmp/tm_rhel_rules.xml >/dev/null 2>&1 || true
+            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_before_TM_RHEL_${IP}.html "$RHEL_XCCDF"
         fi
     done
     
@@ -324,6 +332,14 @@ run_remediation() {
         fi
     fi
 
+    # 🔴 THE FIX: Added RHEL Remediation Block
+    if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
+        if [ "$RUN_TM" == true ]; then
+            echo -e "${GREEN}▶️ [TM] Running Custom RHEL Playbook...${NC}"
+            ansible-playbook -i inventory.ini $RHEL_PLAYBOOK --limit rhel_nodes
+        fi
+    fi
+
     if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}▶️ [HARDENING - CIS] Applying Baseline as $AUDIT_USER...${NC}"
@@ -350,10 +366,15 @@ run_phase_4() {
         fi
     done
     
+    # 🔴 THE FIX: Added TM Verification logic for RHEL
     for IP in "${RHEL_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL 9 - CIS] Verifying $IP...${NC}"
             oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_after_CIS_RHEL_${IP}.html /usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml
+        fi
+        if [ "$RUN_TM" == true ]; then
+            echo -e "${GREEN}🔴 [RHEL 9 - TM] Verifying $IP...${NC}"
+            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_after_TM_RHEL_${IP}.html "$RHEL_XCCDF"
         fi
     done
     
