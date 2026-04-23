@@ -103,14 +103,15 @@ jobs:
           LINUX_ADMIN_USER: ${{ vars.LINUX_ADMIN_USER }}
           WINDOWS_ADMIN_USER: ${{ vars.WINDOWS_ADMIN_USER }}
           EXCLUDE_HOST_NAME: ${{ vars.EXCLUDE_HOST_NAME }}
+          TICKET_ID: ${{ github.event.inputs.ticket_id }}
+          DEBUG_MODE: ${{ github.event.inputs.debug_mode }}
           
         run: |
           echo "🎯 Targeting Environment: $TARGET_ENV"
           echo "📋 Running Profile: $PROFILE in Mode: $MODE"
           
           chmod +x tm_multi_os_benchmark.sh
-          ./tm_multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV"
-
+          ./tm_multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE"
       # --- 🚨 AUTOMATED RELEASE PUBLISHING ---
 
       - name: 🏷️ Generate Version Tag
