@@ -220,7 +220,7 @@ for ip in "${RHEL_MACHINES[@]}"; do echo "${ip} ansible_user=azureuser" >> inven
 echo "" >> inventory.ini
 
 echo "[windows_nodes]" >> inventory.ini
-for ip in "${WINDOWS_MACHINES[@]}"; do echo "${ip} ansible_user=${AUDIT_USER} ansible_password=\"${AUDIT_PASS}\" ansible_connection=winrm ansible_winrm_transport=basic ansible_winrm_server_cert_validation=ignore" >> inventory.ini; done
+for ip in "${WINDOWS_MACHINES[@]}"; do echo "${ip} ansible_user=${AUDIT_USER} ansible_password=\"${AUDIT_PASS}\" ansible_port=5985 ansible_winrm_scheme=http ansible_connection=winrm ansible_winrm_transport=basic ansible_winrm_server_cert_validation=ignore" >> inventory.ini; done
 
 # ======================================================
 # PHASE 0.75: COMPLIANCE PROFILE SELECTION
