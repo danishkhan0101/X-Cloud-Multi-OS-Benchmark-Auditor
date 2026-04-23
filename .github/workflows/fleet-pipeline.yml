@@ -21,9 +21,24 @@ on:
           - remediate
           - full
       environment_tag:
-        description: 'Target Environment Tag (e.g., Prod, Dev, Staging, or type "all")'
+        description: '🎯 Target Environment (Blast Radius)'
         required: true
-        default: 'all'
+        default: 'Dev'
+        type: choice
+        options:
+          - Dev
+          - Staging
+          - Prod
+          - all
+      ticket_id:
+        description: '🎫 Change Request / Ticket ID (For Audit Logs)'
+        required: false
+        type: string
+      debug_mode:
+        description: '🐞 Enable Debug/Verbose Logging'
+        required: false
+        default: false
+        type: boolean    
 
   schedule:
     - cron: '0 18 * * 5'
