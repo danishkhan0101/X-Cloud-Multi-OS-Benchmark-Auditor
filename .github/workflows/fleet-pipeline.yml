@@ -23,7 +23,7 @@ on:
       environment_tag:
         description: '🎯 Target Environment (Blast Radius)'
         required: true
-        default: 'Dev'
+        default: 'all'
         type: choice
         options:
           - Dev
