@@ -79,12 +79,8 @@ if [ "$HEADLESS" == true ]; then
     # 2. The Debug feature (Native Linux Tracing)
     if [ "$DEBUG_MODE" == "true" ]; then
         echo -e "${YELLOW}🐞 DEBUG MODE ENABLED: Activating verbose bash tracing...${NC}"
-        set -x # This is a powerful Linux command that prints every single command before executing it
+        set -x
     fi
-fi
-
-if [ "$HEADLESS" == true ]; then
-    echo -e "${CYAN}${BOLD}🤖 HEADLESS CI/CD MODE ACTIVATED${NC}"
 fi
 
 # ======================================================
@@ -107,13 +103,13 @@ fi
 # ======================================================
 echo -e "${CYAN}📡 Querying Azure for VMs and Power States in [$RG_NAME]...${NC}"
 
-# 1. Query Azure for Name, IPs, OS Type, AND Power State
+# 1. Query Azure for Name, IPs, OS Type, Power State, AND Image Offer (For RHEL Detection)
 if [ "$H_TARGETS" == "all" ] || [ -z "$H_TARGETS" ]; then
     echo "🔍 Target Mode: ALL VMs"
-    VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[].[name, publicIps, storageProfile.osDisk.osType, powerState]" -o tsv)
+    VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[].[name, publicIps, storageProfile.osDisk.osType, powerState, storageProfile.imageReference.offer]" -o tsv)
 else
     echo "🔍 Target Mode: Environment Tag -> $H_TARGETS"
-    VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[?tags.Environment=='$H_TARGETS'].[name, publicIps, storageProfile.osDisk.osType, powerState]" -o tsv)
+    VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[?tags.Environment=='$H_TARGETS'].[name, publicIps, storageProfile.osDisk.osType, powerState, storageProfile.imageReference.offer]" -o tsv)
 fi
 
 if [ -z "$VM_DATA" ]; then
@@ -122,14 +118,16 @@ if [ -z "$VM_DATA" ]; then
 fi
 
 UBUNTU_MACHINES=()
+RHEL_MACHINES=()
 WINDOWS_MACHINES=()
 
-while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
+while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
     # 2. Scrub invisible carriage returns (\r) and trailing spaces
     vm_name=$(echo "$raw_name" | tr -d '\r' | xargs)
     ip=$(echo "$raw_ip" | tr -d '\r' | xargs)
     os=$(echo "$raw_os" | tr -d '\r' | xargs)
     power=$(echo "$raw_power" | tr -d '\r' | xargs)
+    offer=$(echo "$raw_offer" | tr -d '\r' | tr '[:upper:]' '[:lower:]' | xargs)
     
     if [ -z "$ip" ] || [ "$ip" == "None" ]; then 
         echo -e "${RED}🚫 Skipping Node: $vm_name (Error: Azure CLI cannot see the Public IP!)${NC}"
@@ -145,17 +143,29 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
     # 4. Strict OS Routing & AUTO-HEALING
     if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
         
-        # 🛡️ THE AUTO-HEALER: Test if we have SSH access
-        # THE FIX: Added '-n' so SSH stops eating the while loop's data!
-        if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${UBUNTU_USER}@${ip} "echo ok" > /dev/null 2>&1; then
-            echo -e "${YELLOW}   ⚠️ Access denied for $ip. Auto-injecting SSH key via Azure...${NC}"
-            # Force Azure to inject the public key we extracted in the GitHub YAML
-            az vm user update -g "$RG_NAME" -n "$vm_name" -u "$UBUNTU_USER" --ssh-key-value "$(cat ~/.ssh/id_rsa.pub)" -o none
+        # --- DISTRO ROUTER ---
+        if [[ "$offer" == *"rhel"* ]] || [[ "${vm_name,,}" == *"rhel"* ]]; then
+            DISTRO="RHEL"
+            LINUX_USER="azureuser" # Default Azure user for RHEL
+        else
+            DISTRO="Ubuntu"
+            LINUX_USER="$UBUNTU_USER"
+        fi
+
+        # 🛡️ THE AUTO-HEALER (LINUX): Test if we have SSH access (with -n to prevent loop breaking)
+        if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${LINUX_USER}@${ip} "echo ok" > /dev/null 2>&1; then
+            echo -e "${YELLOW}   ⚠️ Access denied for $DISTRO node $ip. Auto-injecting SSH key via Azure...${NC}"
+            az vm user update -g "$RG_NAME" -n "$vm_name" -u "$LINUX_USER" --ssh-key-value "$(cat ~/.ssh/id_rsa.pub)" -o none
             echo -e "${GREEN}   ✅ Key injected!${NC}"
         fi
         
-        UBUNTU_MACHINES+=("$ip")
-        echo -e "${GREEN}🐧 Mapped Ubuntu Node: $ip (Status: ON)${NC}"
+        if [ "$DISTRO" == "RHEL" ]; then
+            RHEL_MACHINES+=("$ip")
+            echo -e "${GREEN}🔴 Mapped RHEL Node: $ip (Status: ON)${NC}"
+        else
+            UBUNTU_MACHINES+=("$ip")
+            echo -e "${GREEN}🟠 Mapped Ubuntu Node: $ip (Status: ON)${NC}"
+        fi
         
     elif [[ "$os" == *"Windows"* ]]; then
         # 🛡️ THE AUTO-HEALER (WINDOWS): Test if WinRM (Port 5985) is open
@@ -163,13 +173,11 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
             echo -e "${YELLOW}   ⚠️ WinRM offline for Windows node $ip.${NC}"
             
             echo -e "${YELLOW}   💉 1/2: Auto-injecting KeyVault Password via Azure...${NC}"
-            # THE FIX: Changed WINDOWS_USER to AUDIT_USER
             az vm user update -g "$RG_NAME" -n "$vm_name" -u "$AUDIT_USER" --password "$AUDIT_PASS" -o none
             
             echo -e "${YELLOW}   🛠️ 2/2: Enabling WinRM (Native Windows Remote Management)...${NC}"
             az vm open-port --resource-group "$RG_NAME" --name "$vm_name" --port 5985 -o none > /dev/null 2>&1 || true
             
-            # THE FIX: Added LocalAccountTokenFilterPolicy registry key to bypass UAC remote blocking
             az vm run-command invoke \
                 --resource-group "$RG_NAME" \
                 --name "$vm_name" \
@@ -189,19 +197,22 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power; do
     fi
 done <<< "$VM_DATA"
 
-echo -e "${GREEN}✅ Discovery Complete: Found ${#UBUNTU_MACHINES[@]} Linux and ${#WINDOWS_MACHINES[@]} Windows targets currently RUNNING.${NC}"
+echo -e "${GREEN}✅ Discovery Complete: Found ${#UBUNTU_MACHINES[@]} Ubuntu, ${#RHEL_MACHINES[@]} RHEL, and ${#WINDOWS_MACHINES[@]} Windows targets currently RUNNING.${NC}"
 
 # ======================================================
 # INVENTORY BUILDER & AZURE KEYVAULT AUTH
 # ======================================================
-# Fetch Windows Password from Azure KeyVault if needed
+# THE FIX: Completely rebuilt this section to correctly map Ubuntu, RHEL, and Windows (WinRM)
+echo "[ubuntu_nodes]" > inventory.ini
+for ip in "${UBUNTU_MACHINES[@]}"; do echo "${ip} ansible_user=${UBUNTU_USER}" >> inventory.ini; done
+echo "" >> inventory.ini
 
-# BUILD THE FINAL ANSIBLE INVENTORY
+echo "[rhel_nodes]" >> inventory.ini
+for ip in "${RHEL_MACHINES[@]}"; do echo "${ip} ansible_user=azureuser" >> inventory.ini; done
+echo "" >> inventory.ini
+
 echo "[windows_nodes]" >> inventory.ini
 for ip in "${WINDOWS_MACHINES[@]}"; do echo "${ip} ansible_user=${AUDIT_USER} ansible_password=\"${AUDIT_PASS}\" ansible_connection=winrm ansible_winrm_transport=basic ansible_winrm_server_cert_validation=ignore" >> inventory.ini; done
-echo "" >> inventory.ini
-echo "[windows_nodes]" >> inventory.ini
-for ip in "${WINDOWS_MACHINES[@]}"; do echo "${ip} ansible_user=${AUDIT_USER} ansible_password=\"${AUDIT_PASS}\" ansible_connection=ssh ansible_shell_type=powershell ansible_shell_executable=None" >> inventory.ini; done
 
 # ======================================================
 # PHASE 0.75: COMPLIANCE PROFILE SELECTION
@@ -232,7 +243,7 @@ fi
 # ======================================================
 if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
     echo -e "\n${CYAN}${BOLD}======================================================"
-    echo -e "⚙️ PHASE 0.8: FLEET BOOTSTRAPPING"
+    echo -e "⚙️ PHASE 0.8a: UBUNTU BOOTSTRAPPING"
     echo -e "======================================================${NC}"
     for IP in "${UBUNTU_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP engine on Ubuntu Node: $IP...${NC}"
@@ -241,12 +252,25 @@ if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
     echo -e "${GREEN}✅ All Ubuntu nodes bootstrapped and ready.${NC}"
 fi
 
+if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
+    echo -e "\n${CYAN}${BOLD}======================================================"
+    echo -e "⚙️ PHASE 0.8b: RHEL BOOTSTRAPPING"
+    echo -e "======================================================${NC}"
+    for IP in "${RHEL_MACHINES[@]}"; do
+        echo -e "   ${YELLOW}Installing OpenSCAP & SSG Baselines on RHEL Node: $IP...${NC}"
+        # RHEL uses dnf, and naturally hosts the SCAP security guide in its own repos!
+        ssh -t azureuser@${IP} "sudo dnf install -y openscap-scanner scap-security-guide" > /dev/null 2>&1
+    done
+    echo -e "${GREEN}✅ All RHEL nodes bootstrapped and ready.${NC}"
+fi
+
 # ======================================================
 # CORE FUNCTIONS (Execution)
 # ======================================================
 
 run_phase_1() {
     echo -e "\n${BOLD}🔍 PHASE 1: Running Initial Baselines...${NC}"
+    
     for IP in "${UBUNTU_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}📦 [UBUNTU - CIS] Scanning $IP...${NC}"
@@ -258,6 +282,15 @@ run_phase_1() {
             oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_before_TM_${IP}.html "$XCCDF_FILE"
         fi
     done
+    
+    for IP in "${RHEL_MACHINES[@]}"; do
+        if [ "$RUN_CIS" == true ]; then
+            echo -e "${GREEN}🔴 [RHEL 9 - CIS] Scanning $IP...${NC}"
+            # RHEL uses its natively installed SSG XML file
+            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_before_CIS_RHEL_${IP}.html /usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml
+        fi
+    done
+    
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - CIS] Scanning $IP...${NC}"
@@ -305,6 +338,7 @@ run_remediation() {
 
 run_phase_4() {
     echo -e "\n${BOLD}🔄 PHASE 4: Running Verification Scans...${NC}"
+    
     for IP in "${UBUNTU_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}✅ [UBUNTU - CIS] Verifying $IP...${NC}"
@@ -315,6 +349,14 @@ run_phase_4() {
             oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_after_TM_${IP}.html "$XCCDF_FILE"
         fi
     done
+    
+    for IP in "${RHEL_MACHINES[@]}"; do
+        if [ "$RUN_CIS" == true ]; then
+            echo -e "${GREEN}🔴 [RHEL 9 - CIS] Verifying $IP...${NC}"
+            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_after_CIS_RHEL_${IP}.html /usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml
+        fi
+    done
+    
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - CIS] Verifying $IP...${NC}"
