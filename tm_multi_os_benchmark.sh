@@ -63,6 +63,7 @@ H_MODE="scan"
 H_TARGETS="all"
 H_TICKET="None"
 DEBUG_MODE=false
+H_CLEANUP=false 
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -408,6 +409,24 @@ run_phase_4() {
     done
 }
 
+run_cleanup() {
+    echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP (REMOVING TOOLS)${NC}"
+    
+    # Clean Ubuntu
+    for IP in "${UBUNTU_MACHINES[@]}"; do
+        echo -e "   ${YELLOW}Removing OpenSCAP from Ubuntu: $IP...${NC}"
+        ssh -n -o BatchMode=yes ${UBUNTU_USER}@${IP} "sudo apt-get purge -y openscap-scanner ssg-base ssg-debderivatives && sudo apt-get autoremove -y" > /dev/null 2>&1
+    done
+
+    # Clean RHEL
+    for IP in "${RHEL_MACHINES[@]}"; do
+        echo -e "   ${YELLOW}Removing OpenSCAP from RHEL: $IP...${NC}"
+        ssh -n -o BatchMode=yes azureuser@${IP} "sudo dnf remove -y openscap-scanner scap-security-guide" > /dev/null 2>&1
+    done
+    
+    echo -e "${GREEN}✅ All Linux targets have been cleaned.${NC}"
+}
+
 # ======================================================
 # HEADLESS EXECUTION (Bypasses Interactive Menu)
 # ======================================================
@@ -425,6 +444,11 @@ if [ "$HEADLESS" == true ]; then
     
     chmod 755 *.json *.html 2>/dev/null || true
     echo -e "\n${GREEN}✅ CI/CD Pipeline Execution Complete. All reports generated.${NC}"
+
+    if [ "$H_CLEANUP" == "true" ]; then
+        run_cleanup
+    fi
+    
     exit 0
 fi
 
