@@ -73,6 +73,7 @@ while [[ "$#" -gt 0 ]]; do
         --targets) H_TARGETS="$2"; shift ;;
         --ticket) H_TICKET="$2"; shift ;;
         --debug) DEBUG_MODE="$2"; shift ;;
+        --cleanup) H_CLEANUP="$2"; shift ;;
         *) echo -e "${RED}Unknown parameter: $1${NC}"; exit 1 ;;
     esac
     shift
@@ -412,19 +413,20 @@ run_phase_4() {
 run_cleanup() {
     echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP (REMOVING TOOLS)${NC}"
     
-    # Clean Ubuntu
+    # 1. Clean Ubuntu
     for IP in "${UBUNTU_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Removing OpenSCAP from Ubuntu: $IP...${NC}"
-        ssh -n -o BatchMode=yes ${UBUNTU_USER}@${IP} "sudo apt-get purge -y openscap-scanner ssg-base ssg-debderivatives && sudo apt-get autoremove -y" > /dev/null 2>&1
+        # We use -n for SSH in loops to prevent it from eating the loop's data
+        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo apt-get purge -y openscap-scanner ssg-base ssg-debderivatives && sudo apt-get autoremove -y" > /dev/null 2>&1
     done
 
-    # Clean RHEL
+    # 2. Clean RHEL
     for IP in "${RHEL_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Removing OpenSCAP from RHEL: $IP...${NC}"
-        ssh -n -o BatchMode=yes azureuser@${IP} "sudo dnf remove -y openscap-scanner scap-security-guide" > /dev/null 2>&1
+        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no azureuser@${IP} "sudo dnf remove -y openscap-scanner scap-security-guide" > /dev/null 2>&1
     done
     
-    echo -e "${GREEN}✅ All Linux targets have been cleaned.${NC}"
+    echo -e "${GREEN}✅ All Linux targets have been cleaned of audit tools.${NC}"
 }
 
 # ======================================================
@@ -441,14 +443,13 @@ if [ "$HEADLESS" == true ]; then
         full) run_phase_1; run_remediation; run_phase_4 ;;
         *) echo -e "${RED}Invalid headless mode specified. Use scan, remediate, or full.${NC}"; exit 1 ;;
     esac
-    
-    chmod 755 *.json *.html 2>/dev/null || true
-    echo -e "\n${GREEN}✅ CI/CD Pipeline Execution Complete. All reports generated.${NC}"
 
     if [ "$H_CLEANUP" == "true" ]; then
         run_cleanup
     fi
     
+    chmod 755 *.json *.html 2>/dev/null || true
+    echo -e "\n${GREEN}✅ CI/CD Pipeline Execution Complete. All reports generated.${NC}"
     exit 0
 fi
 
