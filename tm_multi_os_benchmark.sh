@@ -47,6 +47,8 @@ HEADLESS=false
 H_PROFILE="tm"
 H_MODE="scan"
 H_TARGETS="all"
+H_TICKET="None"
+DEBUG_MODE=false
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -54,10 +56,32 @@ while [[ "$#" -gt 0 ]]; do
         --profile) H_PROFILE="$2"; shift ;;
         --mode) H_MODE="$2"; shift ;;
         --targets) H_TARGETS="$2"; shift ;;
+        --ticket) H_TICKET="$2"; shift ;;
+        --debug) DEBUG_MODE="$2"; shift ;;
         *) echo -e "${RED}Unknown parameter: $1${NC}"; exit 1 ;;
     esac
     shift
 done
+
+# ======================================================
+# ENTERPRISE GUARDRAILS (Audit & Debug)
+# ======================================================
+if [ "$HEADLESS" == true ]; then
+    echo -e "${CYAN}${BOLD}🤖 HEADLESS CI/CD MODE ACTIVATED${NC}"
+    
+    # 1. The Audit Trail feature
+    if [ -n "$H_TICKET" ] && [ "$H_TICKET" != "None" ]; then
+        echo -e "${GREEN}🎫 AUDIT AUTHORIZATION: Execution tracked under Change Request / Ticket ID: ${BOLD}$H_TICKET${NC}"
+    else
+        echo -e "${YELLOW}⚠️ WARNING: No Ticket ID provided. This execution will be flagged in audit logs as Unassociated.${NC}"
+    fi
+
+    # 2. The Debug feature (Native Linux Tracing)
+    if [ "$DEBUG_MODE" == "true" ]; then
+        echo -e "${YELLOW}🐞 DEBUG MODE ENABLED: Activating verbose bash tracing...${NC}"
+        set -x # This is a powerful Linux command that prints every single command before executing it
+    fi
+fi
 
 if [ "$HEADLESS" == true ]; then
     echo -e "${CYAN}${BOLD}🤖 HEADLESS CI/CD MODE ACTIVATED${NC}"
