@@ -7,94 +7,94 @@
   </generator>
   
   <definitions>
-    <definition id="oval:tm.rhel9:def:15" version="1" class="compliance"><metadata><title>LSB15</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Timezone</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:15" comment="Check Timezone"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:19" version="1" class="compliance"><metadata><title>LSB19</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Banner</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:19" comment="Check SSH Banner"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:20" version="1" class="compliance"><metadata><title>LSB20</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Filesystems</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:20" comment="Check Filesystems"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:28" version="1" class="compliance"><metadata><title>LSB28</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Root Login</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:28" comment="Check Root Login"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:39" version="1" class="compliance"><metadata><title>LSB39</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Auditd</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:39" comment="Check Auditd"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:41" version="1" class="compliance"><metadata><title>LSB41</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Rsyslog</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:41" comment="Check Rsyslog"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:14" version="1" class="compliance"><metadata><title>LSB14</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Patch</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:14" comment="Check Patch"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:15" version="1" class="compliance"><metadata><title>LSB15</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Timezone</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:15" comment="Check Timezone"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:19" version="1" class="compliance"><metadata><title>LSB19</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Banner</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:19" comment="Check SSH Banner"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:20" version="1" class="compliance"><metadata><title>LSB20</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Filesystems</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:20" comment="Check Filesystems"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:28" version="1" class="compliance"><metadata><title>LSB28</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Root Login</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:28" comment="Check Root Login"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:39" version="1" class="compliance"><metadata><title>LSB39</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Auditd</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:39" comment="Check Auditd"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:41" version="1" class="compliance"><metadata><title>LSB41</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Rsyslog</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:41" comment="Check Rsyslog"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:14" version="1" class="compliance"><metadata><title>LSB14</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Patch</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:14" comment="Check Patch"/></criteria></definition>
     
-    <definition id="oval:tm.rhel9:def:25" version="1" class="compliance"><metadata><title>LSB25</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>SELinux Installed</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:25" comment="Check libselinux"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:25" version="1" class="compliance"><metadata><title>LSB25</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>SELinux Installed</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:25" comment="Check libselinux"/></criteria></definition>
     
-    <definition id="oval:tm.rhel9:def:26" version="1" class="compliance"><metadata><title>LSB26</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>SELinux Enforcing</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:26" comment="Check SELinux Mode"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:26" version="1" class="compliance"><metadata><title>LSB26</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>SELinux Enforcing</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:26" comment="Check SELinux Mode"/></criteria></definition>
 
-    <definition id="oval:tm.rhel9:def:27" version="1" class="compliance"><metadata><title>LSB27</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>iptables Active</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:27" comment="Check iptables-services installed as proxy for enabled"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:27" version="1" class="compliance"><metadata><title>LSB27</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>iptables Active</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:27" comment="Check iptables-services installed as proxy for enabled"/></criteria></definition>
     
-    <definition id="oval:tm.rhel9:def:29" version="1" class="compliance"><metadata><title>LSB29</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>iptables Drop</description></metadata>
+    <definition id="oval:tm.rhel:def:29" version="1" class="compliance"><metadata><title>LSB29</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>iptables Drop</description></metadata>
       <criteria operator="AND">
-        <criterion test_ref="oval:tm.rhel9:tst:29a" comment="Check iptables INPUT Drop"/>
-        <criterion test_ref="oval:tm.rhel9:tst:29b" comment="Check iptables FORWARD Drop"/>
-        <criterion test_ref="oval:tm.rhel9:tst:29c" comment="Check iptables OUTPUT Drop"/>
+        <criterion test_ref="oval:tm.rhel:tst:29a" comment="Check iptables INPUT Drop"/>
+        <criterion test_ref="oval:tm.rhel:tst:29b" comment="Check iptables FORWARD Drop"/>
+        <criterion test_ref="oval:tm.rhel:tst:29c" comment="Check iptables OUTPUT Drop"/>
       </criteria>
     </definition>
 
-    <definition id="oval:tm.rhel9:def:30" version="1" class="compliance"><metadata><title>LSB30</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Squid</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:30" comment="Check Squid"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:31" version="1" class="compliance"><metadata><title>LSB31</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Dovecot</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:31" comment="Check Dovecot"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:32" version="1" class="compliance"><metadata><title>LSB32</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>FTP</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:32" comment="Check FTP"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:33" version="1" class="compliance"><metadata><title>LSB33</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>DNS</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:33" comment="Check DNS"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:34" version="1" class="compliance"><metadata><title>LSB34</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>DHCP</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:34" comment="Check DHCP"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:35" version="1" class="compliance"><metadata><title>LSB35</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Telnet</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:35" comment="Check Telnet"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:36" version="1" class="compliance"><metadata><title>LSB36</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>RSH</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:36" comment="Check RSH"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:37" version="1" class="compliance"><metadata><title>LSB37</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>LDAP</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:37" comment="Check LDAP"/></criteria></definition>
-    <definition id="oval:tm.rhel9:def:38" version="1" class="compliance"><metadata><title>LSB38</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>SNMP</description></metadata><criteria><criterion test_ref="oval:tm.rhel9:tst:38" comment="Check SNMP"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:30" version="1" class="compliance"><metadata><title>LSB30</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Squid</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:30" comment="Check Squid"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:31" version="1" class="compliance"><metadata><title>LSB31</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Dovecot</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:31" comment="Check Dovecot"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:32" version="1" class="compliance"><metadata><title>LSB32</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>FTP</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:32" comment="Check FTP"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:33" version="1" class="compliance"><metadata><title>LSB33</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>DNS</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:33" comment="Check DNS"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:34" version="1" class="compliance"><metadata><title>LSB34</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>DHCP</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:34" comment="Check DHCP"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:35" version="1" class="compliance"><metadata><title>LSB35</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>Telnet</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:35" comment="Check Telnet"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:36" version="1" class="compliance"><metadata><title>LSB36</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>RSH</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:36" comment="Check RSH"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:37" version="1" class="compliance"><metadata><title>LSB37</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>LDAP</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:37" comment="Check LDAP"/></criteria></definition>
+    <definition id="oval:tm.rhel:def:38" version="1" class="compliance"><metadata><title>LSB38</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>SNMP</description></metadata><criteria><criterion test_ref="oval:tm.rhel:tst:38" comment="Check SNMP"/></criteria></definition>
   </definitions>
 
   <tests>
-    <ind:textfilecontent54_test id="oval:tm.rhel9:tst:15" version="1" check="all" comment="Check Timezone"><ind:object object_ref="oval:tm.rhel9:obj:15"/></ind:textfilecontent54_test>
-    <ind:textfilecontent54_test id="oval:tm.rhel9:tst:19" version="1" check="all" comment="Check SSH Banner"><ind:object object_ref="oval:tm.rhel9:obj:19"/></ind:textfilecontent54_test>
-    <ind:textfilecontent54_test id="oval:tm.rhel9:tst:20" version="1" check="all" comment="Check Filesystems"><ind:object object_ref="oval:tm.rhel9:obj:20"/></ind:textfilecontent54_test>
-    <ind:textfilecontent54_test id="oval:tm.rhel9:tst:28" version="1" check="all" comment="Check Root Login"><ind:object object_ref="oval:tm.rhel9:obj:28"/></ind:textfilecontent54_test>
-    <linux:rpminfo_test id="oval:tm.rhel9:tst:39" version="1" check="all" check_existence="at_least_one_exists" comment="Check Auditd"><linux:object object_ref="oval:tm.rhel9:obj:39"/></linux:rpminfo_test>
-    <ind:textfilecontent54_test id="oval:tm.rhel9:tst:41" version="1" check="all" comment="Check Rsyslog"><ind:object object_ref="oval:tm.rhel9:obj:41"/></ind:textfilecontent54_test>
-    <ind:textfilecontent54_test id="oval:tm.rhel9:tst:14" version="1" check="all" comment="Check Patch"><ind:object object_ref="oval:tm.rhel9:obj:14"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.rhel:tst:15" version="1" check="all" comment="Check Timezone"><ind:object object_ref="oval:tm.rhel:obj:15"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.rhel:tst:19" version="1" check="all" comment="Check SSH Banner"><ind:object object_ref="oval:tm.rhel:obj:19"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.rhel:tst:20" version="1" check="all" comment="Check Filesystems"><ind:object object_ref="oval:tm.rhel:obj:20"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.rhel:tst:28" version="1" check="all" comment="Check Root Login"><ind:object object_ref="oval:tm.rhel:obj:28"/></ind:textfilecontent54_test>
+    <linux:rpminfo_test id="oval:tm.rhel:tst:39" version="1" check="all" check_existence="at_least_one_exists" comment="Check Auditd"><linux:object object_ref="oval:tm.rhel:obj:39"/></linux:rpminfo_test>
+    <ind:textfilecontent54_test id="oval:tm.rhel:tst:41" version="1" check="all" comment="Check Rsyslog"><ind:object object_ref="oval:tm.rhel:obj:41"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.rhel:tst:14" version="1" check="all" comment="Check Patch"><ind:object object_ref="oval:tm.rhel:obj:14"/></ind:textfilecontent54_test>
     
-    <linux:rpminfo_test id="oval:tm.rhel9:tst:25" version="1" check="all" check_existence="at_least_one_exists" comment="Check libselinux"><linux:object object_ref="oval:tm.rhel9:obj:25"/></linux:rpminfo_test>
-    <ind:textfilecontent54_test id="oval:tm.rhel9:tst:26" version="1" check="all" comment="Check SELinux config"><ind:object object_ref="oval:tm.rhel9:obj:26"/></ind:textfilecontent54_test>
-    <linux:rpminfo_test id="oval:tm.rhel9:tst:27" version="1" check="all" check_existence="at_least_one_exists" comment="Check iptables-services"><linux:object object_ref="oval:tm.rhel9:obj:27"/></linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:tm.rhel:tst:25" version="1" check="all" check_existence="at_least_one_exists" comment="Check libselinux"><linux:object object_ref="oval:tm.rhel:obj:25"/></linux:rpminfo_test>
+    <ind:textfilecontent54_test id="oval:tm.rhel:tst:26" version="1" check="all" comment="Check SELinux config"><ind:object object_ref="oval:tm.rhel:obj:26"/></ind:textfilecontent54_test>
+    <linux:rpminfo_test id="oval:tm.rhel:tst:27" version="1" check="all" check_existence="at_least_one_exists" comment="Check iptables-services"><linux:object object_ref="oval:tm.rhel:obj:27"/></linux:rpminfo_test>
     
-    <ind:textfilecontent54_test id="oval:tm.rhel9:tst:29a" version="1" check="all" comment="Check iptables INPUT Drop"><ind:object object_ref="oval:tm.rhel9:obj:29a"/></ind:textfilecontent54_test>
-    <ind:textfilecontent54_test id="oval:tm.rhel9:tst:29b" version="1" check="all" comment="Check iptables FORWARD Drop"><ind:object object_ref="oval:tm.rhel9:obj:29b"/></ind:textfilecontent54_test>
-    <ind:textfilecontent54_test id="oval:tm.rhel9:tst:29c" version="1" check="all" comment="Check iptables OUTPUT Drop"><ind:object object_ref="oval:tm.rhel9:obj:29c"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.rhel:tst:29a" version="1" check="all" comment="Check iptables INPUT Drop"><ind:object object_ref="oval:tm.rhel:obj:29a"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.rhel:tst:29b" version="1" check="all" comment="Check iptables FORWARD Drop"><ind:object object_ref="oval:tm.rhel:obj:29b"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.rhel:tst:29c" version="1" check="all" comment="Check iptables OUTPUT Drop"><ind:object object_ref="oval:tm.rhel:obj:29c"/></ind:textfilecontent54_test>
 
-    <linux:rpminfo_test id="oval:tm.rhel9:tst:30" version="1" check="all" check_existence="none_exist" comment="Check Squid"><linux:object object_ref="oval:tm.rhel9:obj:30"/></linux:rpminfo_test>
-    <linux:rpminfo_test id="oval:tm.rhel9:tst:31" version="1" check="all" check_existence="none_exist" comment="Check Dovecot"><linux:object object_ref="oval:tm.rhel9:obj:31"/></linux:rpminfo_test>
-    <linux:rpminfo_test id="oval:tm.rhel9:tst:32" version="1" check="all" check_existence="none_exist" comment="Check FTP"><linux:object object_ref="oval:tm.rhel9:obj:32"/></linux:rpminfo_test>
-    <linux:rpminfo_test id="oval:tm.rhel9:tst:33" version="1" check="all" check_existence="none_exist" comment="Check DNS"><linux:object object_ref="oval:tm.rhel9:obj:33"/></linux:rpminfo_test>
-    <linux:rpminfo_test id="oval:tm.rhel9:tst:34" version="1" check="all" check_existence="none_exist" comment="Check DHCP"><linux:object object_ref="oval:tm.rhel9:obj:34"/></linux:rpminfo_test>
-    <linux:rpminfo_test id="oval:tm.rhel9:tst:35" version="1" check="all" check_existence="none_exist" comment="Check Telnet"><linux:object object_ref="oval:tm.rhel9:obj:35"/></linux:rpminfo_test>
-    <linux:rpminfo_test id="oval:tm.rhel9:tst:36" version="1" check="all" check_existence="none_exist" comment="Check RSH"><linux:object object_ref="oval:tm.rhel9:obj:36"/></linux:rpminfo_test>
-    <linux:rpminfo_test id="oval:tm.rhel9:tst:37" version="1" check="all" check_existence="none_exist" comment="Check LDAP"><linux:object object_ref="oval:tm.rhel9:obj:37"/></linux:rpminfo_test>
-    <linux:rpminfo_test id="oval:tm.rhel9:tst:38" version="1" check="all" check_existence="none_exist" comment="Check SNMP"><linux:object object_ref="oval:tm.rhel9:obj:38"/></linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:tm.rhel:tst:30" version="1" check="all" check_existence="none_exist" comment="Check Squid"><linux:object object_ref="oval:tm.rhel:obj:30"/></linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:tm.rhel:tst:31" version="1" check="all" check_existence="none_exist" comment="Check Dovecot"><linux:object object_ref="oval:tm.rhel:obj:31"/></linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:tm.rhel:tst:32" version="1" check="all" check_existence="none_exist" comment="Check FTP"><linux:object object_ref="oval:tm.rhel:obj:32"/></linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:tm.rhel:tst:33" version="1" check="all" check_existence="none_exist" comment="Check DNS"><linux:object object_ref="oval:tm.rhel:obj:33"/></linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:tm.rhel:tst:34" version="1" check="all" check_existence="none_exist" comment="Check DHCP"><linux:object object_ref="oval:tm.rhel:obj:34"/></linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:tm.rhel:tst:35" version="1" check="all" check_existence="none_exist" comment="Check Telnet"><linux:object object_ref="oval:tm.rhel:obj:35"/></linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:tm.rhel:tst:36" version="1" check="all" check_existence="none_exist" comment="Check RSH"><linux:object object_ref="oval:tm.rhel:obj:36"/></linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:tm.rhel:tst:37" version="1" check="all" check_existence="none_exist" comment="Check LDAP"><linux:object object_ref="oval:tm.rhel:obj:37"/></linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:tm.rhel:tst:38" version="1" check="all" check_existence="none_exist" comment="Check SNMP"><linux:object object_ref="oval:tm.rhel:obj:38"/></linux:rpminfo_test>
   </tests>
 
   <objects>
-    <ind:textfilecontent54_object id="oval:tm.rhel9:obj:15" version="1"><ind:filepath>/etc/timezone</ind:filepath><ind:pattern>^Asia/Kuala_Lumpur</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
-    <ind:textfilecontent54_object id="oval:tm.rhel9:obj:19" version="1"><ind:filepath>/etc/ssh/sshd_config</ind:filepath><ind:pattern>^\s*Banner\s+/etc/sshbanner\.txt</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
-    <ind:textfilecontent54_object id="oval:tm.rhel9:obj:20" version="1"><ind:path>/etc/modprobe.d</ind:path><ind:filename operation="pattern match">^.*\.conf$</ind:filename><ind:pattern>^\s*install\s+cramfs\s+/bin/true</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
-    <ind:textfilecontent54_object id="oval:tm.rhel9:obj:28" version="1"><ind:filepath>/etc/ssh/sshd_config</ind:filepath><ind:pattern>^\s*PermitRootLogin\s+no</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
-    <linux:rpminfo_object id="oval:tm.rhel9:obj:39" version="1"><linux:name>audit</linux:name></linux:rpminfo_object>
-    <ind:textfilecontent54_object id="oval:tm.rhel9:obj:41" version="1"><ind:filepath>/etc/rsyslog.conf</ind:filepath><ind:pattern>^\*\.\*\s+@@?</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
-    <ind:textfilecontent54_object id="oval:tm.rhel9:obj:14" version="1"><ind:filepath>/var/log/tm_patch_status.log</ind:filepath><ind:pattern>^PATCH_STATUS=COMPLIANT</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.rhel:obj:15" version="1"><ind:filepath>/etc/timezone</ind:filepath><ind:pattern>^Asia/Kuala_Lumpur</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.rhel:obj:19" version="1"><ind:filepath>/etc/ssh/sshd_config</ind:filepath><ind:pattern>^\s*Banner\s+/etc/sshbanner\.txt</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.rhel:obj:20" version="1"><ind:path>/etc/modprobe.d</ind:path><ind:filename operation="pattern match">^.*\.conf$</ind:filename><ind:pattern>^\s*install\s+cramfs\s+/bin/true</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.rhel:obj:28" version="1"><ind:filepath>/etc/ssh/sshd_config</ind:filepath><ind:pattern>^\s*PermitRootLogin\s+no</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <linux:rpminfo_object id="oval:tm.rhel:obj:39" version="1"><linux:name>audit</linux:name></linux:rpminfo_object>
+    <ind:textfilecontent54_object id="oval:tm.rhel:obj:41" version="1"><ind:filepath>/etc/rsyslog.conf</ind:filepath><ind:pattern>^\*\.\*\s+@@?</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.rhel:obj:14" version="1"><ind:filepath>/var/log/tm_patch_status.log</ind:filepath><ind:pattern>^PATCH_STATUS=COMPLIANT</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
     
-    <linux:rpminfo_object id="oval:tm.rhel9:obj:25" version="1"><linux:name>libselinux</linux:name></linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:tm.rhel:obj:25" version="1"><linux:name>libselinux</linux:name></linux:rpminfo_object>
     
-    <ind:textfilecontent54_object id="oval:tm.rhel9:obj:26" version="1"><ind:filepath>/etc/selinux/config</ind:filepath><ind:pattern>^SELINUX=enforcing</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.rhel:obj:26" version="1"><ind:filepath>/etc/selinux/config</ind:filepath><ind:pattern>^SELINUX=enforcing</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
     
-    <linux:rpminfo_object id="oval:tm.rhel9:obj:27" version="1"><linux:name>iptables-services</linux:name></linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:tm.rhel:obj:27" version="1"><linux:name>iptables-services</linux:name></linux:rpminfo_object>
     
-    <ind:textfilecontent54_object id="oval:tm.rhel9:obj:29a" version="1"><ind:filepath>/etc/sysconfig/iptables</ind:filepath><ind:pattern>^:INPUT\s+DROP</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
-    <ind:textfilecontent54_object id="oval:tm.rhel9:obj:29b" version="1"><ind:filepath>/etc/sysconfig/iptables</ind:filepath><ind:pattern>^:FORWARD\s+DROP</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
-    <ind:textfilecontent54_object id="oval:tm.rhel9:obj:29c" version="1"><ind:filepath>/etc/sysconfig/iptables</ind:filepath><ind:pattern>^:OUTPUT\s+DROP</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.rhel:obj:29a" version="1"><ind:filepath>/etc/sysconfig/iptables</ind:filepath><ind:pattern>^:INPUT\s+DROP</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.rhel:obj:29b" version="1"><ind:filepath>/etc/sysconfig/iptables</ind:filepath><ind:pattern>^:FORWARD\s+DROP</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.rhel:obj:29c" version="1"><ind:filepath>/etc/sysconfig/iptables</ind:filepath><ind:pattern>^:OUTPUT\s+DROP</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
 
-    <linux:rpminfo_object id="oval:tm.rhel9:obj:30" version="1"><linux:name>squid</linux:name></linux:rpminfo_object>
-    <linux:rpminfo_object id="oval:tm.rhel9:obj:31" version="1"><linux:name>dovecot</linux:name></linux:rpminfo_object>
-    <linux:rpminfo_object id="oval:tm.rhel9:obj:32" version="1"><linux:name>vsftpd</linux:name></linux:rpminfo_object>
-    <linux:rpminfo_object id="oval:tm.rhel9:obj:33" version="1"><linux:name>bind</linux:name></linux:rpminfo_object>
-    <linux:rpminfo_object id="oval:tm.rhel9:obj:34" version="1"><linux:name>dhcp-server</linux:name></linux:rpminfo_object>
-    <linux:rpminfo_object id="oval:tm.rhel9:obj:35" version="1"><linux:name>telnet-server</linux:name></linux:rpminfo_object>
-    <linux:rpminfo_object id="oval:tm.rhel9:obj:36" version="1"><linux:name>rsh</linux:name></linux:rpminfo_object>
-    <linux:rpminfo_object id="oval:tm.rhel9:obj:37" version="1"><linux:name>openldap-clients</linux:name></linux:rpminfo_object>
-    <linux:rpminfo_object id="oval:tm.rhel9:obj:38" version="1"><linux:name>net-snmp</linux:name></linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:tm.rhel:obj:30" version="1"><linux:name>squid</linux:name></linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:tm.rhel:obj:31" version="1"><linux:name>dovecot</linux:name></linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:tm.rhel:obj:32" version="1"><linux:name>vsftpd</linux:name></linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:tm.rhel:obj:33" version="1"><linux:name>bind</linux:name></linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:tm.rhel:obj:34" version="1"><linux:name>dhcp-server</linux:name></linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:tm.rhel:obj:35" version="1"><linux:name>telnet-server</linux:name></linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:tm.rhel:obj:36" version="1"><linux:name>rsh</linux:name></linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:tm.rhel:obj:37" version="1"><linux:name>openldap-clients</linux:name></linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:tm.rhel:obj:38" version="1"><linux:name>net-snmp</linux:name></linux:rpminfo_object>
   </objects>
 </oval_definitions>
