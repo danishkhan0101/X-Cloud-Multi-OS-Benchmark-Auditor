@@ -37,6 +37,7 @@ RHEL_CUSTOM_XCCDF="${RHEL_CUSTOM_DIR}/tm_rhel_xccdf.xml"
 RHEL_CUSTOM_OVAL="${RHEL_CUSTOM_DIR}/tm_rhel_rules.xml"
 RHEL_CUSTOM_PLAYBOOK="${RHEL_CUSTOM_DIR}/rhel_custom_playbook.yml"
 
+RHEL_CIS_DIR="rhel-default-cis"
 RHEL_CIS_BASE="${RHEL_DIR}/ssg-rhel"
 # Note: RHEL_CIS_XCCDF is defined dynamically in the execution loops based on OS version!
 
