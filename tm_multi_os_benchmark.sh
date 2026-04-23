@@ -450,6 +450,25 @@ run_cleanup() {
     done
 
     echo -e "${GREEN}✅ All Linux targets have been cleaned of audit tools.${NC}"
+
+    # --- Clean Windows ---
+    for IP in "${WINDOWS_MACHINES[@]}"; do
+        echo -e "   ${CYAN}🧹 Reversing security changes on Windows: $IP...${NC}"
+        
+        # We use Azure Run-Command to 'undo' the WinRM setup
+        az vm run-command invoke \
+            --resource-group "$RG_NAME" \
+            --name "$(az vm list-ip-addresses -g "$RG_NAME" --ip-address $IP --query "[0].virtualMachine.name" -o tsv)" \
+            --command-id RunPowerShellScript \
+            --scripts '
+                Stop-Service WinRM; 
+                Set-Service WinRM -StartupType Disabled; 
+                Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "LocalAccountTokenFilterPolicy" -Force;
+                netsh advfirewall firewall set rule name="Windows Remote Management (HTTP-In)" new enable=No
+            ' -o none > /dev/null 2>&1
+    done
+    
+    echo -e "${GREEN}✅ Windows targets have been reset to secure state.${NC}"
 }
 
 # ======================================================
