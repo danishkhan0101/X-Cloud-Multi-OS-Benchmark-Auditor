@@ -286,14 +286,18 @@ run_phase_1() {
         fi
     done
     
-    # 🔴 THE FIX: Added TM Scanning logic for RHEL
     for IP in "${RHEL_MACHINES[@]}"; do
+        # THE FIX: Dynamically fetch the major OS version (8, 9, or 10) directly from the server
+        RHEL_VER=$(ssh -n azureuser@${IP} "source /etc/os-release && echo \${VERSION_ID%%.*}" 2>/dev/null)
+        RHEL_VER=${RHEL_VER:-9} # Failsafe fallback to 9 if detection glitches
+
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL 9 - CIS] Scanning $IP...${NC}"
-            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_before_CIS_RHEL_${IP}.html /usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml
+            echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS] Scanning $IP...${NC}"
+            # Dynamically inject the RHEL_VER variable into the XML filepath!
+            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_before_CIS_RHEL_${IP}.html /usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml
         fi
         if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL 9 - TM] Scanning $IP...${NC}"
+            echo -e "${GREEN}🔴 [RHEL $RHEL_VER - TM] Scanning $IP...${NC}"
             scp "$RHEL_OVAL" azureuser@${IP}:/tmp/tm_rhel_rules.xml >/dev/null 2>&1 || true
             oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_before_TM_RHEL_${IP}.html "$RHEL_XCCDF"
         fi
@@ -366,14 +370,16 @@ run_phase_4() {
         fi
     done
     
-    # 🔴 THE FIX: Added TM Verification logic for RHEL
     for IP in "${RHEL_MACHINES[@]}"; do
+        RHEL_VER=$(ssh -n azureuser@${IP} "source /etc/os-release && echo \${VERSION_ID%%.*}" 2>/dev/null)
+        RHEL_VER=${RHEL_VER:-9}
+
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL 9 - CIS] Verifying $IP...${NC}"
-            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_after_CIS_RHEL_${IP}.html /usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml
+            echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS] Verifying $IP...${NC}"
+            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_after_CIS_RHEL_${IP}.html /usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml
         fi
         if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL 9 - TM] Verifying $IP...${NC}"
+            echo -e "${GREEN}🔴 [RHEL $RHEL_VER - TM] Verifying $IP...${NC}"
             oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_after_TM_RHEL_${IP}.html "$RHEL_XCCDF"
         fi
     done
