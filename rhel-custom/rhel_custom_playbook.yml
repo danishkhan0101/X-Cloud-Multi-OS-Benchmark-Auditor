@@ -44,18 +44,28 @@
         name: iptables-services
         state: present
 
-    - name: Safety Check - Ensure SSH and existing connections are allowed before dropping
-      iptables:
+    - name: Safety Check 1 - Allow all ESTABLISHED and RELATED traffic (CRITICAL)
+      ansible.builtin.iptables:
+        chain: "{{ item }}"
+        ctstate: ESTABLISHED,RELATED
+        jump: ACCEPT
+      loop: 
+        - INPUT
+        - OUTPUT
+
+    - name: Safety Check 2 - Allow new incoming SSH connections
+      ansible.builtin.iptables:
         chain: INPUT
         protocol: tcp
         destination_port: 22
+        ctstate: NEW
         jump: ACCEPT
 
     - name: LSB29 - Set iptables Default Policies to DROP
-      iptables:
+      ansible.builtin.iptables:
         chain: "{{ item }}"
         policy: DROP
-      loop:
+      loop: 
         - INPUT
         - FORWARD
         - OUTPUT
