@@ -58,9 +58,8 @@
 
     - name: WSB13 - Step 2 - Upload ONLY the installer (Direct File Copy)
       ansible.windows.win_copy:
-        src: /home/ubuntu/window-custom/CLIENT/ccmsetup.exe
-        dest: C:\Temp\SCCM_Client\ccmsetup.exe
-        force: yes # This forces a re-upload even if Ansible thinks it's there
+        src: "CLIENT/ccmsetup.exe"
+        dest: "C:\\Temp\\SCCM_Client\\ccmsetup.exe"
 
     - name: WSB13 - Step 3 - Upload supporting files
       ansible.windows.win_copy:
