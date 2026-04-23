@@ -56,9 +56,9 @@
         path: C:\Temp\SCCM_Client
         state: directory
 
-    - name: WSB13 - Step 2 - Upload ONLY the installer (Direct File Copy)
-      ansible.windows.win_copy:
-        src: "CLIENT/ccmsetup.exe"
+    - name: WSB13 - Step 2 - Download SCCM Installer
+      ansible.windows.win_get_url:
+        url: "https://your-storage-account.blob.core.windows.net/installers/ccmsetup.exe"
         dest: "C:\\Temp\\SCCM_Client\\ccmsetup.exe"
 
     - name: WSB13 - Step 3 - Upload supporting files
