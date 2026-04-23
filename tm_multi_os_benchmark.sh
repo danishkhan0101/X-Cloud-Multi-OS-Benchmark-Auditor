@@ -19,8 +19,10 @@ AUDIT_USER="${WINDOWS_ADMIN_USER:-TM_Admin}"
 AUDIT_HOST_NAME="${EXCLUDE_HOST_NAME:-Audit-Host}"
 
 # ======================================================
-# DIRECTORY MAPPINGS (Standardized Naming)
+# DIRECTORY MAPPINGS (Custom Rules Only!)
 # ======================================================
+# Note: CIS default XML files are NOT stored here! 
+# They are dynamically mapped to native /usr/share/... paths in the execution loops.
 
 # --- UBUNTU ---
 UBUNTU_CUSTOM_DIR="ubuntu-custom"
@@ -28,18 +30,11 @@ UBUNTU_CUSTOM_XCCDF="${UBUNTU_CUSTOM_DIR}/tm_xccdf.xml"
 UBUNTU_CUSTOM_OVAL="${UBUNTU_CUSTOM_DIR}/tm_ubuntu_rules.xml"
 UBUNTU_CUSTOM_PLAYBOOK="${UBUNTU_CUSTOM_DIR}/ubuntu_custom_playbook.yml"
 
-UBUNTU_CIS_DIR="ubuntu-default-cis"
-UBUNTU_CIS_XCCDF="${UBUNTU_CIS_DIR}/ssg-ubuntu2404-ds.xml"
-
 # --- RHEL ---
 RHEL_CUSTOM_DIR="rhel-custom"
 RHEL_CUSTOM_XCCDF="${RHEL_CUSTOM_DIR}/tm_rhel_xccdf.xml"
 RHEL_CUSTOM_OVAL="${RHEL_CUSTOM_DIR}/tm_rhel_rules.xml"
 RHEL_CUSTOM_PLAYBOOK="${RHEL_CUSTOM_DIR}/rhel_custom_playbook.yml"
-
-RHEL_CIS_DIR="rhel-default-cis"
-RHEL_CIS_BASE="${RHEL_DIR}/ssg-rhel"
-# Note: RHEL_CIS_XCCDF is defined dynamically in the execution loops based on OS version!
 
 # --- WINDOWS ---
 WIN_CUSTOM_DIR="window-custom"
@@ -88,14 +83,12 @@ done
 if [ "$HEADLESS" == true ]; then
     echo -e "${CYAN}${BOLD}🤖 HEADLESS CI/CD MODE ACTIVATED${NC}"
     
-    # 1. The Audit Trail feature
     if [ -n "$H_TICKET" ] && [ "$H_TICKET" != "None" ]; then
         echo -e "${GREEN}🎫 AUDIT AUTHORIZATION: Execution tracked under Change Request / Ticket ID: ${BOLD}$H_TICKET${NC}"
     else
         echo -e "${YELLOW}⚠️ WARNING: No Ticket ID provided. This execution will be flagged in audit logs as Unassociated.${NC}"
     fi
 
-    # 2. The Debug feature (Native Linux Tracing)
     if [ "$DEBUG_MODE" == "true" ]; then
         echo -e "${YELLOW}🐞 DEBUG MODE ENABLED: Activating verbose bash tracing...${NC}"
         set -x
@@ -111,7 +104,6 @@ if [ -z "$AUDIT_PASS" ]; then
     AUDIT_PASS=$(az keyvault secret show --name "$SECRET_NAME" --vault-name "$KV_NAME" --query value -o tsv 2>/dev/null | tr -d '\r\n')
 fi
 
-# 🚨 THE NEW FAILSAFE
 if [ -z "$AUDIT_PASS" ]; then
     echo -e "${RED}❌ ERROR: Failed to retrieve AuditPassword from KeyVault! Aborting to prevent SSH lockouts.${NC}"
     exit 1
@@ -161,7 +153,7 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
         # --- DISTRO ROUTER ---
         if [[ "$offer" == *"rhel"* ]] || [[ "${vm_name,,}" == *"rhel"* ]]; then
             DISTRO="RHEL"
-            LINUX_USER="azureuser" # Default Azure user for RHEL
+            LINUX_USER="azureuser"
         else
             DISTRO="Ubuntu"
             LINUX_USER="$UBUNTU_USER"
@@ -261,7 +253,7 @@ if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
     echo -e "======================================================${NC}"
     for IP in "${UBUNTU_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP engine on Ubuntu Node: $IP...${NC}"
-        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo apt-get update -qq && sudo apt-get install -y openscap-scanner libopenscap25t64" > /dev/null 2>&1
+        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo apt-get update -qq && sudo apt-get install -y openscap-scanner ssg-base ssg-debderivatives libopenscap25t64" > /dev/null 2>&1
     done
     echo -e "${GREEN}✅ All Ubuntu nodes bootstrapped and ready.${NC}"
 fi
@@ -285,12 +277,16 @@ run_phase_1() {
     echo -e "\n${BOLD}🔍 PHASE 1: Running Initial Baselines...${NC}"
     
     for IP in "${UBUNTU_MACHINES[@]}"; do
+        UBUNTU_VER=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
+        UBUNTU_VER=${UBUNTU_VER:-2404}
+        UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
+
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}📦 [UBUNTU - CIS] Scanning $IP...${NC}"
+            echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - CIS] Scanning $IP...${NC}"
             oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report report_before_CIS_${IP}.html "$UBUNTU_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}📦 [UBUNTU - TM] Scanning $IP...${NC}"
+            echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - TM] Scanning $IP...${NC}"
             scp "$UBUNTU_CUSTOM_OVAL" ${UBUNTU_USER}@${IP}:/tmp/tm_ubuntu_rules.xml >/dev/null 2>&1 || true
             oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_before_TM_${IP}.html "$UBUNTU_CUSTOM_XCCDF"
         fi
@@ -299,13 +295,10 @@ run_phase_1() {
     for IP in "${RHEL_MACHINES[@]}"; do
         RHEL_VER=$(ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "source /etc/os-release && echo \${VERSION_ID%%.*}" 2>/dev/null)
         RHEL_VER=${RHEL_VER:-9}
-        
-        # Assemble the final path: rhel-custom/ssg-rhel + 9 + -ds.xml
-        RHEL_CIS_XCCDF="${RHEL_CIS_BASE}${RHEL_VER}-ds.xml"
+        RHEL_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml"
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS] Scanning $IP...${NC}"
-            # THE FIX: Now using your local path variable!
             oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_before_CIS_RHEL_${IP}.html "$RHEL_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
@@ -332,14 +325,17 @@ run_remediation() {
     
     if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}▶️ [CIS] Auto-Remediating Ubuntu via OpenSCAP Workspace...${NC}"
+            echo -e "${GREEN}▶️ [CIS] Auto-Remediating Ubuntu via Native OpenSCAP...${NC}"
             for IP in "${UBUNTU_MACHINES[@]}"; do
                 echo -e "   ${YELLOW}Fixing $IP...${NC}"
-                ssh -n ${UBUNTU_USER}@${IP} "mkdir -p ~/tm_audit"
-                scp "$UBUNTU_CIS_XCCDF" ${UBUNTU_USER}@${IP}:~/tm_audit/ssg-ubuntu-ds.xml > /dev/null
-                ssh -t ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --remediate --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report ~/tm_audit/report_remediation.html ~/tm_audit/ssg-ubuntu-ds.xml"
-                scp ${UBUNTU_USER}@${IP}:~/tm_audit/report_remediation.html ./report_remediation_CIS_${IP}.html > /dev/null
-                ssh -n ${UBUNTU_USER}@${IP} "rm -rf ~/tm_audit"
+                UBUNTU_VER=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
+                UBUNTU_VER=${UBUNTU_VER:-2404}
+                UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
+
+                # THE FIX: No scp upload required! We remediate using the native file on the server.
+                ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --remediate --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report ~/report_remediation_CIS_${IP}.html $UBUNTU_CIS_XCCDF"
+                scp ${UBUNTU_USER}@${IP}:~/report_remediation_CIS_${IP}.html ./report_remediation_CIS_${IP}.html > /dev/null
+                ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "rm -f ~/report_remediation_CIS_${IP}.html"
             done
         fi   
         if [ "$RUN_TM" == true ]; then
@@ -371,12 +367,16 @@ run_phase_4() {
     echo -e "\n${BOLD}🔄 PHASE 4: Running Verification Scans...${NC}"
     
     for IP in "${UBUNTU_MACHINES[@]}"; do
+        UBUNTU_VER=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
+        UBUNTU_VER=${UBUNTU_VER:-2404}
+        UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
+
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}✅ [UBUNTU - CIS] Verifying $IP...${NC}"
+            echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - CIS] Verifying $IP...${NC}"
             oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report report_after_CIS_${IP}.html "$UBUNTU_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}✅ [UBUNTU - TM] Verifying $IP...${NC}"
+            echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - TM] Verifying $IP...${NC}"
             oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_after_TM_${IP}.html "$UBUNTU_CUSTOM_XCCDF"
         fi
     done
@@ -384,13 +384,10 @@ run_phase_4() {
     for IP in "${RHEL_MACHINES[@]}"; do
         RHEL_VER=$(ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "source /etc/os-release && echo \${VERSION_ID%%.*}" 2>/dev/null)
         RHEL_VER=${RHEL_VER:-9}
-        
-        # Assemble the final path
-        RHEL_CIS_XCCDF="${RHEL_CIS_BASE}${RHEL_VER}-ds.xml"
+        RHEL_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml"
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS] Verifying $IP...${NC}"
-            # THE FIX: Now using your local path variable!
             oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_after_CIS_RHEL_${IP}.html "$RHEL_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
