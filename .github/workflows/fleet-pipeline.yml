@@ -100,11 +100,6 @@ jobs:
           
           export ANSIBLE_HOST_KEY_CHECKING=False
 
-      
-      - name: 💉 Inject WinRM directly into Ansible
-        run: |
-          pipx inject ansible pywinrm requests
-
       - name: 🚀 Execute Fleet Commander
         env:
           AZURE_RG_NAME: ${{ vars.AZURE_RG_NAME }}
