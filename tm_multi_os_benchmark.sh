@@ -255,7 +255,22 @@ if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
     echo -e "======================================================${NC}"
     for IP in "${UBUNTU_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP engine on Ubuntu Node: $IP...${NC}"
-        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo apt-get update -qq && sudo apt-get install -y openscap-scanner ssg-base ssg-debderivatives libopenscap25t64" > /dev/null 2>&1
+        
+        # 1. Kill any lingering apt locks and 2. Try the install with visible errors
+        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
+            sudo systemctl stop unattended-upgrades.service 2>/dev/null
+            sudo fuser -kk /var/lib/dpkg/lock-frontend 2>/dev/null
+            sudo apt-get update -qq
+            sudo apt-get install -y openscap-scanner ssg-base ssg-debderivatives
+        " 
+        
+        # 3. VERIFY if 'oscap' actually exists before moving to Phase 1
+        if ssh -n -o BatchMode=yes ${UBUNTU_USER}@${IP} "command -v oscap" > /dev/null 2>&1; then
+            echo -e "   ${GREEN}✨ Success: oscap is verified on $IP${NC}"
+        else
+            echo -e "   ${RED}❌ FATAL: Installation failed on $IP. Check network or apt sources.${NC}"
+            exit 1
+        fi
     done
     echo -e "${GREEN}✅ All Ubuntu nodes bootstrapped and ready.${NC}"
 fi
