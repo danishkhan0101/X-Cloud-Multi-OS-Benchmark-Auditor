@@ -23,9 +23,9 @@
     
     <definition id="oval:tm.rhel:def:29" version="1" class="compliance"><metadata><title>LSB29</title><affected family="unix"><platform>Red Hat Enterprise Linux 9</platform></affected><description>iptables Drop</description></metadata>
       <criteria operator="AND">
-        <criterion test_ref="oval:tm.rhel:tst:29a" comment="Check iptables INPUT Drop"/>
-        <criterion test_ref="oval:tm.rhel:tst:29b" comment="Check iptables FORWARD Drop"/>
-        <criterion test_ref="oval:tm.rhel:tst:29c" comment="Check iptables OUTPUT Drop"/>
+        <criterion test_ref="oval:tm.rhel:tst:291" comment="Check iptables INPUT Drop"/>
+        <criterion test_ref="oval:tm.rhel:tst:292" comment="Check iptables FORWARD Drop"/>
+        <criterion test_ref="oval:tm.rhel:tst:293" comment="Check iptables OUTPUT Drop"/>
       </criteria>
     </definition>
 
@@ -53,9 +53,9 @@
     <ind:textfilecontent54_test id="oval:tm.rhel:tst:26" version="1" check="all" comment="Check SELinux config"><ind:object object_ref="oval:tm.rhel:obj:26"/></ind:textfilecontent54_test>
     <linux:rpminfo_test id="oval:tm.rhel:tst:27" version="1" check="all" check_existence="at_least_one_exists" comment="Check iptables-services"><linux:object object_ref="oval:tm.rhel:obj:27"/></linux:rpminfo_test>
     
-    <ind:textfilecontent54_test id="oval:tm.rhel:tst:29a" version="1" check="all" comment="Check iptables INPUT Drop"><ind:object object_ref="oval:tm.rhel:obj:29a"/></ind:textfilecontent54_test>
-    <ind:textfilecontent54_test id="oval:tm.rhel:tst:29b" version="1" check="all" comment="Check iptables FORWARD Drop"><ind:object object_ref="oval:tm.rhel:obj:29b"/></ind:textfilecontent54_test>
-    <ind:textfilecontent54_test id="oval:tm.rhel:tst:29c" version="1" check="all" comment="Check iptables OUTPUT Drop"><ind:object object_ref="oval:tm.rhel:obj:29c"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.rhel:tst:291" version="1" check="all" comment="Check iptables INPUT Drop"><ind:object object_ref="oval:tm.rhel:obj:291"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.rhel:tst:292" version="1" check="all" comment="Check iptables FORWARD Drop"><ind:object object_ref="oval:tm.rhel:obj:292"/></ind:textfilecontent54_test>
+    <ind:textfilecontent54_test id="oval:tm.rhel:tst:293" version="1" check="all" comment="Check iptables OUTPUT Drop"><ind:object object_ref="oval:tm.rhel:obj:293"/></ind:textfilecontent54_test>
 
     <linux:rpminfo_test id="oval:tm.rhel:tst:30" version="1" check="all" check_existence="none_exist" comment="Check Squid"><linux:object object_ref="oval:tm.rhel:obj:30"/></linux:rpminfo_test>
     <linux:rpminfo_test id="oval:tm.rhel:tst:31" version="1" check="all" check_existence="none_exist" comment="Check Dovecot"><linux:object object_ref="oval:tm.rhel:obj:31"/></linux:rpminfo_test>
@@ -83,9 +83,9 @@
     
     <linux:rpminfo_object id="oval:tm.rhel:obj:27" version="1"><linux:name>iptables-services</linux:name></linux:rpminfo_object>
     
-    <ind:textfilecontent54_object id="oval:tm.rhel:obj:29a" version="1"><ind:filepath>/etc/sysconfig/iptables</ind:filepath><ind:pattern>^:INPUT\s+DROP</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
-    <ind:textfilecontent54_object id="oval:tm.rhel:obj:29b" version="1"><ind:filepath>/etc/sysconfig/iptables</ind:filepath><ind:pattern>^:FORWARD\s+DROP</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
-    <ind:textfilecontent54_object id="oval:tm.rhel:obj:29c" version="1"><ind:filepath>/etc/sysconfig/iptables</ind:filepath><ind:pattern>^:OUTPUT\s+DROP</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.rhel:obj:291" version="1"><ind:filepath>/etc/sysconfig/iptables</ind:filepath><ind:pattern>^:INPUT\s+DROP</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.rhel:obj:292" version="1"><ind:filepath>/etc/sysconfig/iptables</ind:filepath><ind:pattern>^:FORWARD\s+DROP</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
+    <ind:textfilecontent54_object id="oval:tm.rhel:obj:293" version="1"><ind:filepath>/etc/sysconfig/iptables</ind:filepath><ind:pattern>^:OUTPUT\s+DROP</ind:pattern><ind:instance datatype="int">1</ind:instance></ind:textfilecontent54_object>
 
     <linux:rpminfo_object id="oval:tm.rhel:obj:30" version="1"><linux:name>squid</linux:name></linux:rpminfo_object>
     <linux:rpminfo_object id="oval:tm.rhel:obj:31" version="1"><linux:name>dovecot</linux:name></linux:rpminfo_object>
