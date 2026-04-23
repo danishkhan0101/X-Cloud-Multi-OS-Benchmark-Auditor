@@ -100,6 +100,12 @@ jobs:
           
           export ANSIBLE_HOST_KEY_CHECKING=False
 
+      
+      - name: 🐍 Install Python Dependencies for Windows
+        run: |
+          python -m pip install --upgrade pip
+          pip install pywinrm requests
+
       - name: 🚀 Execute Fleet Commander
         env:
           AZURE_RG_NAME: ${{ vars.AZURE_RG_NAME }}
