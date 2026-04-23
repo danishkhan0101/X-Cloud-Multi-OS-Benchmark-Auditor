@@ -1,5 +1,5 @@
 ---
-- name: TM LSB Full Remediation (RHEL 9)
+- name: TM LSB Full Remediation (RHEL Standardized)
   hosts: all
   become: yes
   tasks:
@@ -8,7 +8,7 @@
     # PATCHING & SELINUX (LSB14, LSB25, LSB26)
     # ==========================================
     
-    - name: LSB14 - Ensure all system packages are up to date (RHEL equivalent of apt upgrade)
+    - name: LSB14 - Ensure all system packages are up to date
       dnf:
         name: '*'
         state: latest
@@ -139,7 +139,6 @@
         state: absent
 
   handlers:
-    # Notice: RHEL uses 'sshd' instead of 'ssh'
     - name: Restart SSH
       service: 
         name: sshd 
