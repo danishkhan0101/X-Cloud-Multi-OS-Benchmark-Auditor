@@ -18,27 +18,38 @@ UBUNTU_USER="${LINUX_ADMIN_USER:-ubuntu}"
 AUDIT_USER="${WINDOWS_ADMIN_USER:-TM_Admin}"
 AUDIT_HOST_NAME="${EXCLUDE_HOST_NAME:-Audit-Host}"
 
-# --- DIRECTORY MAPPINGS (Static) ---
-UBUNTU_DIR="ubuntu-custom"
-XCCDF_FILE="${UBUNTU_DIR}/tm_xccdf.xml"
-OVAL_RULES="${UBUNTU_DIR}/tm_ubuntu_rules.xml"
-UBUNTU_PLAYBOOK="${UBUNTU_DIR}/ubuntu_custom_playbook.yml"
-UBUNTU_DEF_DIR="ubuntu-default-cis"
-XCCDF_DEF_FILE="${UBUNTU_DEF_DIR}/ssg-ubuntu2404-ds.xml"
+# ======================================================
+# DIRECTORY MAPPINGS (Standardized Naming)
+# ======================================================
 
-WIN_DIR="window-custom"
-WIN_BENCHMARK="${WIN_DIR}/tm_baseline.rb"
-WIN_PLAYBOOK="${WIN_DIR}/tm_remediate.yml"
-WIN_DEF_DIR="window-default-cis"
-WIN_DEF_BENCHMARK="${WIN_DEF_DIR}/window-baseline"
-WIN_DEF_PLAYBOOK="${WIN_DEF_DIR}/cis_remediate.yml"
+# --- UBUNTU ---
+UBUNTU_CUSTOM_DIR="ubuntu-custom"
+UBUNTU_CUSTOM_XCCDF="${UBUNTU_CUSTOM_DIR}/tm_xccdf.xml"
+UBUNTU_CUSTOM_OVAL="${UBUNTU_CUSTOM_DIR}/tm_ubuntu_rules.xml"
+UBUNTU_CUSTOM_PLAYBOOK="${UBUNTU_CUSTOM_DIR}/ubuntu_custom_playbook.yml"
 
-RHEL_DIR="rhel-custom"
-RHEL_XCCDF="${RHEL_DIR}/tm_rhel_xccdf.xml"
-RHEL_OVAL="${RHEL_DIR}/tm_rhel_rules.xml"
-RHEL_PLAYBOOK="${RHEL_DIR}/rhel_custom_playbook.yml"
+UBUNTU_CIS_DIR="ubuntu-default-cis"
+UBUNTU_CIS_XCCDF="${UBUNTU_CIS_DIR}/ssg-ubuntu2404-ds.xml"
 
-# Global Settings
+# --- RHEL ---
+RHEL_CUSTOM_DIR="rhel-custom"
+RHEL_CUSTOM_XCCDF="${RHEL_CUSTOM_DIR}/tm_rhel_xccdf.xml"
+RHEL_CUSTOM_OVAL="${RHEL_CUSTOM_DIR}/tm_rhel_rules.xml"
+RHEL_CUSTOM_PLAYBOOK="${RHEL_CUSTOM_DIR}/rhel_custom_playbook.yml"
+# Note: RHEL_CIS_XCCDF is defined dynamically in the execution loops based on OS version!
+
+# --- WINDOWS ---
+WIN_CUSTOM_DIR="window-custom"
+WIN_CUSTOM_BENCHMARK="${WIN_CUSTOM_DIR}/tm_baseline.rb"
+WIN_CUSTOM_PLAYBOOK="${WIN_CUSTOM_DIR}/tm_remediate.yml"
+
+WIN_CIS_DIR="window-default-cis"
+WIN_CIS_BENCHMARK="${WIN_CIS_DIR}/window-baseline"
+WIN_CIS_PLAYBOOK="${WIN_CIS_DIR}/cis_remediate.yml"
+
+# ======================================================
+# GLOBAL SETTINGS
+# ======================================================
 export CHEF_LICENSE="accept-silent"
 export INSPEC_SSH_CONFIG_NO_SECURE=true
 BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
@@ -108,7 +119,6 @@ fi
 # ======================================================
 echo -e "${CYAN}📡 Querying Azure for VMs and Power States in [$RG_NAME]...${NC}"
 
-# 1. Query Azure for Name, IPs, OS Type, Power State, AND Image Offer (For RHEL Detection)
 if [ "$H_TARGETS" == "all" ] || [ -z "$H_TARGETS" ]; then
     echo "🔍 Target Mode: ALL VMs"
     VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[].[name, publicIps, storageProfile.osDisk.osType, powerState, storageProfile.imageReference.offer]" -o tsv)
@@ -127,7 +137,6 @@ RHEL_MACHINES=()
 WINDOWS_MACHINES=()
 
 while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
-    # 2. Scrub invisible carriage returns (\r) and trailing spaces
     vm_name=$(echo "$raw_name" | tr -d '\r' | xargs)
     ip=$(echo "$raw_ip" | tr -d '\r' | xargs)
     os=$(echo "$raw_os" | tr -d '\r' | xargs)
@@ -139,13 +148,11 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
         continue
     fi
     
-    # 3. The Power Check
     if [[ "$power" != *"VM running"* ]]; then
         echo -e "${YELLOW}💤 Skipping Node: $ip (Status: OFF / $power)${NC}"
         continue
     fi
     
-    # 4. Strict OS Routing & AUTO-HEALING
     if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
         
         # --- DISTRO ROUTER ---
@@ -157,7 +164,7 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
             LINUX_USER="$UBUNTU_USER"
         fi
 
-        # 🛡️ THE AUTO-HEALER (LINUX): Test if we have SSH access (with -n to prevent loop breaking)
+        # 🛡️ THE AUTO-HEALER (LINUX)
         if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${LINUX_USER}@${ip} "echo ok" > /dev/null 2>&1; then
             echo -e "${YELLOW}   ⚠️ Access denied for $DISTRO node $ip. Auto-injecting SSH key via Azure...${NC}"
             az vm user update -g "$RG_NAME" -n "$vm_name" -u "$LINUX_USER" --ssh-key-value "$(cat ~/.ssh/id_rsa.pub)" -o none
@@ -173,7 +180,7 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
         fi
         
     elif [[ "$os" == *"Windows"* ]]; then
-        # 🛡️ THE AUTO-HEALER (WINDOWS): Test if WinRM (Port 5985) is open
+        # 🛡️ THE AUTO-HEALER (WINDOWS)
         if ! nc -z -w 5 $ip 5985 2>/dev/null; then
             echo -e "${YELLOW}   ⚠️ WinRM offline for Windows node $ip.${NC}"
             
@@ -251,7 +258,7 @@ if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
     echo -e "======================================================${NC}"
     for IP in "${UBUNTU_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP engine on Ubuntu Node: $IP...${NC}"
-        ssh -t ${UBUNTU_USER}@${IP} "sudo apt-get update -qq && sudo apt-get install -y openscap-scanner && sudo apt-get install -y libopenscap25t64" > /dev/null 2>&1
+        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo apt-get update -qq && sudo apt-get install -y openscap-scanner libopenscap25t64" > /dev/null 2>&1
     done
     echo -e "${GREEN}✅ All Ubuntu nodes bootstrapped and ready.${NC}"
 fi
@@ -262,7 +269,7 @@ if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
     echo -e "======================================================${NC}"
     for IP in "${RHEL_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP & SSG Baselines on RHEL Node: $IP...${NC}"
-        ssh -t azureuser@${IP} "sudo dnf install -y openscap-scanner scap-security-guide" > /dev/null 2>&1
+        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no azureuser@${IP} "sudo dnf install -y openscap-scanner scap-security-guide" > /dev/null 2>&1
     done
     echo -e "${GREEN}✅ All RHEL nodes bootstrapped and ready.${NC}"
 fi
@@ -277,40 +284,40 @@ run_phase_1() {
     for IP in "${UBUNTU_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}📦 [UBUNTU - CIS] Scanning $IP...${NC}"
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report report_before_CIS_${IP}.html "$XCCDF_DEF_FILE"
+            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report report_before_CIS_${IP}.html "$UBUNTU_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}📦 [UBUNTU - TM] Scanning $IP...${NC}"
-            scp "$OVAL_RULES" ${UBUNTU_USER}@${IP}:/tmp/tm_ubuntu_rules.xml >/dev/null 2>&1
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_before_TM_${IP}.html "$XCCDF_FILE"
+            scp "$UBUNTU_CUSTOM_OVAL" ${UBUNTU_USER}@${IP}:/tmp/tm_ubuntu_rules.xml >/dev/null 2>&1 || true
+            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_before_TM_${IP}.html "$UBUNTU_CUSTOM_XCCDF"
         fi
     done
     
     for IP in "${RHEL_MACHINES[@]}"; do
-        # THE FIX: Dynamically fetch the major OS version (8, 9, or 10) directly from the server
-        RHEL_VER=$(ssh -n azureuser@${IP} "source /etc/os-release && echo \${VERSION_ID%%.*}" 2>/dev/null)
-        RHEL_VER=${RHEL_VER:-9} # Failsafe fallback to 9 if detection glitches
+        # Dynamically fetch the RHEL Version (8, 9, 10) and map the correct CIS file path!
+        RHEL_VER=$(ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "source /etc/os-release && echo \${VERSION_ID%%.*}" 2>/dev/null)
+        RHEL_VER=${RHEL_VER:-9}
+        RHEL_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml"
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS] Scanning $IP...${NC}"
-            # Dynamically inject the RHEL_VER variable into the XML filepath!
-            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_before_CIS_RHEL_${IP}.html /usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml
+            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_before_CIS_RHEL_${IP}.html "$RHEL_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - TM] Scanning $IP...${NC}"
-            scp "$RHEL_OVAL" azureuser@${IP}:/tmp/tm_rhel_rules.xml >/dev/null 2>&1 || true
-            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_before_TM_RHEL_${IP}.html "$RHEL_XCCDF"
+            scp "$RHEL_CUSTOM_OVAL" azureuser@${IP}:/tmp/tm_rhel_rules.xml >/dev/null 2>&1 || true
+            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_before_TM_RHEL_${IP}.html "$RHEL_CUSTOM_XCCDF"
         fi
     done
     
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - CIS] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_DEF_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_CIS_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_CIS_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - TM] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_${IP}.json
         fi
     done
 }
@@ -323,35 +330,34 @@ run_remediation() {
             echo -e "${GREEN}▶️ [CIS] Auto-Remediating Ubuntu via OpenSCAP Workspace...${NC}"
             for IP in "${UBUNTU_MACHINES[@]}"; do
                 echo -e "   ${YELLOW}Fixing $IP...${NC}"
-                ssh ${UBUNTU_USER}@${IP} "mkdir -p ~/tm_audit"
-                scp "$XCCDF_DEF_FILE" ${UBUNTU_USER}@${IP}:~/tm_audit/ssg-ubuntu2404-ds.xml > /dev/null
-                ssh -t ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --remediate --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report ~/tm_audit/report_remediation.html ~/tm_audit/ssg-ubuntu2404-ds.xml"
+                ssh -n ${UBUNTU_USER}@${IP} "mkdir -p ~/tm_audit"
+                scp "$UBUNTU_CIS_XCCDF" ${UBUNTU_USER}@${IP}:~/tm_audit/ssg-ubuntu-ds.xml > /dev/null
+                ssh -t ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --remediate --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report ~/tm_audit/report_remediation.html ~/tm_audit/ssg-ubuntu-ds.xml"
                 scp ${UBUNTU_USER}@${IP}:~/tm_audit/report_remediation.html ./report_remediation_CIS_${IP}.html > /dev/null
-                ssh ${UBUNTU_USER}@${IP} "rm -rf ~/tm_audit"
+                ssh -n ${UBUNTU_USER}@${IP} "rm -rf ~/tm_audit"
             done
         fi   
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}▶️ [TM] Running Custom Ubuntu Playbook...${NC}"
-            ansible-playbook -i inventory.ini $UBUNTU_PLAYBOOK --limit ubuntu_nodes
+            ansible-playbook -i inventory.ini $UBUNTU_CUSTOM_PLAYBOOK --limit ubuntu_nodes
         fi
     fi
 
-    # 🔴 THE FIX: Added RHEL Remediation Block
     if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}▶️ [TM] Running Custom RHEL Playbook...${NC}"
-            ansible-playbook -i inventory.ini $RHEL_PLAYBOOK --limit rhel_nodes
+            ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rhel_nodes
         fi
     fi
 
     if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}▶️ [HARDENING - CIS] Applying Baseline as $AUDIT_USER...${NC}"
-            ansible-playbook -i inventory.ini $WIN_DEF_PLAYBOOK --limit windows_nodes
+            ansible-playbook -i inventory.ini $WIN_CIS_PLAYBOOK --limit windows_nodes
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}▶️ [HARDENING - TM] Applying Baseline as $AUDIT_USER...${NC}"
-            ansible-playbook -i inventory.ini $WIN_PLAYBOOK --limit windows_nodes
+            ansible-playbook -i inventory.ini $WIN_CUSTOM_PLAYBOOK --limit windows_nodes
         fi
     fi
 }
@@ -362,36 +368,38 @@ run_phase_4() {
     for IP in "${UBUNTU_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}✅ [UBUNTU - CIS] Verifying $IP...${NC}"
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report report_after_CIS_${IP}.html "$XCCDF_DEF_FILE"
+            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report report_after_CIS_${IP}.html "$UBUNTU_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}✅ [UBUNTU - TM] Verifying $IP...${NC}"
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_after_TM_${IP}.html "$XCCDF_FILE"
+            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_after_TM_${IP}.html "$UBUNTU_CUSTOM_XCCDF"
         fi
     done
     
     for IP in "${RHEL_MACHINES[@]}"; do
-        RHEL_VER=$(ssh -n azureuser@${IP} "source /etc/os-release && echo \${VERSION_ID%%.*}" 2>/dev/null)
+        # Fetch OS Version dynamically for Phase 4 Verification
+        RHEL_VER=$(ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "source /etc/os-release && echo \${VERSION_ID%%.*}" 2>/dev/null)
         RHEL_VER=${RHEL_VER:-9}
+        RHEL_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml"
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS] Verifying $IP...${NC}"
-            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_after_CIS_RHEL_${IP}.html /usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml
+            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_after_CIS_RHEL_${IP}.html "$RHEL_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - TM] Verifying $IP...${NC}"
-            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_after_TM_RHEL_${IP}.html "$RHEL_XCCDF"
+            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_after_TM_RHEL_${IP}.html "$RHEL_CUSTOM_XCCDF"
         fi
     done
     
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - CIS] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_DEF_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_CIS_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_CIS_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - TM] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_TM_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_TM_${IP}.json
         fi
     done
 }
