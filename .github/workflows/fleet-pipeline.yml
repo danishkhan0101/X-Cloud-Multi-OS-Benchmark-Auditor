@@ -84,18 +84,24 @@ jobs:
           mkdir -p ~/.ssh
           ssh-add -L > ~/.ssh/id_rsa.pub
 
-      - name: 🛠️ Install Ansible & InSpec (Cinc Auditor)
+      - name: 🛠️ Install Core Tools & Ansible (Nuclear Option)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ansible openscap-scanner openscap-utils sshpass python3-winrm
+          # 1. Install standard Linux tools ONLY (No Ansible or WinRM here)
+          sudo apt-get install -y openscap-scanner openscap-utils sshpass
+          
+          # 2. Force pip to install Ansible and WinRM together in the local user space
+          python3 -m pip install --user --upgrade pip
+          python3 -m pip install --user ansible pywinrm requests
+          
+          # 3. Add the local pip directory to the runner's PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
           
           # Bypass the Corporate Paywall using Cinc Auditor
           curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-auditor
-          
-          # Secretly alias Cinc to InSpec so your bash script works perfectly
           sudo ln -sf /usr/bin/cinc-auditor /usr/bin/inspec
           
-          # Global Fix for OpenSCAP "Host key verification failed"
+          # Global Fix for OpenSCAP SSH
           sudo sh -c 'printf "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null\n" >> /etc/ssh/ssh_config'
           
           export ANSIBLE_HOST_KEY_CHECKING=False
