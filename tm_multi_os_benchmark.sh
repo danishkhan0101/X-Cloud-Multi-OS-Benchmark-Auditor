@@ -36,6 +36,8 @@ RHEL_CUSTOM_DIR="rhel-custom"
 RHEL_CUSTOM_XCCDF="${RHEL_CUSTOM_DIR}/tm_rhel_xccdf.xml"
 RHEL_CUSTOM_OVAL="${RHEL_CUSTOM_DIR}/tm_rhel_rules.xml"
 RHEL_CUSTOM_PLAYBOOK="${RHEL_CUSTOM_DIR}/rhel_custom_playbook.yml"
+
+RHEL_CIS_BASE="${RHEL_DIR}/ssg-rhel"
 # Note: RHEL_CIS_XCCDF is defined dynamically in the execution loops based on OS version!
 
 # --- WINDOWS ---
@@ -294,13 +296,15 @@ run_phase_1() {
     done
     
     for IP in "${RHEL_MACHINES[@]}"; do
-        # Dynamically fetch the RHEL Version (8, 9, 10) and map the correct CIS file path!
         RHEL_VER=$(ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "source /etc/os-release && echo \${VERSION_ID%%.*}" 2>/dev/null)
         RHEL_VER=${RHEL_VER:-9}
-        RHEL_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml"
+        
+        # Assemble the final path: rhel-custom/ssg-rhel + 9 + -ds.xml
+        RHEL_CIS_XCCDF="${RHEL_CIS_BASE}${RHEL_VER}-ds.xml"
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS] Scanning $IP...${NC}"
+            # THE FIX: Now using your local path variable!
             oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_before_CIS_RHEL_${IP}.html "$RHEL_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
@@ -377,13 +381,15 @@ run_phase_4() {
     done
     
     for IP in "${RHEL_MACHINES[@]}"; do
-        # Fetch OS Version dynamically for Phase 4 Verification
         RHEL_VER=$(ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "source /etc/os-release && echo \${VERSION_ID%%.*}" 2>/dev/null)
         RHEL_VER=${RHEL_VER:-9}
-        RHEL_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml"
+        
+        # Assemble the final path
+        RHEL_CIS_XCCDF="${RHEL_CIS_BASE}${RHEL_VER}-ds.xml"
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS] Verifying $IP...${NC}"
+            # THE FIX: Now using your local path variable!
             oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_after_CIS_RHEL_${IP}.html "$RHEL_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
