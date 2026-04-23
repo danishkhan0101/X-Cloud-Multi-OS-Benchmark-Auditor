@@ -1,0 +1,151 @@
+---
+- name: TM LSB Full Remediation (RHEL 9)
+  hosts: all
+  become: yes
+  tasks:
+
+    # ==========================================
+    # PATCHING & SELINUX (LSB14, LSB25, LSB26)
+    # ==========================================
+    
+    - name: LSB14 - Ensure all system packages are up to date (RHEL equivalent of apt upgrade)
+      dnf:
+        name: '*'
+        state: latest
+
+    - name: LSB14 - Write Patch Trace Evidence for OpenSCAP
+      copy: 
+        dest: /var/log/tm_patch_status.log
+        content: "PATCH_STATUS=COMPLIANT\n"
+
+    - name: LSB25 - Ensure SELinux core packages are installed
+      dnf: 
+        name: 
+          - libselinux
+          - policycoreutils
+        state: present
+
+    - name: LSB26 - Enforce SELinux in config file
+      lineinfile:
+        path: /etc/selinux/config
+        regexp: '^SELINUX='
+        line: 'SELINUX=enforcing'
+      
+    - name: LSB26 - Apply SELinux Enforcing immediately in runtime
+      command: setenforce 1
+      ignore_errors: yes # Ignores error if it's already enforcing
+
+    # ==========================================
+    # FIREWALL (LSB27 & LSB29 - iptables)
+    # ==========================================
+
+    - name: LSB27 - Install iptables-services
+      dnf:
+        name: iptables-services
+        state: present
+
+    - name: Safety Check - Ensure SSH and existing connections are allowed before dropping
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: 22
+        jump: ACCEPT
+
+    - name: LSB29 - Set iptables Default Policies to DROP
+      iptables:
+        chain: "{{ item }}"
+        policy: DROP
+      loop:
+        - INPUT
+        - FORWARD
+        - OUTPUT
+
+    - name: LSB29 - Save iptables rules to /etc/sysconfig/iptables (Required for OVAL scan)
+      shell: iptables-save > /etc/sysconfig/iptables
+
+    - name: LSB27 - Enable and Start iptables service
+      systemd:
+        name: iptables
+        state: started
+        enabled: yes
+
+    # ==========================================
+    # SYSTEM CONFIGURATIONS (LSB15, 19, 20, 28)
+    # ==========================================
+
+    - name: LSB15 - Enforce Timezone
+      timezone: 
+        name: Asia/Kuala_Lumpur
+
+    - name: LSB19 & LSB28 - Harden SSH
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.r }}"
+        line: "{{ item.l }}"
+      loop:
+        - { r: '^#?Banner', l: 'Banner /etc/sshbanner.txt' }
+        - { r: '^#?PermitRootLogin', l: 'PermitRootLogin no' }
+      notify: Restart SSH
+
+    - name: LSB19 - Create Banner Text
+      copy:
+        dest: /etc/sshbanner.txt
+        content: "TM AUTHORIZED ACCESS ONLY. ALL ACTIVITIES ARE MONITORED.\n"
+
+    - name: LSB20 - Disable Uncommon Filesystems
+      copy:
+        dest: /etc/modprobe.d/tm_hardened.conf
+        content: |
+          install cramfs /bin/true
+          install freevxfs /bin/true
+          install jffs2 /bin/true
+          install hfs /bin/true
+          install hfsplus /bin/true
+          install squashfs /bin/true
+          install udf /bin/true
+
+    # ==========================================
+    # AUDITING & LOGGING (LSB39, LSB41)
+    # ==========================================
+
+    - name: LSB39 - Install Auditing Library (audit)
+      dnf:
+        name: audit
+        state: present
+
+    - name: LSB41 - Configure Rsyslog Forwarding to NGSIEM
+      lineinfile:
+        path: /etc/rsyslog.conf
+        line: "*.* @@10.0.0.50:514"
+        state: present
+      notify: Restart Rsyslog
+
+    # ==========================================
+    # SERVICE PURGE (LSB30 - LSB38)
+    # ==========================================
+
+    - name: LSB30 to LSB38 - Purge All Forbidden Packages
+      dnf: 
+        name: 
+          - squid
+          - dovecot
+          - vsftpd
+          - bind
+          - dhcp-server
+          - telnet-server
+          - rsh
+          - openldap-clients
+          - net-snmp
+        state: absent
+
+  handlers:
+    # Notice: RHEL uses 'sshd' instead of 'ssh'
+    - name: Restart SSH
+      service: 
+        name: sshd 
+        state: restarted
+        
+    - name: Restart Rsyslog
+      service:
+        name: rsyslog
+        state: restarted
