@@ -426,22 +426,29 @@ run_phase_4() {
     done
 }
 
+
 run_cleanup() {
-    echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP (REMOVING TOOLS)${NC}"
+    echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP (REMOVING TOOLS & KEYS)${NC}"
     
-    # 1. Clean Ubuntu
+    # --- Clean Ubuntu ---
     for IP in "${UBUNTU_MACHINES[@]}"; do
-        echo -e "   ${YELLOW}Removing OpenSCAP from Ubuntu: $IP...${NC}"
-        # We use -n for SSH in loops to prevent it from eating the loop's data
-        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo apt-get purge -y openscap-scanner ssg-base ssg-debderivatives && sudo apt-get autoremove -y" > /dev/null 2>&1
+        echo -e "   ${YELLOW}Removing tools & SSH key from Ubuntu: $IP...${NC}"
+        ssh -n -o BatchMode=yes ${UBUNTU_USER}@${IP} "
+            sudo apt-get purge -y openscap-scanner ssg-base && \
+            sudo apt-get autoremove -y && \
+            sed -i '/Fleet-Commander-Key/d' ~/.ssh/authorized_keys
+        " > /dev/null 2>&1
     done
 
-    # 2. Clean RHEL
+    # --- Clean RHEL ---
     for IP in "${RHEL_MACHINES[@]}"; do
-        echo -e "   ${YELLOW}Removing OpenSCAP from RHEL: $IP...${NC}"
-        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no azureuser@${IP} "sudo dnf remove -y openscap-scanner scap-security-guide" > /dev/null 2>&1
+        echo -e "   ${YELLOW}Removing tools & SSH key from RHEL: $IP...${NC}"
+        ssh -n -o BatchMode=yes azureuser@${IP} "
+            sudo dnf remove -y openscap-scanner scap-security-guide && \
+            sed -i '/Fleet-Commander-Key/d' ~/.ssh/authorized_keys
+        " > /dev/null 2>&1
     done
-    
+
     echo -e "${GREEN}✅ All Linux targets have been cleaned of audit tools.${NC}"
 }
 
