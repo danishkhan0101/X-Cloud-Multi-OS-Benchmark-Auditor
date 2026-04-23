@@ -431,44 +431,50 @@ run_cleanup() {
     echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP (REMOVING TOOLS & KEYS)${NC}"
     
     # --- Clean Ubuntu ---
-    for IP in "${UBUNTU_MACHINES[@]}"; do
-        echo -e "   ${YELLOW}Removing tools & SSH key from Ubuntu: $IP...${NC}"
-        ssh -n -o BatchMode=yes ${UBUNTU_USER}@${IP} "
-            sudo apt-get purge -y openscap-scanner ssg-base && \
-            sudo apt-get autoremove -y && \
-            sed -i '/Fleet-Commander-Key/d' ~/.ssh/authorized_keys
-        " > /dev/null 2>&1
-    done
+    if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
+        for IP in "${UBUNTU_MACHINES[@]}"; do
+            echo -e "   ${YELLOW}Removing tools & SSH key from Ubuntu: $IP...${NC}"
+            ssh -n -o BatchMode=yes ${UBUNTU_USER}@${IP} "
+                sudo apt-get purge -y openscap-scanner ssg-base && \
+                sudo apt-get autoremove -y && \
+                sed -i '/Fleet-Commander-Key/d' ~/.ssh/authorized_keys
+            " > /dev/null 2>&1
+        done
+        echo -e "${GREEN}✅ Ubuntu targets have been cleaned.${NC}"
+    fi
 
     # --- Clean RHEL ---
-    for IP in "${RHEL_MACHINES[@]}"; do
-        echo -e "   ${YELLOW}Removing tools & SSH key from RHEL: $IP...${NC}"
-        ssh -n -o BatchMode=yes azureuser@${IP} "
-            sudo dnf remove -y openscap-scanner scap-security-guide && \
-            sed -i '/Fleet-Commander-Key/d' ~/.ssh/authorized_keys
-        " > /dev/null 2>&1
-    done
-
-    echo -e "${GREEN}✅ All Linux targets have been cleaned of audit tools.${NC}"
+    if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
+        for IP in "${RHEL_MACHINES[@]}"; do
+            echo -e "   ${YELLOW}Removing tools & SSH key from RHEL: $IP...${NC}"
+            # ⚡ Optimized with -C to bypass the slow RHUI internet check
+            ssh -n -o BatchMode=yes azureuser@${IP} "
+                sudo dnf remove -y openscap-scanner scap-security-guide -C --setopt=metadata_expire=never && \
+                sed -i '/Fleet-Commander-Key/d' ~/.ssh/authorized_keys
+            " > /dev/null 2>&1
+        done
+        echo -e "${GREEN}✅ RHEL targets have been cleaned.${NC}"
+    fi
 
     # --- Clean Windows ---
-    for IP in "${WINDOWS_MACHINES[@]}"; do
-        echo -e "   ${CYAN}🧹 Reversing security changes on Windows: $IP...${NC}"
-        
-        # We use Azure Run-Command to 'undo' the WinRM setup
-        az vm run-command invoke \
-            --resource-group "$RG_NAME" \
-            --name "$(az vm list-ip-addresses -g "$RG_NAME" --ip-address $IP --query "[0].virtualMachine.name" -o tsv)" \
-            --command-id RunPowerShellScript \
-            --scripts '
-                Stop-Service WinRM; 
-                Set-Service WinRM -StartupType Disabled; 
-                Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "LocalAccountTokenFilterPolicy" -Force;
-                netsh advfirewall firewall set rule name="Windows Remote Management (HTTP-In)" new enable=No
-            ' -o none > /dev/null 2>&1
-    done
-    
-    echo -e "${GREEN}✅ Windows targets have been reset to secure state.${NC}"
+    if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
+        for IP in "${WINDOWS_MACHINES[@]}"; do
+            echo -e "   ${CYAN}🧹 Reversing security changes on Windows: $IP...${NC}"
+            
+            # We use Azure Run-Command to 'undo' the WinRM setup
+            az vm run-command invoke \
+                --resource-group "$RG_NAME" \
+                --name "$(az vm list-ip-addresses -g "$RG_NAME" --ip-address $IP --query "[0].virtualMachine.name" -o tsv)" \
+                --command-id RunPowerShellScript \
+                --scripts '
+                    Stop-Service WinRM; 
+                    Set-Service WinRM -StartupType Disabled; 
+                    Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "LocalAccountTokenFilterPolicy" -Force;
+                    netsh advfirewall firewall set rule name="Windows Remote Management (HTTP-In)" new enable=No
+                ' -o none > /dev/null 2>&1
+        done
+        echo -e "${GREEN}✅ Windows targets have been reset to secure state.${NC}"
+    fi
 }
 
 # ======================================================
