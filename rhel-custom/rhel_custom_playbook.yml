@@ -2,11 +2,11 @@
 - name: TM LSB Full Remediation (RHEL Standardized)
   hosts: all
   become: yes
-  gather_facts: no 
+  gather_facts: no  # <-- CRITICAL: Prevents the instant crash on RHEL 8
 
-    # ==========================================
-    # SMART BOOTSTRAP (OS SNIFFER & PYTHON FIX)
-    # ==========================================
+  # ==========================================
+  # SMART BOOTSTRAP (OS SNIFFER & PYTHON FIX)
+  # ==========================================
   pre_tasks:
     - name: OS Sniffer - Check RHEL version safely via raw SSH
       ansible.builtin.raw: cat /etc/redhat-release
@@ -28,6 +28,7 @@
       ansible.builtin.setup:
 
   tasks:
+
     # ==========================================
     # PATCHING & SELINUX (LSB14, LSB25, LSB26)
     # ==========================================
@@ -36,6 +37,8 @@
       dnf:
         name: '*'
         state: latest
+      vars:
+        ansible_python_interpreter: /usr/libexec/platform-python
 
     - name: LSB14 - Write Patch Trace Evidence for OpenSCAP
       copy: 
@@ -48,6 +51,8 @@
           - libselinux
           - policycoreutils
         state: present
+      vars:
+        ansible_python_interpreter: /usr/libexec/platform-python
 
     - name: LSB26 - Enforce SELinux in config file
       lineinfile:
@@ -67,6 +72,8 @@
       dnf:
         name: iptables-services
         state: present
+      vars:
+        ansible_python_interpreter: /usr/libexec/platform-python
 
     - name: Safety Check 1 - Allow all ESTABLISHED and RELATED traffic (CRITICAL)
       ansible.builtin.iptables:
@@ -146,6 +153,8 @@
       dnf:
         name: audit
         state: present
+      vars:
+        ansible_python_interpreter: /usr/libexec/platform-python
 
     - name: LSB41 - Configure Rsyslog Forwarding to NGSIEM
       lineinfile:
@@ -171,6 +180,8 @@
           - openldap-clients
           - net-snmp
         state: absent
+      vars:
+        ansible_python_interpreter: /usr/libexec/platform-python
 
   handlers:
     - name: Restart SSH
