@@ -12,22 +12,22 @@
     # WSB12 - ACTIVE DIRECTORY INTEGRATION
     # ====================================================================
 
-    # - name: WSB12 - Join TM Active Directory Domain
-    #   microsoft.ad.membership:
-    #     dns_domain_name: "tm.com.my"             # <--- Change to actual TM domain
-    #     domain_admin_user: "DOMAIN_JOIN_USER"    # <--- E.g., admin@tm.com.my
-    #     domain_admin_password: "YOUR_PASSWORD"   # <--- Keep this secure!
-    #     state: domain
-    #   register: ad_join_status
-    #   tags: wsb12
-    #   ignore_errors: yes
+    - name: WSB12 - Join TM Active Directory Domain
+      microsoft.ad.membership:
+        dns_domain_name: "tm.com.my"             # <--- Change to actual TM domain
+        domain_admin_user: "DOMAIN_JOIN_USER"    # <--- E.g., admin@tm.com.my
+        domain_admin_password: "YOUR_PASSWORD"   # <--- Keep this secure!
+        state: domain
+      register: ad_join_status
+      tags: wsb12
+      ignore_errors: yes
 
-    # - name: WSB12 - Reboot Server to apply Domain Join
-    #   ansible.windows.win_reboot:
-    #     msg: "Ansible is rebooting the server to finalize Active Directory integration."
-    #     reboot_timeout: 600
-    #   when: ad_join_status.reboot_required
-    #   tags: wsb12
+    - name: WSB12 - Reboot Server to apply Domain Join
+      ansible.windows.win_reboot:
+        msg: "Ansible is rebooting the server to finalize Active Directory integration."
+        reboot_timeout: 600
+      when: ad_join_status.reboot_required
+      tags: wsb12
 
 
     # ====================================================================
