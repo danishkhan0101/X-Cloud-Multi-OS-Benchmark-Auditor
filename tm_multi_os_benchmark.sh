@@ -184,14 +184,24 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
             echo -e "${YELLOW}   💉 1/2: Auto-injecting KeyVault Password via Azure...${NC}"
             az vm user update -g "$RG_NAME" -n "$vm_name" -u "$AUDIT_USER" --password "$AUDIT_PASS" -o none
             
-            echo -e "${YELLOW}   🛠️ 2/2: Enabling WinRM (Native Windows Remote Management)...${NC}"
+            echo -e "${YELLOW}   🛠️ 2/2: Enabling WinRM and Securing the Firewall...${NC}"
             RUNNER_IP=$(curl -s https://api.ipify.org)
-            az vm open-port \
+            
+            # 1. Dynamically find the Network Security Group (NSG) attached to this VM
+            NIC_ID=$(az vm show -g "$RG_NAME" -n "$vm_name" --query "networkProfile.networkInterfaces[0].id" -o tsv)
+            NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
+            NSG_NAME=$(basename "$NSG_ID")
+            
+            # 2. Inject the strict VIP firewall rule directly into the NSG
+            az network nsg rule create \
                 --resource-group "$RG_NAME" \
-                --name "$vm_name" \
-                --port 5985 \
+                --nsg-name "$NSG_NAME" \
+                --name "Allow_WinRM_Runner_Only" \
                 --priority 999 \
+                --destination-port-ranges 5985 \
                 --source-address-prefixes "$RUNNER_IP" \
+                --access Allow \
+                --protocol Tcp \
                 -o none
                         
             az vm run-command invoke \
