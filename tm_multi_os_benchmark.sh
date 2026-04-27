@@ -185,7 +185,8 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
             az vm user update -g "$RG_NAME" -n "$vm_name" -u "$AUDIT_USER" --password "$AUDIT_PASS" -o none
             
             echo -e "${YELLOW}   🛠️ 2/2: Enabling WinRM (Native Windows Remote Management)...${NC}"
-            az vm open-port --resource-group "$RG_NAME" --name "$vm_name" --port 5985 -o none > /dev/null 2>&1 || true
+            RUNNER_IP=$(curl -s https://api.ipify.org)
+            az vm open-port --resource-group "$RG_NAME" --name "$vm_name" --port 5985 --source-address-prefixes "$RUNNER_IP" -o none > /dev/null 2>&1 || true
             
             az vm run-command invoke \
                 --resource-group "$RG_NAME" \
