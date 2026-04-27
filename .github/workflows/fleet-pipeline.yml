@@ -11,6 +11,14 @@ on:
         options:
           - tm
           - cis
+      cis_level:
+        description: 'CIS Level (ONLY applies if profile is "cis")'
+        required: true
+        type: choice
+        default: 'Level 1'
+        options:
+          - 'Level 1'
+          - 'Level 2'
       mode:
         description: 'Execution Mode'
         required: true
