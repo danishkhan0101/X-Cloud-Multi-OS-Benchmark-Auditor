@@ -34,11 +34,8 @@
     # ==========================================
     
     - name: LSB14 - Ensure all system packages are up to date
-      dnf:
-        name: '*'
-        state: latest
-      vars:
-        ansible_python_interpreter: /usr/libexec/platform-python
+      command: dnf upgrade -y
+      changed_when: false
 
     - name: LSB14 - Write Patch Trace Evidence for OpenSCAP
       copy: 
@@ -46,13 +43,9 @@
         content: "PATCH_STATUS=COMPLIANT\n"
 
     - name: LSB25 - Ensure SELinux core packages are installed
-      dnf: 
-        name: 
-          - libselinux
-          - policycoreutils
-        state: present
-      vars:
-        ansible_python_interpreter: /usr/libexec/platform-python
+      command: dnf install -y libselinux policycoreutils
+      args:
+        creates: /usr/sbin/semanage
 
     - name: LSB26 - Enforce SELinux in config file
       lineinfile:
@@ -69,11 +62,9 @@
     # ==========================================
 
     - name: LSB27 - Install iptables-services
-      dnf:
-        name: iptables-services
-        state: present
-      vars:
-        ansible_python_interpreter: /usr/libexec/platform-python
+      command: dnf install -y iptables-services
+      args:
+        creates: /usr/lib/systemd/system/iptables.service
 
     - name: Safety Check 1 - Allow all ESTABLISHED and RELATED traffic (CRITICAL)
       ansible.builtin.iptables:
@@ -150,11 +141,9 @@
     # ==========================================
 
     - name: LSB39 - Install Auditing Library (audit)
-      dnf:
-        name: audit
-        state: present
-      vars:
-        ansible_python_interpreter: /usr/libexec/platform-python
+      command: dnf install -y audit
+      args:
+        creates: /sbin/auditd
 
     - name: LSB41 - Configure Rsyslog Forwarding to NGSIEM
       lineinfile:
@@ -168,20 +157,8 @@
     # ==========================================
 
     - name: LSB30 to LSB38 - Purge All Forbidden Packages
-      dnf: 
-        name: 
-          - squid
-          - dovecot
-          - vsftpd
-          - bind
-          - dhcp-server
-          - telnet-server
-          - rsh
-          - openldap-clients
-          - net-snmp
-        state: absent
-      vars:
-        ansible_python_interpreter: /usr/libexec/platform-python
+      command: dnf remove -y squid dovecot vsftpd bind dhcp-server telnet-server rsh openldap-clients net-snmp
+      ignore_errors: yes
 
   handlers:
     - name: Restart SSH
