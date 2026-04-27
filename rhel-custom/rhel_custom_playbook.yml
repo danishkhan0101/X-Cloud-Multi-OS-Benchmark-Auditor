@@ -66,6 +66,20 @@
       args:
         creates: /usr/lib/systemd/system/iptables.service
 
+    # --- ADD THESE TWO NEW TASKS HERE ---
+    - name: Safety Check 1.1 - Allow Localhost (Loopback) INPUT (CRITICAL)
+      ansible.builtin.iptables:
+        chain: INPUT
+        in_interface: lo
+        jump: ACCEPT
+
+    - name: Safety Check 1.2 - Allow Localhost (Loopback) OUTPUT (CRITICAL)
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        out_interface: lo
+        jump: ACCEPT
+    # ------------------------------------
+
     - name: Safety Check 1 - Allow all ESTABLISHED and RELATED traffic (CRITICAL)
       ansible.builtin.iptables:
         chain: "{{ item }}"
