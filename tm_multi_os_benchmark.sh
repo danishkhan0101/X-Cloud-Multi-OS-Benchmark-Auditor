@@ -163,9 +163,31 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
 
         # 🛡️ THE AUTO-HEALER (LINUX)
         if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${LINUX_USER}@${ip} "echo ok" > /dev/null 2>&1; then
-            echo -e "${YELLOW}   ⚠️ Access denied for $DISTRO node $ip. Auto-injecting SSH key via Azure...${NC}"
+            echo -e "${YELLOW}   ⚠️ Access denied or timeout for $DISTRO node $ip.${NC}"
+            
+            echo -e "${YELLOW}   🛠️ 1/2: Opening Port 22 on Azure NSG for Runner...${NC}"
+            RUNNER_IP=$(curl -s https://api.ipify.org)
+            
+            # Dynamically find the Network Security Group (NSG) attached to this VM
+            NIC_ID=$(az vm show -g "$RG_NAME" -n "$vm_name" --query "networkProfile.networkInterfaces[0].id" -o tsv)
+            NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
+            NSG_NAME=$(basename "$NSG_ID")
+            
+            # Inject the strict VIP firewall rule for SSH
+            az network nsg rule create \
+                --resource-group "$RG_NAME" \
+                --nsg-name "$NSG_NAME" \
+                --name "Allow_SSH_Runner_Only" \
+                --priority 998 \
+                --destination-port-ranges 22 \
+                --source-address-prefixes "$RUNNER_IP" \
+                --access Allow \
+                --protocol Tcp \
+                -o none > /dev/null 2>&1 || true
+
+            echo -e "${YELLOW}   💉 2/2: Auto-injecting SSH key via Azure...${NC}"
             az vm user update -g "$RG_NAME" -n "$vm_name" -u "$LINUX_USER" --ssh-key-value "$(cat ~/.ssh/id_rsa.pub)" -o none
-            echo -e "${GREEN}   ✅ Key injected!${NC}"
+            echo -e "${GREEN}   ✅ Key injected and SSH connection secured!${NC}"
         fi
         
         if [ "$DISTRO" == "RHEL" ]; then
