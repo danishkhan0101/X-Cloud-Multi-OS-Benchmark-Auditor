@@ -123,20 +123,20 @@
     # WSB24 - CREATE NEW ADMIN & DISABLE DEFAULT ADMIN (GUI SYNC)
     # ====================================================================
 
-    - name: WSB24 (Part 1) - Create fallback Admin to bypass Windows lockout failsafe
-      win_user:
-        name: TM_Admin
-        password: "TM_Secure_P@ssw0rd!"
-        state: present
-        groups: Administrators
-      tags: wsb24
+    # - name: WSB24 (Part 1) - Create fallback Admin to bypass Windows lockout failsafe
+    #   win_user:
+    #     name: TM_Admin
+    #     password: "TM_Secure_P@ssw0rd!"
+    #     state: present
+    #     groups: Administrators
+    #   tags: wsb24
 
-    - name: WSB24 (Part 2) - Ensure your current 'window' user is safely in the Admin group
-      win_user:
-        name: window
-        state: present
-        groups: Administrators
-      tags: wsb24
+    # - name: WSB24 (Part 2) - Ensure your current 'window' user is safely in the Admin group
+    #   win_user:
+    #     name: window
+    #     state: present
+    #     groups: Administrators
+    #   tags: wsb24
 
     - name: WSB24 (Part 3) - Disable the physical default Administrator account
       win_user:
