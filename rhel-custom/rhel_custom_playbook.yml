@@ -3,7 +3,6 @@
   hosts: all
   become: yes
   gather_facts: no 
-  tasks:
 
     # ==========================================
     # SMART BOOTSTRAP (OS SNIFFER & PYTHON FIX)
@@ -28,6 +27,7 @@
     - name: Safety Check - Now gather facts normally
       ansible.builtin.setup:
 
+  tasks:
     # ==========================================
     # PATCHING & SELINUX (LSB14, LSB25, LSB26)
     # ==========================================
