@@ -62,13 +62,13 @@
 
     - name: WSB13 - Step 3 - Verify file exists on Windows before installing
       ansible.windows.win_stat:
-        path: C:\Temp\SCCM_Client\ccmsetup.exe
+        path: C:\Temp\SCCM_Client\CLIENT\ccmsetup.exe   
       register: exe_check
 
     - name: WSB13 - Step 4 - Install ONLY if file is found
       ansible.windows.win_package:
-        path: C:\Temp\SCCM_Client\ccmsetup.exe
-        arguments: '/source:"C:\Temp\SCCM_Client"'
+        path: C:\Temp\SCCM_Client\CLIENT\ccmsetup.exe   
+        arguments: '/source:"C:\Temp\SCCM_Client\CLIENT"' 
         state: present
       when: exe_check.stat.exists
 
