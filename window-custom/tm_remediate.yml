@@ -51,31 +51,24 @@
       ignore_errors: yes
       tags: wsb23
  
-    - name: WSB13 - Step 1 - Force create the SCCM folder
-      ansible.windows.win_file:
-        path: C:\Temp\SCCM_Client
-        state: directory
-
-    - name: WSB13 - Step 2 - Download SCCM Installer
+    - name: WSB13 - Step 1 - Download Full Offline SCCM ZIP
       ansible.windows.win_get_url:
-        url: "https://your-storage-account.blob.core.windows.net/installers/ccmsetup.exe"
-        dest: "C:\\Temp\\SCCM_Client\\ccmsetup.exe"
+        url: "https://secopssandbox2026.blob.core.windows.net/installers/CLIENT.rar?sp=r&st=2026-04-27T01:24:28Z&se=2026-04-27T09:39:28Z&spr=https&sv=2025-11-05&sr=b&sig=usCOoUw%2FMIx8LETk8%2B0q9CXBKDA5n9dgv0e8GCqrfQM%3D"
+        dest: "C:\\Temp\\SCCM_Offline_Client.zip"
 
-    - name: WSB13 - Step 3 - Upload supporting files
-      ansible.windows.win_copy:
-        src: /home/ubuntu/window-custom/CLIENT/
-        dest: C:\Temp\SCCM_Client\
-        force: yes
+    - name: WSB13 - Step 2 - Extract the ZIP file
+      ansible.windows.win_shell: |
+        Expand-Archive -Path "C:\Temp\SCCM_Offline_Client.zip" -DestinationPath "C:\Temp\SCCM_Client" -Force
 
-    - name: WSB13 - Step 4 - Verify file exists on Windows before installing
+    - name: WSB13 - Step 3 - Verify file exists on Windows before installing
       ansible.windows.win_stat:
         path: C:\Temp\SCCM_Client\ccmsetup.exe
       register: exe_check
 
-    - name: WSB13 - Step 5 - Install ONLY if file is found
+    - name: WSB13 - Step 4 - Install ONLY if file is found
       ansible.windows.win_package:
         path: C:\Temp\SCCM_Client\ccmsetup.exe
-        arguments: '/source:"C:\Temp\SCCM_Client" /install'
+        arguments: '/source:"C:\Temp\SCCM_Client"'
         state: present
       when: exe_check.stat.exists
 
