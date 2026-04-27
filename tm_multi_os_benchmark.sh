@@ -478,17 +478,40 @@ run_cleanup() {
         for IP in "${WINDOWS_MACHINES[@]}"; do
             echo -e "   ${CYAN}🧹 Reversing security changes on Windows: $IP...${NC}"
             
-            # We use Azure Run-Command to 'undo' the WinRM setup
-            az vm run-command invoke \
-                --resource-group "$RG_NAME" \
-                --name "$(az vm list-ip-addresses -g "$RG_NAME" --ip-address $IP --query "[0].virtualMachine.name" -o tsv)" \
-                --command-id RunPowerShellScript \
-                --scripts '
-                    Stop-Service WinRM; 
-                    Set-Service WinRM -StartupType Disabled; 
-                    Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "LocalAccountTokenFilterPolicy" -Force;
-                    netsh advfirewall firewall set rule name="Windows Remote Management (HTTP-In)" new enable=No
-                ' -o none > /dev/null 2>&1
+            # 1. Reverse lookup: Find the Azure VM Name associated with this IP
+            VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$IP'].virtualMachine.name" -o tsv)
+            
+            if [ -n "$VM_NAME" ]; then
+                # 2. Dynamically find the NSG attached to this VM
+                NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv)
+                NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
+                
+                # 3. Delete the custom WinRM firewall rule from Azure
+                if [ -n "$NSG_ID" ]; then
+                    NSG_NAME=$(basename "$NSG_ID")
+                    echo -e "      🔒 Removing DevSecOps WinRM Firewall Rule from NSG..."
+                    az network nsg rule delete \
+                        --resource-group "$RG_NAME" \
+                        --nsg-name "$NSG_NAME" \
+                        --name "Allow_WinRM_Runner_Only" \
+                        -o none > /dev/null 2>&1 || true
+                fi
+
+                # 4. Disable WinRM internally via Azure Run Command
+                echo -e "      🔌 Disabling WinRM service inside the VM..."
+                az vm run-command invoke \
+                    --resource-group "$RG_NAME" \
+                    --name "$VM_NAME" \
+                    --command-id RunPowerShellScript \
+                    --scripts '
+                        Stop-Service WinRM -WarningAction SilentlyContinue; 
+                        Set-Service WinRM -StartupType Disabled; 
+                        Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "LocalAccountTokenFilterPolicy" -Force -ErrorAction SilentlyContinue;
+                        Disable-NetFirewallRule -DisplayGroup "Windows Remote Management" -ErrorAction SilentlyContinue
+                    ' -o none > /dev/null 2>&1 || true
+            else
+                echo -e "      ${RED}⚠️ Could not resolve VM name for IP $IP. Skipping.${NC}"
+            fi
         done
         echo -e "${GREEN}✅ Windows targets have been reset to secure state.${NC}"
     fi
