@@ -79,6 +79,9 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
+# Catch GitHub CIS_LEVEL or default to Level 1
+CIS_LEVEL="${CIS_LEVEL:-Level 1}"
+
 # ======================================================
 # ENTERPRISE GUARDRAILS (Audit & Debug)
 # ======================================================
@@ -168,12 +171,10 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
             echo -e "${YELLOW}   🛠️ 1/2: Opening Port 22 on Azure NSG for Runner...${NC}"
             RUNNER_IP=$(curl -s https://api.ipify.org)
             
-            # Dynamically find the Network Security Group (NSG) attached to this VM
             NIC_ID=$(az vm show -g "$RG_NAME" -n "$vm_name" --query "networkProfile.networkInterfaces[0].id" -o tsv)
             NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
             NSG_NAME=$(basename "$NSG_ID")
             
-            # Inject the strict VIP firewall rule for SSH
             az network nsg rule create \
                 --resource-group "$RG_NAME" \
                 --nsg-name "$NSG_NAME" \
@@ -209,12 +210,10 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
             echo -e "${YELLOW}   🛠️ 2/2: Enabling WinRM and Securing the Firewall...${NC}"
             RUNNER_IP=$(curl -s https://api.ipify.org)
             
-            # 1. Dynamically find the Network Security Group (NSG) attached to this VM
             NIC_ID=$(az vm show -g "$RG_NAME" -n "$vm_name" --query "networkProfile.networkInterfaces[0].id" -o tsv)
             NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
             NSG_NAME=$(basename "$NSG_ID")
             
-            # 2. Inject the strict VIP firewall rule directly into the NSG
             az network nsg rule create \
                 --resource-group "$RG_NAME" \
                 --nsg-name "$NSG_NAME" \
@@ -286,6 +285,21 @@ else
 fi
 
 # ======================================================
+# DYNAMIC OSCAP PROFILE ROUTER (Linux Level 1 vs 2)
+# ======================================================
+if [ "$RUN_CIS" == true ]; then
+    echo -e "${YELLOW}🛡️ CIS Level Selected: $CIS_LEVEL${NC}"
+    if [ "$CIS_LEVEL" == "Level 1" ]; then
+        UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level1_server"
+        RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_server_l1"
+    else
+        # Level 2 Profiles
+        UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level2_server"
+        RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_server_l2"
+    fi
+fi
+
+# ======================================================
 # PHASE 0.8: FLEET BOOTSTRAPPING (DEPENDENCIES)
 # ======================================================
 if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
@@ -295,16 +309,13 @@ if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
     for IP in "${UBUNTU_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP engine on Ubuntu Node: $IP...${NC}"
         
-        # 1. Standardize the package list for Ubuntu 24.04
         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
             sudo systemctl stop unattended-upgrades.service 2>/dev/null
             sudo fuser -kk /var/lib/dpkg/lock-frontend 2>/dev/null
             sudo apt-get update -qq
-            # REMOVED: ssg-debderivatives and libopenscap25t64
             sudo apt-get install -y openscap-scanner ssg-base
         " 
         
-        # 2. Verification check
         if ssh -n -o BatchMode=yes ${UBUNTU_USER}@${IP} "command -v oscap" > /dev/null 2>&1; then
             echo -e "   ${GREEN}✨ Success: oscap is verified on $IP${NC}"
         else
@@ -312,7 +323,6 @@ if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
             exit 1
         fi
     done
-    echo -e "${GREEN}✅ All Ubuntu nodes bootstrapped and ready.${NC}"
 fi
 
 if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
@@ -323,7 +333,6 @@ if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
         echo -e "   ${YELLOW}Installing OpenSCAP & SSG Baselines on RHEL Node: $IP...${NC}"
         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no azureuser@${IP} "sudo dnf install -y openscap-scanner scap-security-guide" > /dev/null 2>&1
     done
-    echo -e "${GREEN}✅ All RHEL nodes bootstrapped and ready.${NC}"
 fi
 
 # ======================================================
@@ -339,8 +348,8 @@ run_phase_1() {
         UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
 
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - CIS] Scanning $IP...${NC}"
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report report_before_CIS_UBUNTU_${IP}.html "$UBUNTU_CIS_XCCDF"
+            echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - CIS $CIS_LEVEL] Scanning $IP...${NC}"
+            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile "$UBUNTU_CIS_PROFILE" --report report_before_CIS_UBUNTU_${IP}.html "$UBUNTU_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - TM] Scanning $IP...${NC}"
@@ -355,8 +364,8 @@ run_phase_1() {
         RHEL_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml"
 
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS] Scanning $IP...${NC}"
-            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_before_CIS_RHEL_${IP}.html "$RHEL_CIS_XCCDF"
+            echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS $CIS_LEVEL] Scanning $IP...${NC}"
+            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile "$RHEL_CIS_PROFILE" --report report_before_CIS_RHEL_${IP}.html "$RHEL_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - TM] Scanning $IP...${NC}"
@@ -389,8 +398,7 @@ run_remediation() {
                 UBUNTU_VER=${UBUNTU_VER:-2404}
                 UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
 
-                # THE FIX: No scp upload required! We remediate using the native file on the server.
-                ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --remediate --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report ~/report_remediation_CIS_${IP}.html $UBUNTU_CIS_XCCDF"
+                ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --remediate --profile $UBUNTU_CIS_PROFILE --report ~/report_remediation_CIS_${IP}.html $UBUNTU_CIS_XCCDF"
                 scp ${UBUNTU_USER}@${IP}:~/report_remediation_CIS_${IP}.html ./report_remediation_CIS_${IP}.html > /dev/null
                 ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "rm -f ~/report_remediation_CIS_${IP}.html"
             done
@@ -409,9 +417,19 @@ run_remediation() {
     fi
 
     if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
+        EXTRA_VARS=""
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}▶️ [HARDENING - CIS] Applying Baseline as $AUDIT_USER...${NC}"
-            ansible-playbook -i inventory.ini $WIN_CIS_PLAYBOOK --limit windows_nodes
+            
+            # Dynamic Windows CIS Level Vars
+            ansible-galaxy role install ansible-lockdown.windows_2022_cis > /dev/null 2>&1 || true
+            if [ "$CIS_LEVEL" == "Level 1" ]; then
+                EXTRA_VARS="-e win2022cis_level_1=true -e win2022cis_level_2=false"
+            elif [ "$CIS_LEVEL" == "Level 2" ]; then
+                EXTRA_VARS="-e win2022cis_level_1=true -e win2022cis_level_2=true"
+            fi
+            
+            ansible-playbook -i inventory.ini $WIN_CIS_PLAYBOOK --limit windows_nodes $EXTRA_VARS
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}▶️ [HARDENING - TM] Applying Baseline as $AUDIT_USER...${NC}"
@@ -429,8 +447,8 @@ run_phase_4() {
         UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
 
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - CIS] Verifying $IP...${NC}"
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report report_after_CIS_UBUNTU_${IP}.html "$UBUNTU_CIS_XCCDF"
+            echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - CIS $CIS_LEVEL] Verifying $IP...${NC}"
+            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile "$UBUNTU_CIS_PROFILE" --report report_after_CIS_UBUNTU_${IP}.html "$UBUNTU_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - TM] Verifying $IP...${NC}"
@@ -444,8 +462,8 @@ run_phase_4() {
         RHEL_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml"
 
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS] Verifying $IP...${NC}"
-            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis --report report_after_CIS_RHEL_${IP}.html "$RHEL_CIS_XCCDF"
+            echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS $CIS_LEVEL] Verifying $IP...${NC}"
+            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile "$RHEL_CIS_PROFILE" --report report_after_CIS_RHEL_${IP}.html "$RHEL_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - TM] Verifying $IP...${NC}"
