@@ -318,12 +318,12 @@ run_phase_1() {
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - CIS] Scanning $IP...${NC}"
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report report_before_CIS_${IP}.html "$UBUNTU_CIS_XCCDF"
+            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report report_before_CIS_UBUNTU_${IP}.html "$UBUNTU_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - TM] Scanning $IP...${NC}"
             scp "$UBUNTU_CUSTOM_OVAL" ${UBUNTU_USER}@${IP}:/tmp/tm_ubuntu_rules.xml >/dev/null 2>&1 || true
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_before_TM_${IP}.html "$UBUNTU_CUSTOM_XCCDF"
+            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_before_TM_UBUNTU_${IP}.html "$UBUNTU_CUSTOM_XCCDF"
         fi
     done
     
@@ -346,11 +346,11 @@ run_phase_1() {
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - CIS] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_CIS_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_CIS_WIN_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - TM] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_WIN_${IP}.json
         fi
     done
 }
@@ -408,11 +408,11 @@ run_phase_4() {
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - CIS] Verifying $IP...${NC}"
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report report_after_CIS_${IP}.html "$UBUNTU_CIS_XCCDF"
+            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_org.ssgproject.content_profile_cis_level1_server --report report_after_CIS_UBUNTU_${IP}.html "$UBUNTU_CIS_XCCDF"
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - TM] Verifying $IP...${NC}"
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_after_TM_${IP}.html "$UBUNTU_CUSTOM_XCCDF"
+            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_after_TM_UBUNTU_${IP}.html "$UBUNTU_CUSTOM_XCCDF"
         fi
     done
     
@@ -434,11 +434,11 @@ run_phase_4() {
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - CIS] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_CIS_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_CIS_WIN_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - TM] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_TM_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_TM_WIN_${IP}.json
         fi
     done
 }
