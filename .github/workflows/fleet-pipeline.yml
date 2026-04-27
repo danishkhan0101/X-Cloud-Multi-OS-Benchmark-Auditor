@@ -72,6 +72,7 @@ jobs:
       TARGET_ENV: ${{ github.event.client_payload.target_env || github.event.inputs.environment_tag || 'Prod' }}
       PROFILE: ${{ github.event.inputs.profile || 'tm' }}
       MODE: ${{ github.event.inputs.mode || 'scan' }}
+      CIS_LEVEL: ${{ github.event.inputs.cis_level || 'Level 1' }}
 
     steps:
       - name: 📥 Pull Repository Code
