@@ -2,7 +2,31 @@
 - name: TM LSB Full Remediation (RHEL Standardized)
   hosts: all
   become: yes
+  gather_facts: no 
   tasks:
+
+    # ==========================================
+    # SMART BOOTSTRAP (OS SNIFFER & PYTHON FIX)
+    # ==========================================
+  pre_tasks:
+    - name: OS Sniffer - Check RHEL version safely via raw SSH
+      ansible.builtin.raw: cat /etc/redhat-release
+      register: os_release
+      changed_when: false
+      ignore_errors: true
+
+    - name: Bootstrap - Install modern Python ONLY on RHEL 8
+      ansible.builtin.raw: dnf install -y python39
+      when: os_release.stdout is defined and 'release 8' in os_release.stdout
+      changed_when: false
+
+    - name: Brain Switch - Point Ansible to Python 3.9 ONLY on RHEL 8
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: /usr/bin/python3.9
+      when: os_release.stdout is defined and 'release 8' in os_release.stdout
+
+    - name: Safety Check - Now gather facts normally
+      ansible.builtin.setup:
 
     # ==========================================
     # PATCHING & SELINUX (LSB14, LSB25, LSB26)
