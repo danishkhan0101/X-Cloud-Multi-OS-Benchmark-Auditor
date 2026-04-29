@@ -61,6 +61,14 @@
     # FIREWALL (LSB27 & LSB29 - iptables)
     # ==========================================
 
+    # 🚨 THE FIX 1: Kill the default firewall so it doesn't fight iptables
+    - name: Pre-Safety - Disable firewalld (Prevents kernel lockup)
+      systemd:
+        name: firewalld
+        state: stopped
+        enabled: no
+      ignore_errors: true
+
     - name: LSB27 - Install iptables-services
       command: dnf install -y iptables-services
       args:
@@ -124,11 +132,20 @@
     - name: LSB29 - Save iptables rules to /etc/sysconfig/iptables
       shell: iptables-save > /etc/sysconfig/iptables
 
-    - name: LSB27 - Enable and Start iptables service
+    # 🚨 THE FIX 2: Fire & Forget the start command, don't wait for a reply!
+    - name: LSB27 - Enable and Start iptables service (Async)
       systemd:
         name: iptables
-        state: started
+        state: restarted
         enabled: yes
+      async: 45
+      poll: 0
+
+    # 🚨 THE FIX 3: Gracefully reconnect to the new SSH session
+    - name: Safety Check - Wait for SSH to stabilize after firewall reload
+      wait_for_connection:
+        delay: 5
+        timeout: 60
 
     # ==========================================
     # SYSTEM CONFIGURATIONS (LSB15, 19, 20, 28)
