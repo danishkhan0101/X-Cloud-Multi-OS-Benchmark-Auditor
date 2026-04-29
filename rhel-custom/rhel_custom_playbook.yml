@@ -151,9 +151,15 @@
     # SYSTEM CONFIGURATIONS (LSB15, 19, 20, 28)
     # ==========================================
 
-    - name: LSB15 - Enforce Timezone
+    - name: LSB15 - Enforce Timezone (Modern Systemd)
       timezone: 
         name: Asia/Kuala_Lumpur
+
+    - name: LSB15 - Enforce Timezone (OVAL Scanner Compliance)
+      copy:
+        dest: /etc/timezone
+        content: "Asia/Kuala_Lumpur\n"
+        mode: '0644'
 
     - name: LSB19 & LSB28 - Harden SSH
       lineinfile:
