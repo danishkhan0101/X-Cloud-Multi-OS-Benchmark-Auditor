@@ -349,12 +349,14 @@ run_phase_1() {
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - CIS $CIS_LEVEL] Scanning $IP...${NC}"
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile "$UBUNTU_CIS_PROFILE" --report report_before_CIS_UBUNTU_${IP}.html "$UBUNTU_CIS_XCCDF"
+            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_before_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF" > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_CIS_UBUNTU_${IP}.html ./report_before_CIS_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - TM] Scanning $IP...${NC}"
-            scp "$UBUNTU_CUSTOM_OVAL" ${UBUNTU_USER}@${IP}:/tmp/tm_ubuntu_rules.xml >/dev/null 2>&1 || true
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_before_TM_UBUNTU_${IP}.html "$UBUNTU_CUSTOM_XCCDF"
+            scp -o StrictHostKeyChecking=no "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" ${UBUNTU_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_before_TM_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)" > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_TM_UBUNTU_${IP}.html ./report_before_TM_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
     done
     
@@ -365,12 +367,14 @@ run_phase_1() {
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS $CIS_LEVEL] Scanning $IP...${NC}"
-            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile "$RHEL_CIS_PROFILE" --report report_before_CIS_RHEL_${IP}.html "$RHEL_CIS_XCCDF"
+            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_RHEL_${IP}.html $RHEL_CIS_XCCDF" > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_CIS_RHEL_${IP}.html ./report_before_CIS_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - TM] Scanning $IP...${NC}"
-            scp "$RHEL_CUSTOM_OVAL" azureuser@${IP}:/tmp/tm_rhel_rules.xml >/dev/null 2>&1 || true
-            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_before_TM_RHEL_${IP}.html "$RHEL_CUSTOM_XCCDF"
+            scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" azureuser@${IP}:/tmp/ > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_before_TM_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_TM_RHEL_${IP}.html ./report_before_TM_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
     done
     
@@ -448,11 +452,14 @@ run_phase_4() {
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - CIS $CIS_LEVEL] Verifying $IP...${NC}"
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile "$UBUNTU_CIS_PROFILE" --report report_after_CIS_UBUNTU_${IP}.html "$UBUNTU_CIS_XCCDF"
+            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_after_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF" > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_CIS_UBUNTU_${IP}.html ./report_after_CIS_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - TM] Verifying $IP...${NC}"
-            oscap-ssh --sudo ${UBUNTU_USER}@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_after_TM_UBUNTU_${IP}.html "$UBUNTU_CUSTOM_XCCDF"
+            scp -o StrictHostKeyChecking=no "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" ${UBUNTU_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_after_TM_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)" > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_TM_UBUNTU_${IP}.html ./report_after_TM_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
     done
     
@@ -463,11 +470,14 @@ run_phase_4() {
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS $CIS_LEVEL] Verifying $IP...${NC}"
-            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile "$RHEL_CIS_PROFILE" --report report_after_CIS_RHEL_${IP}.html "$RHEL_CIS_XCCDF"
+            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_RHEL_${IP}.html $RHEL_CIS_XCCDF" > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_after_CIS_RHEL_${IP}.html ./report_after_CIS_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}🔴 [RHEL $RHEL_VER - TM] Verifying $IP...${NC}"
-            oscap-ssh --sudo azureuser@${IP} 22 xccdf eval --profile xccdf_com.tm_profile_lsb --report report_after_TM_RHEL_${IP}.html "$RHEL_CUSTOM_XCCDF"
+            scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" azureuser@${IP}:/tmp/ > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_after_TM_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_after_TM_RHEL_${IP}.html ./report_after_TM_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
     done
     
