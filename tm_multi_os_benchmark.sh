@@ -343,51 +343,46 @@ run_phase_1() {
     echo -e "\n${BOLD}🔍 PHASE 1: Running Initial Baselines...${NC}"
     
     for IP in "${UBUNTU_MACHINES[@]}"; do
-        UBUNTU_VER=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
-        UBUNTU_VER=${UBUNTU_VER:-2404}
-        UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
+        # 🚨 THE FIX: Dynamically find the newest available XML file on the server
+        UBUNTU_CIS_XCCDF=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1" 2>/dev/null)
 
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - CIS $CIS_LEVEL] Scanning $IP...${NC}"
-            # 🚨 SILENCERS REMOVED. ADDED -t FOR SUDO.
-            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_before_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF"
-            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_CIS_UBUNTU_${IP}.html ./report_before_CIS_UBUNTU_${IP}.html
+            echo -e "${GREEN}📦 [UBUNTU - CIS $CIS_LEVEL] Scanning $IP...${NC}"
+            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_before_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF" || true
+            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_CIS_UBUNTU_${IP}.html ./report_before_CIS_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - TM] Scanning $IP...${NC}"
-            scp -o StrictHostKeyChecking=no "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" ${UBUNTU_USER}@${IP}:/tmp/
-            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_before_TM_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
-            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_TM_UBUNTU_${IP}.html ./report_before_TM_UBUNTU_${IP}.html
+            echo -e "${GREEN}📦 [UBUNTU - TM] Scanning $IP...${NC}"
+            scp -o StrictHostKeyChecking=no "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" ${UBUNTU_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_before_TM_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)" || true
+            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_TM_UBUNTU_${IP}.html ./report_before_TM_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
     done
     
     for IP in "${RHEL_MACHINES[@]}"; do
-        RHEL_VER=$(ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "source /etc/os-release && echo \${VERSION_ID%%.*}" 2>/dev/null)
-        RHEL_VER=${RHEL_VER:-9}
-        RHEL_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml"
+        RHEL_CIS_XCCDF=$(ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1" 2>/dev/null)
 
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS $CIS_LEVEL] Scanning $IP...${NC}"
-            # 🚨 SILENCERS REMOVED. ADDED -t FOR SUDO.
-            ssh -t -o StrictHostKeyChecking=no azureuser@${IP} "sudo oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_RHEL_${IP}.html $RHEL_CIS_XCCDF"
-            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_CIS_RHEL_${IP}.html ./report_before_CIS_RHEL_${IP}.html
+            echo -e "${GREEN}🔴 [RHEL - CIS $CIS_LEVEL] Scanning $IP...${NC}"
+            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_RHEL_${IP}.html $RHEL_CIS_XCCDF" || true
+            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_CIS_RHEL_${IP}.html ./report_before_CIS_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL $RHEL_VER - TM] Scanning $IP...${NC}"
-            scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" azureuser@${IP}:/tmp/
-            ssh -t -o StrictHostKeyChecking=no azureuser@${IP} "sudo oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_before_TM_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
-            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_TM_RHEL_${IP}.html ./report_before_TM_RHEL_${IP}.html
+            echo -e "${GREEN}🔴 [RHEL - TM] Scanning $IP...${NC}"
+            scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" azureuser@${IP}:/tmp/ > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_before_TM_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" || true
+            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_TM_RHEL_${IP}.html ./report_before_TM_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
     done
     
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - CIS] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_CIS_WIN_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_CIS_WIN_${IP}.json || true
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - TM] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_WIN_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_WIN_${IP}.json || true
         fi
     done
 }
@@ -400,13 +395,11 @@ run_remediation() {
             echo -e "${GREEN}▶️ [CIS] Auto-Remediating Ubuntu via Native OpenSCAP...${NC}"
             for IP in "${UBUNTU_MACHINES[@]}"; do
                 echo -e "   ${YELLOW}Fixing $IP...${NC}"
-                UBUNTU_VER=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
-                UBUNTU_VER=${UBUNTU_VER:-2404}
-                UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
+                UBUNTU_CIS_XCCDF=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1" 2>/dev/null)
 
-                ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --remediate --profile $UBUNTU_CIS_PROFILE --report ~/report_remediation_CIS_${IP}.html $UBUNTU_CIS_XCCDF"
-                scp ${UBUNTU_USER}@${IP}:~/report_remediation_CIS_${IP}.html ./report_remediation_CIS_${IP}.html > /dev/null
-                ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "rm -f ~/report_remediation_CIS_${IP}.html"
+                ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --remediate --profile $UBUNTU_CIS_PROFILE --report /tmp/report_remediation_CIS_${IP}.html $UBUNTU_CIS_XCCDF" || true
+                scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_remediation_CIS_${IP}.html ./report_remediation_CIS_${IP}.html > /dev/null 2>&1 || true
+                ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "rm -f /tmp/report_remediation_CIS_${IP}.html"
             done
         fi   
         if [ "$RUN_TM" == true ]; then
@@ -426,15 +419,12 @@ run_remediation() {
         EXTRA_VARS=""
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}▶️ [HARDENING - CIS] Applying Baseline as $AUDIT_USER...${NC}"
-            
-            # Dynamic Windows CIS Level Vars
             ansible-galaxy role install ansible-lockdown.windows_2022_cis > /dev/null 2>&1 || true
             if [ "$CIS_LEVEL" == "Level 1" ]; then
                 EXTRA_VARS="-e win2022cis_level_1=true -e win2022cis_level_2=false"
             elif [ "$CIS_LEVEL" == "Level 2" ]; then
                 EXTRA_VARS="-e win2022cis_level_1=true -e win2022cis_level_2=true"
             fi
-            
             ansible-playbook -i inventory.ini $WIN_CIS_PLAYBOOK --limit windows_nodes $EXTRA_VARS
         fi
         if [ "$RUN_TM" == true ]; then
@@ -448,37 +438,33 @@ run_phase_4() {
     echo -e "\n${BOLD}🔄 PHASE 4: Running Verification Scans...${NC}"
     
     for IP in "${UBUNTU_MACHINES[@]}"; do
-        UBUNTU_VER=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
-        UBUNTU_VER=${UBUNTU_VER:-2404}
-        UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
+        UBUNTU_CIS_XCCDF=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1" 2>/dev/null)
 
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - CIS $CIS_LEVEL] Verifying $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_after_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF" > /dev/null 2>&1 || true
+            echo -e "${GREEN}✅ [UBUNTU - CIS $CIS_LEVEL] Verifying $IP...${NC}"
+            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_after_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF" || true
             scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_CIS_UBUNTU_${IP}.html ./report_after_CIS_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - TM] Verifying $IP...${NC}"
+            echo -e "${GREEN}✅ [UBUNTU - TM] Verifying $IP...${NC}"
             scp -o StrictHostKeyChecking=no "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" ${UBUNTU_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_after_TM_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)" > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_after_TM_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)" || true
             scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_TM_UBUNTU_${IP}.html ./report_after_TM_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
     done
     
     for IP in "${RHEL_MACHINES[@]}"; do
-        RHEL_VER=$(ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "source /etc/os-release && echo \${VERSION_ID%%.*}" 2>/dev/null)
-        RHEL_VER=${RHEL_VER:-9}
-        RHEL_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-rhel${RHEL_VER}-ds.xml"
+        RHEL_CIS_XCCDF=$(ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1" 2>/dev/null)
 
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL $RHEL_VER - CIS $CIS_LEVEL] Verifying $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_RHEL_${IP}.html $RHEL_CIS_XCCDF" > /dev/null 2>&1 || true
+            echo -e "${GREEN}🔴 [RHEL - CIS $CIS_LEVEL] Verifying $IP...${NC}"
+            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_RHEL_${IP}.html $RHEL_CIS_XCCDF" || true
             scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_after_CIS_RHEL_${IP}.html ./report_after_CIS_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL $RHEL_VER - TM] Verifying $IP...${NC}"
+            echo -e "${GREEN}🔴 [RHEL - TM] Verifying $IP...${NC}"
             scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" azureuser@${IP}:/tmp/ > /dev/null 2>&1 || true
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_after_TM_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_after_TM_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" || true
             scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_after_TM_RHEL_${IP}.html ./report_after_TM_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
     done
@@ -486,11 +472,11 @@ run_phase_4() {
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - CIS] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_CIS_WIN_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_CIS_WIN_${IP}.json || true
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - TM] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_TM_WIN_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_TM_WIN_${IP}.json || true
         fi
     done
 }
