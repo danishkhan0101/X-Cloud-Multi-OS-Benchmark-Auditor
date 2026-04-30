@@ -237,7 +237,7 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
                 --resource-group "$RG_NAME" \
                 --name "$vm_name" \
                 --command-id RunPowerShellScript \
-                --scripts 'Enable-PSRemoting -SkipNetworkProfileCheck -Force; Set-Item WSMan:\localhost\Service\Auth\Basic -Value $true -Force; Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value $true -Force; New-ItemProperty -Name LocalAccountTokenFilterPolicy -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -PropertyType DWord -Value 1 -Force; Set-NetFirewallRule -DisplayGroup "Windows Remote Management" -Enabled True -Profile Any; Restart-Service WinRM' \
+                --scripts 'Enable-PSRemoting -SkipNetworkProfileCheck -Force; Set-Item WSMan:\localhost\Service\Auth\Basic -Value $true -Force; Set-Item WSMan:\localhost\Service\Auth\Negotiate -Value $true -Force; Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value $true -Force; New-ItemProperty -Name LocalAccountTokenFilterPolicy -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -PropertyType DWord -Value 1 -Force; Set-NetFirewallRule -DisplayGroup "Windows Remote Management" -Enabled True -Profile Any; Restart-Service WinRM' \
                 -o none
                 
             echo -e "${YELLOW}   ⏳ Waiting 30 seconds for WinRM to bind...${NC}"
@@ -387,11 +387,11 @@ run_phase_1() {
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - CIS] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user=".\${AUDIT_USER}" --password="${AUDIT_PASS}" --insecure --reporter cli json:heimdall_before_CIS_WIN_${IP}.json || true
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password='${AUDIT_PASS}' --insecure --reporter cli json:heimdall_before_CIS_WIN_${IP}.json || true
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - TM] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user=".\${AUDIT_USER}" --password="${AUDIT_PASS}" --insecure --reporter cli json:heimdall_before_TM_WIN_${IP}.json || true
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password='${AUDIT_PASS}' --insecure --reporter cli json:heimdall_before_CIS_WIN_${IP}.json || true
         fi
     done
 }
@@ -484,11 +484,10 @@ run_phase_4() {
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - CIS] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user=".\${AUDIT_USER}" --password="${AUDIT_PASS}" --insecure --reporter cli json:heimdall_after_CIS_WIN_${IP}.json || true
-        fi
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password='${AUDIT_PASS}' --insecure --reporter cli json:heimdall_before_CIS_WIN_${IP}.json || true        fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - TM] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user=".\${AUDIT_USER}" --password="${AUDIT_PASS}" --insecure --reporter cli json:heimdall_after_TM_WIN_${IP}.json || true
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password='${AUDIT_PASS}' --insecure --reporter cli json:heimdall_before_CIS_WIN_${IP}.json || true
         fi
     done
 }
