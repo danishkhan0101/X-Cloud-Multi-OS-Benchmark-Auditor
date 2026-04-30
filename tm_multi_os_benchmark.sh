@@ -387,10 +387,14 @@ run_phase_1() {
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - CIS $CIS_LEVEL] Scanning $IP...${NC}"
             
-            # Translate the string into an integer for InSpec Ruby metadata
+            # 1. Translate string to integer
             if [ "$CIS_LEVEL" == "Level 1" ]; then INSPEC_LVL="1"; else INSPEC_LVL="2"; fi
             
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input cis_level=$INSPEC_LVL --reporter cli json:heimdall_before_CIS_WIN_${IP}.json
+            # 2. 🚨 THE FIX: Create a YAML file to safely pass the input!
+            echo "cis_level: $INSPEC_LVL" > inspec_inputs.yml
+            
+            # 3. Execute using the perfectly working credential syntax + input-file
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input-file inspec_inputs.yml --reporter cli json:heimdall_before_CIS_WIN_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - TM] Scanning $IP...${NC}"
@@ -489,10 +493,12 @@ run_phase_4() {
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - CIS $CIS_LEVEL] Verifying $IP...${NC}"
             
-            # Translate the string into an integer for InSpec Ruby metadata
             if [ "$CIS_LEVEL" == "Level 1" ]; then INSPEC_LVL="1"; else INSPEC_LVL="2"; fi
             
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input cis_level=$INSPEC_LVL --reporter cli json:heimdall_after_CIS_WIN_${IP}.json
+            # 🚨 THE FIX: Create a YAML file to safely pass the input!
+            echo "cis_level: $INSPEC_LVL" > inspec_inputs.yml
+            
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input-file inspec_inputs.yml --reporter cli json:heimdall_after_CIS_WIN_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - TM] Verifying $IP...${NC}"
