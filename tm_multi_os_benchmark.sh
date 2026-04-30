@@ -237,7 +237,7 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
                 --resource-group "$RG_NAME" \
                 --name "$vm_name" \
                 --command-id RunPowerShellScript \
-                --scripts 'Enable-PSRemoting -SkipNetworkProfileCheck -Force; Set-Item WSMan:\localhost\Service\Auth\Basic -Value $true -Force; Set-Item WSMan:\localhost\Service\Auth\Negotiate -Value $true -Force; Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value $true -Force; New-ItemProperty -Name LocalAccountTokenFilterPolicy -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -PropertyType DWord -Value 1 -Force; Set-NetFirewallRule -DisplayGroup "Windows Remote Management" -Enabled True -Profile Any; Restart-Service WinRM' \
+                --scripts "Unlock-LocalUser -Name '${AUDIT_USER}' -ErrorAction SilentlyContinue; Enable-PSRemoting -SkipNetworkProfileCheck -Force; Set-Item WSMan:\localhost\Service\Auth\Basic -Value \$true -Force; Set-Item WSMan:\localhost\Service\Auth\Negotiate -Value \$true -Force; Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value \$true -Force; New-ItemProperty -Name LocalAccountTokenFilterPolicy -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -PropertyType DWord -Value 1 -Force; Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' -Enabled True -Profile Any; Restart-Service WinRM" \
                 -o none
                 
             echo -e "${YELLOW}   ⏳ Waiting 30 seconds for WinRM to bind...${NC}"
