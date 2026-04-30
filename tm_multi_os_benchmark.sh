@@ -484,10 +484,10 @@ run_phase_4() {
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - CIS] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password='${AUDIT_PASS}' --insecure --reporter cli json:heimdall_before_CIS_WIN_${IP}.json || true        fi
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password='${AUDIT_PASS}' --insecure --reporter cli json:heimdall_after_CIS_WIN_${IP}.json || true        fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - TM] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password='${AUDIT_PASS}' --insecure --reporter cli json:heimdall_before_CIS_WIN_${IP}.json || true
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password='${AUDIT_PASS}' --insecure --reporter cli json:heimdall_after_CIS_WIN_${IP}.json || true
         fi
     done
 }
