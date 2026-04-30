@@ -295,7 +295,7 @@ if [ "$RUN_CIS" == true ]; then
     else
         # Level 2 Profiles
         UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level2_server"
-        RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_server_l2"
+        RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis"
     fi
 fi
 
@@ -309,11 +309,12 @@ if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
     for IP in "${UBUNTU_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP engine on Ubuntu Node: $IP...${NC}"
         
-        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
+        # 🚨 THE FIX: Added ssg-debderivatives back so the XML files actually exist!
+        ssh -t -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
             sudo systemctl stop unattended-upgrades.service 2>/dev/null
             sudo fuser -kk /var/lib/dpkg/lock-frontend 2>/dev/null
             sudo apt-get update -qq
-            sudo apt-get install -y openscap-scanner ssg-base ssg-ubuntu
+            sudo apt-get install -y openscap-scanner ssg-base ssg-debderivatives
         " 
         
         if ssh -n -o BatchMode=yes ${UBUNTU_USER}@${IP} "command -v oscap" > /dev/null 2>&1; then
@@ -331,7 +332,8 @@ if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
     echo -e "======================================================${NC}"
     for IP in "${RHEL_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP & SSG Baselines on RHEL Node: $IP...${NC}"
-        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no azureuser@${IP} "sudo dnf install -y openscap-scanner scap-security-guide" > /dev/null 2>&1
+        # 🚨 THE FIX: Removed > /dev/null and added -t so we can see the DNF error!
+        ssh -t -o BatchMode=yes -o StrictHostKeyChecking=no azureuser@${IP} "sudo dnf install -y openscap-scanner scap-security-guide"
     done
 fi
 
