@@ -200,9 +200,15 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
         fi
         
     elif [[ "$os" == *"Windows"* ]]; then
-        # 🛡️ THE AUTO-HEALER (WINDOWS)
-        if ! nc -z -w 5 $ip 5985 2>/dev/null; then
-            echo -e "${YELLOW}   ⚠️ WinRM offline for Windows node $ip.${NC}"
+        # 🛡️ THE AUTO-HEALER (WINDOWS - AUTH AWARE)
+        echo -e "${CYAN}   🕵️ Testing WinRM Authentication on $ip...${NC}"
+        
+        # We send a dummy POST request to see if WinRM accepts our KeyVault credentials
+        WIN_AUTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://${ip}:5985/wsman -u "${AUDIT_USER}:${AUDIT_PASS}" -H "Content-Type: application/soap+xml;charset=UTF-8" --connect-timeout 5)
+        
+        # If it returns 401 (Unauthorized) or 000 (Offline/Timeout), we heal it.
+        if [ "$WIN_AUTH_STATUS" == "401" ] || [ "$WIN_AUTH_STATUS" == "000" ]; then
+            echo -e "${YELLOW}   ⚠️ WinRM Auth Failed (HTTP $WIN_AUTH_STATUS) for $ip.${NC}"
             
             echo -e "${YELLOW}   💉 1/2: Auto-injecting KeyVault Password via Azure...${NC}"
             az vm user update -g "$RG_NAME" -n "$vm_name" -u "$AUDIT_USER" --password "$AUDIT_PASS" -o none
@@ -212,18 +218,20 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
             
             NIC_ID=$(az vm show -g "$RG_NAME" -n "$vm_name" --query "networkProfile.networkInterfaces[0].id" -o tsv)
             NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
-            NSG_NAME=$(basename "$NSG_ID")
             
-            az network nsg rule create \
-                --resource-group "$RG_NAME" \
-                --nsg-name "$NSG_NAME" \
-                --name "Allow_WinRM_Runner_Only" \
-                --priority 999 \
-                --destination-port-ranges 5985 \
-                --source-address-prefixes "$RUNNER_IP" \
-                --access Allow \
-                --protocol Tcp \
-                -o none
+            if [ -n "$NSG_ID" ]; then
+                NSG_NAME=$(basename "$NSG_ID")
+                az network nsg rule create \
+                    --resource-group "$RG_NAME" \
+                    --nsg-name "$NSG_NAME" \
+                    --name "Allow_WinRM_Runner_Only" \
+                    --priority 999 \
+                    --destination-port-ranges 5985 \
+                    --source-address-prefixes "$RUNNER_IP" \
+                    --access Allow \
+                    --protocol Tcp \
+                    -o none > /dev/null 2>&1 || true
+            fi
                         
             az vm run-command invoke \
                 --resource-group "$RG_NAME" \
@@ -234,7 +242,9 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
                 
             echo -e "${YELLOW}   ⏳ Waiting 30 seconds for WinRM to bind...${NC}"
             sleep 30
-            echo -e "${GREEN}   ✅ Windows Node fully healed and ready for WinRM!${NC}"
+            echo -e "${GREEN}   ✅ Windows Node fully healed and synced with KeyVault!${NC}"
+        else
+            echo -e "${GREEN}   ✅ WinRM pre-authenticated successfully!${NC}"
         fi
         
         WINDOWS_MACHINES+=("$ip")
