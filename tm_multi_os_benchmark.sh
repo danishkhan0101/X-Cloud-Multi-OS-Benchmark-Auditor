@@ -345,18 +345,18 @@ run_phase_1() {
     echo -e "\n${BOLD}🔍 PHASE 1: Running Initial Baselines...${NC}"
     
     for IP in "${UBUNTU_MACHINES[@]}"; do
-        # 🚨 THE FIX: Dynamically find the newest available XML file on the server
-        UBUNTU_CIS_XCCDF=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1" 2>/dev/null)
-
-        # 🚨 THE FIX: Ensure the file was actually found before scanning!
-        if [ -z "$UBUNTU_CIS_XCCDF" ]; then
-            echo -e "${RED}❌ ERROR: OpenSCAP XML Baseline not found on Ubuntu $IP. Skipping scan.${NC}"
-            continue
-        fi
-
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}📦 [UBUNTU - CIS $CIS_LEVEL] Scanning $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_before_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF" || true
+            # 🚨 THE FIX: The remote server finds the file and scans it in one continuous step.
+            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
+                XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1)
+                if [ -z \"\$XML_FILE\" ]; then
+                    echo '❌ ERROR: No Ubuntu SCAP XML found on server! Did ssg-debderivatives install?'
+                    exit 1
+                fi
+                echo \"   ↳ Using baseline: \$XML_FILE\"
+                sudo /usr/bin/oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_before_CIS_UBUNTU_${IP}.html \"\$XML_FILE\"
+            " || true
             scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_CIS_UBUNTU_${IP}.html ./report_before_CIS_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
@@ -368,11 +368,17 @@ run_phase_1() {
     done
     
     for IP in "${RHEL_MACHINES[@]}"; do
-        RHEL_CIS_XCCDF=$(ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1" 2>/dev/null)
-
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL - CIS $CIS_LEVEL] Scanning $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_RHEL_${IP}.html $RHEL_CIS_XCCDF" || true
+            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "
+                XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                if [ -z \"\$XML_FILE\" ]; then
+                    echo '❌ ERROR: No RHEL SCAP XML found on server!'
+                    exit 1
+                fi
+                echo \"   ↳ Using baseline: \$XML_FILE\"
+                sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_RHEL_${IP}.html \"\$XML_FILE\"
+            " || true
             scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_CIS_RHEL_${IP}.html ./report_before_CIS_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
@@ -403,9 +409,10 @@ run_remediation() {
             echo -e "${GREEN}▶️ [CIS] Auto-Remediating Ubuntu via Native OpenSCAP...${NC}"
             for IP in "${UBUNTU_MACHINES[@]}"; do
                 echo -e "   ${YELLOW}Fixing $IP...${NC}"
-                UBUNTU_CIS_XCCDF=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1" 2>/dev/null)
-
-                ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --remediate --profile $UBUNTU_CIS_PROFILE --report /tmp/report_remediation_CIS_${IP}.html $UBUNTU_CIS_XCCDF" || true
+                ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
+                    XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1)
+                    sudo /usr/bin/oscap xccdf eval --remediate --profile $UBUNTU_CIS_PROFILE --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\"
+                " || true
                 scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_remediation_CIS_${IP}.html ./report_remediation_CIS_${IP}.html > /dev/null 2>&1 || true
                 ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "rm -f /tmp/report_remediation_CIS_${IP}.html"
             done
@@ -446,17 +453,12 @@ run_phase_4() {
     echo -e "\n${BOLD}🔄 PHASE 4: Running Verification Scans...${NC}"
     
     for IP in "${UBUNTU_MACHINES[@]}"; do
-        UBUNTU_CIS_XCCDF=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1" 2>/dev/null)
-
-        # 🚨 THE FIX: Ensure the file was actually found before scanning!
-        if [ -z "$UBUNTU_CIS_XCCDF" ]; then
-            echo -e "${RED}❌ ERROR: OpenSCAP XML Baseline not found on Ubuntu $IP. Skipping scan.${NC}"
-            continue
-        fi
-
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}✅ [UBUNTU - CIS $CIS_LEVEL] Verifying $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_after_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF" || true
+            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
+                XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1)
+                sudo /usr/bin/oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_after_CIS_UBUNTU_${IP}.html \"\$XML_FILE\"
+            " || true
             scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_CIS_UBUNTU_${IP}.html ./report_after_CIS_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
@@ -468,11 +470,12 @@ run_phase_4() {
     done
     
     for IP in "${RHEL_MACHINES[@]}"; do
-        RHEL_CIS_XCCDF=$(ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1" 2>/dev/null)
-
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL - CIS $CIS_LEVEL] Verifying $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_RHEL_${IP}.html $RHEL_CIS_XCCDF" || true
+            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "
+                XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_RHEL_${IP}.html \"\$XML_FILE\"
+            " || true
             scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_after_CIS_RHEL_${IP}.html ./report_after_CIS_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
