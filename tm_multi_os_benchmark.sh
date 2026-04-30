@@ -313,7 +313,7 @@ if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
             sudo systemctl stop unattended-upgrades.service 2>/dev/null
             sudo fuser -kk /var/lib/dpkg/lock-frontend 2>/dev/null
             sudo apt-get update -qq
-            sudo apt-get install -y openscap-scanner ssg-base
+            sudo apt-get install -y openscap-scanner ssg-base ssg-ubuntu
         " 
         
         if ssh -n -o BatchMode=yes ${UBUNTU_USER}@${IP} "command -v oscap" > /dev/null 2>&1; then
@@ -345,6 +345,12 @@ run_phase_1() {
     for IP in "${UBUNTU_MACHINES[@]}"; do
         # 🚨 THE FIX: Dynamically find the newest available XML file on the server
         UBUNTU_CIS_XCCDF=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1" 2>/dev/null)
+
+        # 🚨 THE FIX: Ensure the file was actually found before scanning!
+        if [ -z "$UBUNTU_CIS_XCCDF" ]; then
+            echo -e "${RED}❌ ERROR: OpenSCAP XML Baseline not found on Ubuntu $IP. Skipping scan.${NC}"
+            continue
+        fi
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}📦 [UBUNTU - CIS $CIS_LEVEL] Scanning $IP...${NC}"
@@ -440,6 +446,12 @@ run_phase_4() {
     for IP in "${UBUNTU_MACHINES[@]}"; do
         UBUNTU_CIS_XCCDF=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1" 2>/dev/null)
 
+        # 🚨 THE FIX: Ensure the file was actually found before scanning!
+        if [ -z "$UBUNTU_CIS_XCCDF" ]; then
+            echo -e "${RED}❌ ERROR: OpenSCAP XML Baseline not found on Ubuntu $IP. Skipping scan.${NC}"
+            continue
+        fi
+
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}✅ [UBUNTU - CIS $CIS_LEVEL] Verifying $IP...${NC}"
             ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_after_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF" || true
@@ -515,11 +527,6 @@ run_cleanup() {
                 sudo dnf remove -y openscap-scanner scap-security-guide -C --setopt=metadata_expire=never
             " > /dev/null 2>&1
             
-            # 2. Out-of-band assassination: Use Azure to delete the user
-            VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$IP'].virtualMachine.name" -o tsv)
-            if [ -n "$VM_NAME" ]; then
-                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "userdel -r azureuser" -o none > /dev/null 2>&1 || true
-            fi
         done
         echo -e "${GREEN}✅ RHEL targets have been scrubbed.${NC}"
     fi
