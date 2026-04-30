@@ -384,8 +384,17 @@ run_phase_1() {
     
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${CYAN}🔍 [WINDOWS - CIS] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --insecure --reporter cli json:heimdall_before_CIS_WIN_${IP}.json || true
+            echo -e "${CYAN}🔍 [WINDOWS - CIS $CIS_LEVEL] Scanning $IP...${NC}"
+            
+            # Translate the string into an integer for InSpec Ruby metadata
+            if [ "$CIS_LEVEL" == "Level 1" ]; then INSPEC_LVL="1"; else INSPEC_LVL="2"; fi
+            
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK \
+                -t winrm://${IP} \
+                --user="${AUDIT_USER}" \
+                --password="${AUDIT_PASS}" \
+                --input cis_level=$INSPEC_LVL \
+                --reporter cli json:heimdall_before_CIS_WIN_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - TM] Scanning $IP...${NC}"
@@ -481,8 +490,17 @@ run_phase_4() {
     
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${CYAN}✅ [WINDOWS - CIS] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --insecure --reporter cli json:heimdall_after_CIS_WIN_${IP}.json || true
+            echo -e "${CYAN}✅ [WINDOWS - CIS $CIS_LEVEL] Verifying $IP...${NC}"
+            
+            # Translate the string into an integer for InSpec Ruby metadata
+            if [ "$CIS_LEVEL" == "Level 1" ]; then INSPEC_LVL="1"; else INSPEC_LVL="2"; fi
+            
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK \
+                -t winrm://${IP} \
+                --user="${AUDIT_USER}" \
+                --password="${AUDIT_PASS}" \
+                --input cis_level=$INSPEC_LVL \
+                --reporter cli json:heimdall_after_CIS_WIN_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - TM] Verifying $IP...${NC}"
