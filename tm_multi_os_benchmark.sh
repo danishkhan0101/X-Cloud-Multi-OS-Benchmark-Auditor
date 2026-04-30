@@ -495,70 +495,72 @@ run_phase_4() {
 
 
 run_cleanup() {
-    echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP (REMOVING TOOLS & KEYS)${NC}"
+    echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP (THE GHOST METHOD)${NC}"
     
     # --- Clean Ubuntu ---
     if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
         for IP in "${UBUNTU_MACHINES[@]}"; do
-            echo -e "   ${YELLOW}Removing tools & SSH key from Ubuntu: $IP...${NC}"
+            echo -e "   ${YELLOW}Removing tools & nuking user from Ubuntu: $IP...${NC}"
+            
+            # 1. Uninstall tools normally over SSH
             ssh -n -o BatchMode=yes ${UBUNTU_USER}@${IP} "
                 sudo apt-get purge -y openscap-scanner ssg-base && \
-                sudo apt-get autoremove -y && \
-                sed -i '/Fleet-Commander-Key/d' ~/.ssh/authorized_keys
+                sudo apt-get autoremove -y
             " > /dev/null 2>&1
+            
+            # 2. Out-of-band assassination: Use Azure to delete the user we just logged out of
+            VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$IP'].virtualMachine.name" -o tsv)
+            if [ -n "$VM_NAME" ]; then
+                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "userdel -r ${UBUNTU_USER}" -o none > /dev/null 2>&1 || true
+            fi
         done
-        echo -e "${GREEN}✅ Ubuntu targets have been cleaned.${NC}"
+        echo -e "${GREEN}✅ Ubuntu targets have been scrubbed.${NC}"
     fi
 
     # --- Clean RHEL ---
     if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
         for IP in "${RHEL_MACHINES[@]}"; do
-            echo -e "   ${YELLOW}Removing tools & SSH key from RHEL: $IP...${NC}"
-            # ⚡ Optimized with -C to bypass the slow RHUI internet check
+            echo -e "   ${YELLOW}Removing tools & nuking user from RHEL: $IP...${NC}"
+            
+            # 1. Uninstall tools normally over SSH
             ssh -n -o BatchMode=yes azureuser@${IP} "
-                sudo dnf remove -y openscap-scanner scap-security-guide -C --setopt=metadata_expire=never && \
-                sed -i '/Fleet-Commander-Key/d' ~/.ssh/authorized_keys
+                sudo dnf remove -y openscap-scanner scap-security-guide -C --setopt=metadata_expire=never
             " > /dev/null 2>&1
+            
+            # 2. Out-of-band assassination: Use Azure to delete the user
+            VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$IP'].virtualMachine.name" -o tsv)
+            if [ -n "$VM_NAME" ]; then
+                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "userdel -r azureuser" -o none > /dev/null 2>&1 || true
+            fi
         done
-        echo -e "${GREEN}✅ RHEL targets have been cleaned.${NC}"
+        echo -e "${GREEN}✅ RHEL targets have been scrubbed.${NC}"
     fi
 
     # --- Clean Windows ---
     if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
         for IP in "${WINDOWS_MACHINES[@]}"; do
-            echo -e "   ${CYAN}🧹 Reversing security changes on Windows: $IP...${NC}"
+            echo -e "   ${CYAN}🧹 Reversing security changes & nuking user on Windows: $IP...${NC}"
             
-            # 1. Reverse lookup: Find the Azure VM Name associated with this IP
             VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$IP'].virtualMachine.name" -o tsv)
             
             if [ -n "$VM_NAME" ]; then
-                # 2. Dynamically find the NSG attached to this VM
                 NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv)
                 NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
                 
-                # 3. Delete the custom WinRM firewall rule from Azure
                 if [ -n "$NSG_ID" ]; then
                     NSG_NAME=$(basename "$NSG_ID")
                     echo -e "      🔒 Removing DevSecOps WinRM Firewall Rule from NSG..."
-                    az network nsg rule delete \
-                        --resource-group "$RG_NAME" \
-                        --nsg-name "$NSG_NAME" \
-                        --name "Allow_WinRM_Runner_Only" \
-                        -o none > /dev/null 2>&1 || true
+                    az network nsg rule delete -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_WinRM_Runner_Only" -o none > /dev/null 2>&1 || true
                 fi
 
-                # 4. Disable WinRM internally via Azure Run Command
-                echo -e "      🔌 Disabling WinRM service inside the VM..."
-                az vm run-command invoke \
-                    --resource-group "$RG_NAME" \
-                    --name "$VM_NAME" \
-                    --command-id RunPowerShellScript \
-                    --scripts '
-                        Stop-Service WinRM -WarningAction SilentlyContinue; 
-                        Set-Service WinRM -StartupType Disabled; 
-                        Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "LocalAccountTokenFilterPolicy" -Force -ErrorAction SilentlyContinue;
-                        Disable-NetFirewallRule -DisplayGroup "Windows Remote Management" -ErrorAction SilentlyContinue
-                    ' -o none > /dev/null 2>&1 || true
+                echo -e "      🔌 Disabling WinRM & Deleting TM_Admin..."
+                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunPowerShellScript --scripts "
+                    Stop-Service WinRM -WarningAction SilentlyContinue; 
+                    Set-Service WinRM -StartupType Disabled; 
+                    Remove-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'LocalAccountTokenFilterPolicy' -Force -ErrorAction SilentlyContinue;
+                    Disable-NetFirewallRule -DisplayGroup 'Windows Remote Management' -ErrorAction SilentlyContinue;
+                    Remove-LocalUser -Name '$AUDIT_USER' -ErrorAction SilentlyContinue
+                " -o none > /dev/null 2>&1 || true
             else
                 echo -e "      ${RED}⚠️ Could not resolve VM name for IP $IP. Skipping.${NC}"
             fi
