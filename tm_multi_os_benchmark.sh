@@ -347,16 +347,8 @@ run_phase_1() {
     for IP in "${UBUNTU_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}📦 [UBUNTU - CIS $CIS_LEVEL] Scanning $IP...${NC}"
-            # 🚨 THE FIX: The remote server finds the file and scans it in one continuous step.
-            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
-                XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1)
-                if [ -z \"\$XML_FILE\" ]; then
-                    echo '❌ ERROR: No Ubuntu SCAP XML found on server! Did ssg-debderivatives install?'
-                    exit 1
-                fi
-                echo \"   ↳ Using baseline: \$XML_FILE\"
-                sudo /usr/bin/oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_before_CIS_UBUNTU_${IP}.html \"\$XML_FILE\"
-            " || true
+            # 🚨 THE FIX: A single, continuous remote command with a built-in safety net
+            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1); if [ -z \"\$TARGET_XML\" ]; then echo '❌ ERROR: SCAP XML missing! ssg-debderivatives failed to install.'; exit 1; fi; echo \"   ↳ Discovered Baseline: \$TARGET_XML\"; sudo /usr/bin/oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_before_CIS_UBUNTU_${IP}.html \"\$TARGET_XML\"" || true
             scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_CIS_UBUNTU_${IP}.html ./report_before_CIS_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
@@ -370,15 +362,8 @@ run_phase_1() {
     for IP in "${RHEL_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL - CIS $CIS_LEVEL] Scanning $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "
-                XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                if [ -z \"\$XML_FILE\" ]; then
-                    echo '❌ ERROR: No RHEL SCAP XML found on server!'
-                    exit 1
-                fi
-                echo \"   ↳ Using baseline: \$XML_FILE\"
-                sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_RHEL_${IP}.html \"\$XML_FILE\"
-            " || true
+            # 🚨 THE FIX: Same single-line remote command for RHEL
+            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); if [ -z \"\$TARGET_XML\" ]; then echo '❌ ERROR: SCAP XML missing! scap-security-guide failed to install.'; exit 1; fi; echo \"   ↳ Discovered Baseline: \$TARGET_XML\"; sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_RHEL_${IP}.html \"\$TARGET_XML\"" || true
             scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_CIS_RHEL_${IP}.html ./report_before_CIS_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
