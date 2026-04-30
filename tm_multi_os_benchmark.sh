@@ -206,14 +206,14 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
         # We send a dummy POST request to see if WinRM accepts our KeyVault credentials
         WIN_AUTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://${ip}:5985/wsman -u "${AUDIT_USER}:${AUDIT_PASS}" -H "Content-Type: application/soap+xml;charset=UTF-8" --connect-timeout 5)
         
-        # If it returns 401 (Unauthorized) or 000 (Offline/Timeout), we heal it.
-        if [ "$WIN_AUTH_STATUS" == "401" ] || [ "$WIN_AUTH_STATUS" == "000" ]; then
+        # 🚨 THE FIX: Added 403 to the catch list so the Healer actually triggers!
+        if [ "$WIN_AUTH_STATUS" == "401" ] || [ "$WIN_AUTH_STATUS" == "403" ] || [ "$WIN_AUTH_STATUS" == "000" ]; then
             echo -e "${YELLOW}   ⚠️ WinRM Auth Failed (HTTP $WIN_AUTH_STATUS) for $ip.${NC}"
             
             echo -e "${YELLOW}   💉 1/2: Auto-injecting KeyVault Password via Azure...${NC}"
             az vm user update -g "$RG_NAME" -n "$vm_name" -u "$AUDIT_USER" --password "$AUDIT_PASS" -o none
             
-            echo -e "${YELLOW}   🛠️ 2/2: Enabling WinRM and Securing the Firewall...${NC}"
+            echo -e "${YELLOW}   🛠️ 2/2: Bypassing CIS Policies & Enabling WinRM...${NC}"
             RUNNER_IP=$(curl -s https://api.ipify.org)
             
             NIC_ID=$(az vm show -g "$RG_NAME" -n "$vm_name" --query "networkProfile.networkInterfaces[0].id" -o tsv)
