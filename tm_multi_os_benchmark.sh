@@ -357,16 +357,39 @@ fi
 run_phase_1() {
     echo -e "\n${BOLD}🔍 PHASE 1: Running Initial Baselines...${NC}"
     
+    # --- UBUNTU SCANNING ---
     for IP in "${UBUNTU_MACHINES[@]}"; do
+        
+        # 1. Ask the server exactly what version it is (e.g., "24.04" becomes "2404")
+        RAW_VER=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
+        
+        # 2. Build the expected file path based on the true OS version
+        EXPECTED_XML="/usr/share/xml/scap/ssg/content/ssg-ubuntu${RAW_VER}-ds.xml"
+        
+        # 3. THE SMART CHECK: Does this file actually exist on the target server?
+        FILE_EXISTS=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "[ -f $EXPECTED_XML ] && echo 'YES' || echo 'NO'" 2>/dev/null)
+        
+        if [ "$FILE_EXISTS" == "YES" ]; then
+            UBUNTU_VER="$RAW_VER"
+            UBUNTU_CIS_XCCDF="$EXPECTED_XML"
+        else
+            # 🚨 Fallback mechanism for brand new OS versions (like 24.04)
+            UBUNTU_VER="${RAW_VER} (Using 2204 Fallback)"
+            UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu2204-ds.xml"
+        fi
+
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}📦 [UBUNTU - CIS $CIS_LEVEL] Scanning $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1); if [ -z \"\$TARGET_XML\" ]; then echo '❌ ERROR: SCAP XML missing! ssg-debderivatives failed to install.'; exit 1; fi; echo \"   ↳ Discovered Baseline: \$TARGET_XML\"; sudo /usr/bin/oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_before_CIS_UBUNTU_${IP}.html \"\$TARGET_XML\"" || true
+            echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - CIS $CIS_LEVEL] Scanning $IP...${NC}"
+            echo -e "   ${YELLOW}↳ Target XML: $UBUNTU_CIS_XCCDF${NC}"
+            
+            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_before_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF"
             scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_CIS_UBUNTU_${IP}.html ./report_before_CIS_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
+        
         if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}📦 [UBUNTU - TM] Scanning $IP...${NC}"
+            echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - TM] Scanning $IP...${NC}"
             scp -o StrictHostKeyChecking=no "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" ${UBUNTU_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_before_TM_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)" || true
+            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_before_TM_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
             scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_TM_UBUNTU_${IP}.html ./report_before_TM_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
     done
