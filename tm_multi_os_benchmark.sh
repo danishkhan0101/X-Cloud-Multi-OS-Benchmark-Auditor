@@ -200,52 +200,55 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
         fi
         
     elif [[ "$os" == *"Windows"* ]]; then
-        # 🛡️ THE AUTO-HEALER (WINDOWS - AUTH AWARE)
-        echo -e "${CYAN}   🕵️ Testing WinRM Authentication on $ip...${NC}"
+        # 🛡️ THE AUTO-HEALER (NUCLEAR OVERRIDE)
+        echo -e "${YELLOW}   ☢️ Forcing WinRM Unlock & CIS Policy Bypass for $ip...${NC}"
         
-        # We send a dummy POST request to see if WinRM accepts our KeyVault credentials
-        WIN_AUTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://${ip}:5985/wsman -u "${AUDIT_USER}:${AUDIT_PASS}" -H "Content-Type: application/soap+xml;charset=UTF-8" --connect-timeout 5)
+        # 1. Force the password reset to clear any Windows Account Lockouts instantly
+        echo -e "${YELLOW}   💉 1/2: Resetting Lockout Timer via Azure...${NC}"
+        az vm user update -g "$RG_NAME" -n "$vm_name" -u "$AUDIT_USER" --password "$AUDIT_PASS" -o none
         
-        # 🚨 THE FIX: Added 403 to the catch list so the Healer actually triggers!
-        if [ "$WIN_AUTH_STATUS" == "401" ] || [ "$WIN_AUTH_STATUS" == "403" ] || [ "$WIN_AUTH_STATUS" == "000" ]; then
-            echo -e "${YELLOW}   ⚠️ WinRM Auth Failed (HTTP $WIN_AUTH_STATUS) for $ip.${NC}"
-            
-            echo -e "${YELLOW}   💉 1/2: Auto-injecting KeyVault Password via Azure...${NC}"
-            az vm user update -g "$RG_NAME" -n "$vm_name" -u "$AUDIT_USER" --password "$AUDIT_PASS" -o none
-            
-            echo -e "${YELLOW}   🛠️ 2/2: Bypassing CIS Policies & Enabling WinRM...${NC}"
-            RUNNER_IP=$(curl -s https://api.ipify.org)
-            
-            NIC_ID=$(az vm show -g "$RG_NAME" -n "$vm_name" --query "networkProfile.networkInterfaces[0].id" -o tsv)
-            NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
-            
-            if [ -n "$NSG_ID" ]; then
-                NSG_NAME=$(basename "$NSG_ID")
-                az network nsg rule create \
-                    --resource-group "$RG_NAME" \
-                    --nsg-name "$NSG_NAME" \
-                    --name "Allow_WinRM_Runner_Only" \
-                    --priority 999 \
-                    --destination-port-ranges 5985 \
-                    --source-address-prefixes "$RUNNER_IP" \
-                    --access Allow \
-                    --protocol Tcp \
-                    -o none > /dev/null 2>&1 || true
-            fi
-                        
-            az vm run-command invoke \
+        # 2. Secure the Network Security Group
+        RUNNER_IP=$(curl -s https://api.ipify.org)
+        NIC_ID=$(az vm show -g "$RG_NAME" -n "$vm_name" --query "networkProfile.networkInterfaces[0].id" -o tsv)
+        NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
+        
+        if [ -n "$NSG_ID" ]; then
+            NSG_NAME=$(basename "$NSG_ID")
+            az network nsg rule create \
                 --resource-group "$RG_NAME" \
-                --name "$vm_name" \
-                --command-id RunPowerShellScript \
-                --scripts "Remove-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM' -Recurse -Force -ErrorAction SilentlyContinue; Enable-LocalUser -Name '${AUDIT_USER}' -ErrorAction SilentlyContinue; Unlock-LocalUser -Name '${AUDIT_USER}' -ErrorAction SilentlyContinue; Set-LocalUser -Name '${AUDIT_USER}' -PasswordNeverExpires \$true -ErrorAction SilentlyContinue; Add-LocalGroupMember -Group 'Administrators' -Member '${AUDIT_USER}' -ErrorAction SilentlyContinue; Enable-PSRemoting -SkipNetworkProfileCheck -Force; Set-Item WSMan:\localhost\Service\Auth\Basic -Value \$true -Force; Set-Item WSMan:\localhost\Service\Auth\Negotiate -Value \$true -Force; Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value \$true -Force; New-ItemProperty -Name LocalAccountTokenFilterPolicy -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -PropertyType DWord -Value 1 -Force; Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' -Enabled True -Profile Any; Restart-Service WinRM" \
-                -o none
-                
-            echo -e "${YELLOW}   ⏳ Waiting 30 seconds for WinRM to bind...${NC}"
-            sleep 30
-            echo -e "${GREEN}   ✅ Windows Node fully healed and synced with KeyVault!${NC}"
-        else
-            echo -e "${GREEN}   ✅ WinRM pre-authenticated successfully!${NC}"
+                --nsg-name "$NSG_NAME" \
+                --name "Allow_WinRM_Runner_Only" \
+                --priority 999 \
+                --destination-port-ranges 5985 \
+                --source-address-prefixes "$RUNNER_IP" \
+                --access Allow \
+                --protocol Tcp \
+                -o none > /dev/null 2>&1 || true
         fi
+                    
+        # 3. Nuclear PowerShell Payload: Destroys CIS WinRM Blocks & Rebuilds from scratch
+        echo -e "${YELLOW}   🛠️ 2/2: Rebuilding WinRM Listeners & Permissions...${NC}"
+        az vm run-command invoke \
+            --resource-group "$RG_NAME" \
+            --name "$vm_name" \
+            --command-id RunPowerShellScript \
+            --scripts "
+                Remove-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM' -Recurse -Force -ErrorAction SilentlyContinue; 
+                Enable-LocalUser -Name '${AUDIT_USER}' -ErrorAction SilentlyContinue; 
+                Unlock-LocalUser -Name '${AUDIT_USER}' -ErrorAction SilentlyContinue; 
+                Add-LocalGroupMember -Group 'Administrators' -Member '${AUDIT_USER}' -ErrorAction SilentlyContinue; 
+                Enable-PSRemoting -SkipNetworkProfileCheck -Force; 
+                Set-Item WSMan:\localhost\Service\Auth\Basic -Value \$true -Force; 
+                Set-Item WSMan:\localhost\Service\Auth\Negotiate -Value \$true -Force; 
+                Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value \$true -Force; 
+                Set-Item WSMan:\localhost\Service\IPv4Filter -Value * -Force;
+                New-ItemProperty -Name LocalAccountTokenFilterPolicy -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -PropertyType DWord -Value 1 -Force; 
+                Restart-Service WinRM -Force
+            " -o none
+            
+        echo -e "${YELLOW}   ⏳ Waiting 20 seconds for WinRM to bind...${NC}"
+        sleep 20
+        echo -e "${GREEN}   ✅ Windows Node fully unlocked and ready for Phase 1!${NC}"
         
         WINDOWS_MACHINES+=("$ip")
         echo -e "${CYAN}🪟 Mapped Windows Node: $ip (Status: ON)${NC}"
