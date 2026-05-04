@@ -360,23 +360,12 @@ run_phase_1() {
     # --- UBUNTU SCANNING ---
     for IP in "${UBUNTU_MACHINES[@]}"; do
         
-        # 1. Ask the server exactly what version it is (e.g., "24.04" becomes "2404")
+        # 1. Ask the server exactly what version it is (e.g., "24.04" becomes "2404", "22.04" becomes "2204")
         RAW_VER=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
+        UBUNTU_VER=${RAW_VER:-2404}
         
-        # 2. Build the expected file path based on the true OS version
-        EXPECTED_XML="/usr/share/xml/scap/ssg/content/ssg-ubuntu${RAW_VER}-ds.xml"
-        
-        # 3. THE SMART CHECK: Does this file actually exist on the target server?
-        FILE_EXISTS=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "[ -f $EXPECTED_XML ] && echo 'YES' || echo 'NO'" 2>/dev/null)
-        
-        if [ "$FILE_EXISTS" == "YES" ]; then
-            UBUNTU_VER="$RAW_VER"
-            UBUNTU_CIS_XCCDF="$EXPECTED_XML"
-        else
-            # 🚨 Fallback mechanism for brand new OS versions (like 24.04)
-            UBUNTU_VER="${RAW_VER} (Using 2204 Fallback)"
-            UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu2204-ds.xml"
-        fi
+        # 2. STRICT MAPPING: Build the file path based strictly on the true OS version
+        UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - CIS $CIS_LEVEL] Scanning $IP...${NC}"
