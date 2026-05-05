@@ -372,13 +372,16 @@ run_phase_1() {
         FILE_EXISTS=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "[ -f $UBUNTU_CIS_XCCDF ] && echo 'YES' || echo 'NO'" 2>/dev/null)
         
         if [ "$FILE_EXISTS" == "NO" ]; then
-            echo -e "${YELLOW}   ⚠️ Missing official baseline for Ubuntu ${UBUNTU_VER}. Bypassing Apt and injecting via Python...${NC}"
+            echo -e "${YELLOW}   ⚠️ Missing official baseline for Ubuntu ${UBUNTU_VER}. Auto-injecting v0.1.80 via Python...${NC}"
+            # Using -t -t to suppress the pseudo-terminal warning!
             ssh -t -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
                 cd /tmp && \
-                wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.73/scap-security-guide-0.1.73.zip && \
-                python3 -m zipfile -e scap-security-guide-0.1.73.zip . && \
-                sudo cp scap-security-guide-0.1.73/ssg-ubuntu${UBUNTU_VER}-ds.xml /usr/share/xml/scap/ssg/content/ && \
-                rm -rf scap-security-guide-0.1.73*
+                wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.80/scap-security-guide-0.1.80.zip && \
+                python3 -m zipfile -e scap-security-guide-0.1.80.zip . && \
+                sudo mkdir -p /usr/share/xml/scap/ssg/content/ && \
+                sudo cp scap-security-guide-0.1.80/ssg-ubuntu${UBUNTU_VER}-ds.xml /usr/share/xml/scap/ssg/content/ 2>/dev/null || \
+                sudo cp scap-security-guide-0.1.80/ssg-ubuntu2204-ds.xml /usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml && \
+                rm -rf scap-security-guide-0.1.80*
             " > /dev/null 2>&1 || true
             echo -e "${GREEN}   ✅ Baseline injected successfully!${NC}"
         fi
@@ -497,14 +500,16 @@ run_phase_4() {
         FILE_EXISTS=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "[ -f $UBUNTU_CIS_XCCDF ] && echo 'YES' || echo 'NO'" 2>/dev/null)
         
         if [ "$FILE_EXISTS" == "NO" ]; then
-            echo -e "${YELLOW}   ⚠️ Missing official baseline for Ubuntu ${UBUNTU_VER}. Bypassing Apt and injecting via Python...${NC}"
+            echo -e "${YELLOW}   ⚠️ Missing official baseline for Ubuntu ${UBUNTU_VER}. Auto-injecting v0.1.80 via Python...${NC}"
             # Using -t -t to suppress the pseudo-terminal warning!
             ssh -t -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
                 cd /tmp && \
-                wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.73/scap-security-guide-0.1.73.zip && \
-                python3 -m zipfile -e scap-security-guide-0.1.73.zip . && \
-                sudo cp scap-security-guide-0.1.73/ssg-ubuntu${UBUNTU_VER}-ds.xml /usr/share/xml/scap/ssg/content/ && \
-                rm -rf scap-security-guide-0.1.73*
+                wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.80/scap-security-guide-0.1.80.zip && \
+                python3 -m zipfile -e scap-security-guide-0.1.80.zip . && \
+                sudo mkdir -p /usr/share/xml/scap/ssg/content/ && \
+                sudo cp scap-security-guide-0.1.80/ssg-ubuntu${UBUNTU_VER}-ds.xml /usr/share/xml/scap/ssg/content/ 2>/dev/null || \
+                sudo cp scap-security-guide-0.1.80/ssg-ubuntu2204-ds.xml /usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml && \
+                rm -rf scap-security-guide-0.1.80*
             " > /dev/null 2>&1 || true
             echo -e "${GREEN}   ✅ Baseline injected successfully!${NC}"
         fi
