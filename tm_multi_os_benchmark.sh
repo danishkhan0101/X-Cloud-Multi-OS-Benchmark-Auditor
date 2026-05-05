@@ -371,13 +371,11 @@ run_phase_1() {
         FILE_EXISTS=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "[ -f $UBUNTU_CIS_XCCDF ] && echo 'YES' || echo 'NO'" 2>/dev/null)
         
         if [ "$FILE_EXISTS" == "NO" ]; then
-            echo -e "${YELLOW}   ⚠️ Missing official baseline for Ubuntu ${UBUNTU_VER}. Auto-injecting from GitHub...${NC}"
-            # Using -t -t to suppress the pseudo-terminal warning!
+            echo -e "${YELLOW}   ⚠️ Missing official baseline for Ubuntu ${UBUNTU_VER}. Bypassing Apt and injecting via Python...${NC}"
             ssh -t -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
                 cd /tmp && \
                 wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.73/scap-security-guide-0.1.73.zip && \
-                sudo apt-get update -qq && sudo apt-get install unzip -qq -y && \
-                unzip -q scap-security-guide-0.1.73.zip && \
+                python3 -m zipfile -e scap-security-guide-0.1.73.zip . && \
                 sudo cp scap-security-guide-0.1.73/ssg-ubuntu${UBUNTU_VER}-ds.xml /usr/share/xml/scap/ssg/content/ && \
                 rm -rf scap-security-guide-0.1.73*
             " > /dev/null 2>&1 || true
