@@ -161,27 +161,38 @@ jobs:
         run: |
           echo "TIMESTAMP=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
 
-      # 2. 🧹 Sanitize the CIS Level to remove spaces (e.g., "Level 1" becomes "Level-1")
-      - name: 🧹 Sanitize Level for Git Tag
+      # 2. 🧹 Configure Smart Release Variables
+      - name: 🧹 Configure Release Variables
         if: steps.check_reports.outputs.has_reports == 'true'
         run: |
           RAW_LEVEL="${{ github.event.inputs.cis_level }}"
-          echo "SAFE_LEVEL=${RAW_LEVEL// /-}" >> $GITHUB_ENV
+          
+          # 🚨 THE FIX: If TM is selected, hide CIS Level and rename the release!
+          if [ "${{ env.PROFILE }}" == "tm" ]; then
+            echo "RELEASE_TAG=audit-${{ env.TIMESTAMP }}-TM" >> $GITHUB_ENV
+            echo "RELEASE_NAME=Fleet Audit Report - TM Baseline" >> $GITHUB_ENV
+            echo "CIS_DISPLAY=" >> $GITHUB_ENV
+          else
+            echo "RELEASE_TAG=audit-${{ env.TIMESTAMP }}-${RAW_LEVEL// /-}" >> $GITHUB_ENV
+            echo "RELEASE_NAME=Fleet Audit Report - ${RAW_LEVEL}" >> $GITHUB_ENV
+            echo "CIS_DISPLAY=**CIS Level:** \`${{ env.CIS_LEVEL }}\`" >> $GITHUB_ENV
+          fi
 
-      # 3. 📢 Publish using the dynamic timestamp and safe tag
+      # 3. 📢 Publish to GitHub Releases
       - name: 📢 Publish to GitHub Releases
         if: steps.check_reports.outputs.has_reports == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: audit-${{ env.TIMESTAMP }}-${{ env.SAFE_LEVEL }}
-          name: Fleet Audit Report - ${{ github.event.inputs.cis_level }}
+          # Injecting the smart variables we just built!
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_NAME }}
           body: |
             ## 📊 DevSecOps Audit Execution
             **Ticket / Change Request:** `${{ github.event.inputs.ticket_id }}`
             **Target Environment:** `${{ env.TARGET_ENV }}`
             **Compliance Profile:** `${{ env.PROFILE }}`
             **Execution Mode:** `${{ env.MODE }}`
-            **CIS Level:** `${{ env.CIS_LEVEL }}`
+            ${{ env.CIS_DISPLAY }}
             
             > *This release contains the immutable compliance artifacts for the above authorization.*
           files: |
