@@ -546,7 +546,7 @@ run_phase_4() {
             echo -e "${GREEN}✅ [WINDOWS - CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
             
             # Inject global var into YAML
-            echo "cis_level: $WIN_INSPEC_LVL" > inspec_inputs.yml
+            echo "level_1_or_2: $WIN_INSPEC_LVL" > inspec_inputs.yml
             
             CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input-file inspec_inputs.yml --reporter cli json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
         fi
