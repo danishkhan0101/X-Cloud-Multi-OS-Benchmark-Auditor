@@ -173,15 +173,17 @@ jobs:
         if: steps.check_reports.outputs.has_reports == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          # 🚨 FIXED: Now uses the dynamic clock AND the space-free level!
           tag_name: audit-${{ env.TIMESTAMP }}-${{ env.SAFE_LEVEL }}
           name: Fleet Audit Report - ${{ github.event.inputs.cis_level }}
           body: |
             ## 📊 DevSecOps Audit Execution
+            **Ticket / Change Request:** `${{ github.event.inputs.ticket_id }}`
             **Target Environment:** `${{ env.TARGET_ENV }}`
             **Compliance Profile:** `${{ env.PROFILE }}`
             **Execution Mode:** `${{ env.MODE }}`
             **CIS Level:** `${{ env.CIS_LEVEL }}`
+            
+            > *This release contains the immutable compliance artifacts for the above authorization.*
           files: |
             **/*.html
             **/*.json
