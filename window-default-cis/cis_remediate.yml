@@ -2,16 +2,22 @@
 - name: Remediate Windows Server 2022
   hosts: all
   vars:
-    # Tell the role to target Level 1 specifically
-    win2022cis_level_1: true
-    win2022cis_level_2: false
+    # 🚨 Notice we removed the Level 1/Level 2 variables!
+    # They are now injected dynamically by your Bash script.
     
-    # These roles often include 'Section' toggles too
-    # Section 1: Account Policy, Section 2: Local Policy, etc.
+    # You can keep these section toggles enabled if you want the 
+    # role to apply all these specific control sections.
     win2022cis_section1: true
     win2022cis_section2: true
-  
+    win2022cis_section3: true
+    win2022cis_section4: true
+    win2022cis_section5: true
+    win2022cis_section6: true
+    win2022cis_section7: true
+    win2022cis_section8: true
+    win2022cis_section9: true
+
   tasks:
-    - name: Apply Windows Server 2022 CIS Level 1
+    - name: Apply Windows Server 2022 CIS Baseline
       include_role:
         name: ansible-lockdown.windows_2022_cis
