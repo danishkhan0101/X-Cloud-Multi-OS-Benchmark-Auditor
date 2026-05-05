@@ -360,17 +360,31 @@ run_phase_1() {
     # --- UBUNTU SCANNING ---
     for IP in "${UBUNTU_MACHINES[@]}"; do
         
-        # 1. Ask the server exactly what version it is (e.g., "24.04" becomes "2404", "22.04" becomes "2204")
+        # 1. Ask the server exactly what version it is
         RAW_VER=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
         UBUNTU_VER=${RAW_VER:-2404}
         
-        # 2. STRICT MAPPING: Build the file path based strictly on the true OS version
+        # 2. Build the strict file path
         UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
+
+        # 3. THE AUTO-INJECTOR: Check if the file exists. If not, fetch it from GitHub!
+        FILE_EXISTS=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "[ -f $UBUNTU_CIS_XCCDF ] && echo 'YES' || echo 'NO'" 2>/dev/null)
+        
+        if [ "$FILE_EXISTS" == "NO" ]; then
+            echo -e "${YELLOW}   ⚠️ Missing official baseline for Ubuntu ${UBUNTU_VER}. Auto-injecting from GitHub...${NC}"
+            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
+                cd /tmp && \
+                wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.73/scap-security-guide-0.1.73.zip && \
+                sudo apt-get update -qq && sudo apt-get install unzip -qq -y && \
+                unzip -q scap-security-guide-0.1.73.zip && \
+                sudo cp scap-security-guide-0.1.73/ssg-ubuntu${UBUNTU_VER}-ds.xml /usr/share/xml/scap/ssg/content/ && \
+                rm -rf scap-security-guide-0.1.73*
+            " > /dev/null 2>&1 || true
+            echo -e "${GREEN}   ✅ Baseline injected successfully!${NC}"
+        fi
 
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - CIS $CIS_LEVEL] Scanning $IP...${NC}"
-            echo -e "   ${YELLOW}↳ Target XML: $UBUNTU_CIS_XCCDF${NC}"
-            
             ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_before_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF"
             scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_CIS_UBUNTU_${IP}.html ./report_before_CIS_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
@@ -469,19 +483,42 @@ run_remediation() {
 run_phase_4() {
     echo -e "\n${BOLD}🔄 PHASE 4: Running Verification Scans...${NC}"
     
+    # --- UBUNTU VERIFICATION ---
     for IP in "${UBUNTU_MACHINES[@]}"; do
+        
+        # 1. Ask the server exactly what version it is
+        RAW_VER=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
+        UBUNTU_VER=${RAW_VER:-2404}
+        
+        # 2. Build the strict file path
+        UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
+
+        # 3. THE AUTO-INJECTOR: Check if the file exists. If not, fetch it from GitHub!
+        FILE_EXISTS=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "[ -f $UBUNTU_CIS_XCCDF ] && echo 'YES' || echo 'NO'" 2>/dev/null)
+        
+        if [ "$FILE_EXISTS" == "NO" ]; then
+            echo -e "${YELLOW}   ⚠️ Missing official baseline for Ubuntu ${UBUNTU_VER}. Auto-injecting from GitHub...${NC}"
+            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
+                cd /tmp && \
+                wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.73/scap-security-guide-0.1.73.zip && \
+                sudo apt-get update -qq && sudo apt-get install unzip -qq -y && \
+                unzip -q scap-security-guide-0.1.73.zip && \
+                sudo cp scap-security-guide-0.1.73/ssg-ubuntu${UBUNTU_VER}-ds.xml /usr/share/xml/scap/ssg/content/ && \
+                rm -rf scap-security-guide-0.1.73*
+            " > /dev/null 2>&1 || true
+            echo -e "${GREEN}   ✅ Baseline injected successfully!${NC}"
+        fi
+
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}✅ [UBUNTU - CIS $CIS_LEVEL] Verifying $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
-                XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1)
-                sudo /usr/bin/oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_after_CIS_UBUNTU_${IP}.html \"\$XML_FILE\"
-            " || true
+            echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - CIS $CIS_LEVEL] Verifying $IP...${NC}"
+            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_after_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF" > /dev/null 2>&1 || true
             scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_CIS_UBUNTU_${IP}.html ./report_after_CIS_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
+        
         if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}✅ [UBUNTU - TM] Verifying $IP...${NC}"
+            echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - TM] Verifying $IP...${NC}"
             scp -o StrictHostKeyChecking=no "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" ${UBUNTU_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-            ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_after_TM_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)" || true
+            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_after_TM_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)" > /dev/null 2>&1 || true
             scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_TM_UBUNTU_${IP}.html ./report_after_TM_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
     done
