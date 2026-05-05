@@ -155,18 +155,33 @@ jobs:
             echo "has_reports=false" >> $GITHUB_OUTPUT
           fi
 
+      # 1. 🕒 Generate a dynamic timestamp (Format: YYYY-MM-DD-HHMM)
+      - name: 🕒 Generate Dynamic Timestamp
+        if: steps.check_reports.outputs.has_reports == 'true'
+        run: |
+          echo "TIMESTAMP=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
+
+      # 2. 🧹 Sanitize the CIS Level to remove spaces (e.g., "Level 1" becomes "Level-1")
+      - name: 🧹 Sanitize Level for Git Tag
+        if: steps.check_reports.outputs.has_reports == 'true'
+        run: |
+          RAW_LEVEL="${{ github.event.inputs.cis_level }}"
+          echo "SAFE_LEVEL=${RAW_LEVEL// /-}" >> $GITHUB_ENV
+
+      # 3. 📢 Publish using the dynamic timestamp and safe tag
       - name: 📢 Publish to GitHub Releases
         if: steps.check_reports.outputs.has_reports == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: audit-2026-05-05-0457-${{ github.event.inputs.cis_level }}
+          # 🚨 FIXED: Now uses the dynamic clock AND the space-free level!
+          tag_name: audit-${{ env.TIMESTAMP }}-${{ env.SAFE_LEVEL }}
           name: Fleet Audit Report - ${{ github.event.inputs.cis_level }}
           body: |
             ## 📊 DevSecOps Audit Execution
             **Target Environment:** `${{ env.TARGET_ENV }}`
             **Compliance Profile:** `${{ env.PROFILE }}`
             **Execution Mode:** `${{ env.MODE }}`
-            **Execution Mode:** `${{ env.CIS_LEVEL }}`
+            **CIS Level:** `${{ env.CIS_LEVEL }}`
           files: |
             **/*.html
             **/*.json
