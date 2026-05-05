@@ -372,7 +372,8 @@ run_phase_1() {
         
         if [ "$FILE_EXISTS" == "NO" ]; then
             echo -e "${YELLOW}   ⚠️ Missing official baseline for Ubuntu ${UBUNTU_VER}. Auto-injecting from GitHub...${NC}"
-            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
+            # Using -t -t to suppress the pseudo-terminal warning!
+            ssh -t -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
                 cd /tmp && \
                 wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.73/scap-security-guide-0.1.73.zip && \
                 sudo apt-get update -qq && sudo apt-get install unzip -qq -y && \
