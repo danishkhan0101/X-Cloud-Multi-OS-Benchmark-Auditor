@@ -9,7 +9,7 @@ if [ -f ".env" ]; then
 fi
 
 # --- AZURE TARGET INFRASTRUCTURE ---
-RG_NAME="${AZURE_RG_NAME:-Packer_RG}"
+RG_NAME="${AZURE_RG_NAME:-TM_RG}"
 KV_NAME="${AZURE_KV_NAME:-TM-Vault-Danish}"
 SECRET_NAME="${AZURE_KV_SECRET:-AuditPassword}"
 
@@ -299,17 +299,26 @@ else
 fi
 
 # ======================================================
-# DYNAMIC OSCAP PROFILE ROUTER (Linux Level 1 vs 2)
+# 🧠 DYNAMIC GLOBAL PROFILE ROUTER
 # ======================================================
 if [ "$RUN_CIS" == true ]; then
     echo -e "${YELLOW}🛡️ CIS Level Selected: $CIS_LEVEL${NC}"
     if [ "$CIS_LEVEL" == "Level 1" ]; then
+        # Linux Level 1 Variables
         UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level1_server"
         RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_server_l1"
+        OS_LVL="1"
+        
+        # Windows Level 1 Variable
+        WIN_INSPEC_LVL="1"
     else
-        # Level 2 Profiles
+        # Linux Level 2 Variables
         UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level2_server"
         RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis"
+        OS_LVL="2"
+        
+        # Windows Level 2 Variable
+        WIN_INSPEC_LVL="2"
     fi
 fi
 
@@ -323,7 +332,6 @@ if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
     for IP in "${UBUNTU_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP engine on Ubuntu Node: $IP...${NC}"
         
-        # 🚨 THE FIX: The correct package names for Ubuntu 24.04 are ssg-debderived and ssg-debian
         ssh -t -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
             sudo systemctl stop unattended-upgrades.service 2>/dev/null
             sudo fuser -kk /var/lib/dpkg/lock-frontend 2>/dev/null
@@ -346,7 +354,6 @@ if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
     echo -e "======================================================${NC}"
     for IP in "${RHEL_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP & SSG Baselines on RHEL Node: $IP...${NC}"
-        # 🚨 THE FIX: Removed > /dev/null and added -t so we can see the DNF error!
         ssh -t -o BatchMode=yes -o StrictHostKeyChecking=no azureuser@${IP} "sudo dnf install -y openscap-scanner scap-security-guide"
     done
 fi
@@ -361,19 +368,14 @@ run_phase_1() {
     # --- UBUNTU SCANNING ---
     for IP in "${UBUNTU_MACHINES[@]}"; do
         
-        # 1. Ask the server exactly what version it is
         RAW_VER=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
         UBUNTU_VER=${RAW_VER:-2404}
-        
-        # 2. Build the strict file path
         UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
 
-        # 3. THE AUTO-INJECTOR: Check if the file exists. If not, fetch it from GitHub!
         FILE_EXISTS=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "[ -f $UBUNTU_CIS_XCCDF ] && echo 'YES' || echo 'NO'" 2>/dev/null)
         
         if [ "$FILE_EXISTS" == "NO" ]; then
             echo -e "${YELLOW}   ⚠️ Missing official baseline for Ubuntu ${UBUNTU_VER}. Auto-injecting v0.1.80 via Python...${NC}"
-            # Using -t -t to suppress the pseudo-terminal warning!
             ssh -t -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
                 cd /tmp && \
                 wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.80/scap-security-guide-0.1.80.zip && \
@@ -387,9 +389,9 @@ run_phase_1() {
         fi
 
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - CIS $CIS_LEVEL] Scanning $IP...${NC}"
-            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_before_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF"
-            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_CIS_UBUNTU_${IP}.html ./report_before_CIS_UBUNTU_${IP}.html > /dev/null 2>&1 || true
+            echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - CIS L${OS_LVL}] Scanning $IP...${NC}"
+            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF"
+            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html ./report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
         
         if [ "$RUN_TM" == true ]; then
@@ -400,11 +402,12 @@ run_phase_1() {
         fi
     done
     
+    # --- RHEL SCANNING ---
     for IP in "${RHEL_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL - CIS $CIS_LEVEL] Scanning $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); if [ -z \"\$TARGET_XML\" ]; then echo '❌ ERROR: SCAP XML missing! scap-security-guide failed to install.'; exit 1; fi; echo \"   ↳ Discovered Baseline: \$TARGET_XML\"; sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_RHEL_${IP}.html \"\$TARGET_XML\"" || true
-            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_CIS_RHEL_${IP}.html ./report_before_CIS_RHEL_${IP}.html > /dev/null 2>&1 || true
+            echo -e "${GREEN}🔴 [RHEL - CIS L${OS_LVL}] Scanning $IP...${NC}"
+            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); if [ -z \"\$TARGET_XML\" ]; then echo '❌ ERROR: SCAP XML missing! scap-security-guide failed to install.'; exit 1; fi; echo \"   ↳ Discovered Baseline: \$TARGET_XML\"; sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$TARGET_XML\"" || true
+            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_before_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}🔴 [RHEL - TM] Scanning $IP...${NC}"
@@ -417,16 +420,12 @@ run_phase_1() {
     # --- WINDOWS SCANNING ---
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${CYAN}🔍 [WINDOWS - CIS $CIS_LEVEL] Scanning $IP...${NC}"
+            echo -e "${GREEN}📦 [WINDOWS - CIS L${WIN_INSPEC_LVL}] Scanning $IP...${NC}"
             
-            # 1. Translate string to integer
-            if [ "$CIS_LEVEL" == "Level 1" ]; then INSPEC_LVL="1"; else INSPEC_LVL="2"; fi
+            # Inject global var into YAML for InSpec
+            echo "cis_level: $WIN_INSPEC_LVL" > inspec_inputs.yml
             
-            # 2. 🚨 THE FIX: Create a YAML file to safely pass the input!
-            echo "cis_level: $INSPEC_LVL" > inspec_inputs.yml
-            
-            # 3. Execute using the perfectly working credential syntax + input-file
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input-file inspec_inputs.yml --reporter cli json:heimdall_before_CIS_WIN_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input-file inspec_inputs.yml --reporter cli json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - TM] Scanning $IP...${NC}"
@@ -489,19 +488,14 @@ run_phase_4() {
     # --- UBUNTU VERIFICATION ---
     for IP in "${UBUNTU_MACHINES[@]}"; do
         
-        # 1. Ask the server exactly what version it is
         RAW_VER=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
         UBUNTU_VER=${RAW_VER:-2404}
-        
-        # 2. Build the strict file path
         UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
 
-        # 3. THE AUTO-INJECTOR: Check if the file exists. If not, fetch it from GitHub!
         FILE_EXISTS=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "[ -f $UBUNTU_CIS_XCCDF ] && echo 'YES' || echo 'NO'" 2>/dev/null)
         
         if [ "$FILE_EXISTS" == "NO" ]; then
             echo -e "${YELLOW}   ⚠️ Missing official baseline for Ubuntu ${UBUNTU_VER}. Auto-injecting v0.1.80 via Python...${NC}"
-            # Using -t -t to suppress the pseudo-terminal warning!
             ssh -t -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
                 cd /tmp && \
                 wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.80/scap-security-guide-0.1.80.zip && \
@@ -515,9 +509,9 @@ run_phase_4() {
         fi
 
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - CIS $CIS_LEVEL] Verifying $IP...${NC}"
-            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_after_CIS_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF" > /dev/null 2>&1 || true
-            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_CIS_UBUNTU_${IP}.html ./report_after_CIS_UBUNTU_${IP}.html > /dev/null 2>&1 || true
+            echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - CIS L${OS_LVL}] Verifying $IP...${NC}"
+            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF" > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html ./report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
         
         if [ "$RUN_TM" == true ]; then
@@ -528,14 +522,15 @@ run_phase_4() {
         fi
     done
     
+    # --- RHEL VERIFICATION ---
     for IP in "${RHEL_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL - CIS $CIS_LEVEL] Verifying $IP...${NC}"
+            echo -e "${GREEN}🔴 [RHEL - CIS L${OS_LVL}] Verifying $IP...${NC}"
             ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "
                 XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_RHEL_${IP}.html \"\$XML_FILE\"
+                sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$XML_FILE\"
             " || true
-            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_after_CIS_RHEL_${IP}.html ./report_after_CIS_RHEL_${IP}.html > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}🔴 [RHEL - TM] Verifying $IP...${NC}"
@@ -548,14 +543,12 @@ run_phase_4() {
     # --- WINDOWS VERIFICATION ---
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${CYAN}✅ [WINDOWS - CIS $CIS_LEVEL] Verifying $IP...${NC}"
+            echo -e "${GREEN}✅ [WINDOWS - CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
             
-            if [ "$CIS_LEVEL" == "Level 1" ]; then INSPEC_LVL="1"; else INSPEC_LVL="2"; fi
+            # Inject global var into YAML
+            echo "cis_level: $WIN_INSPEC_LVL" > inspec_inputs.yml
             
-            # 🚨 THE FIX: Create a YAML file to safely pass the input!
-            echo "cis_level: $INSPEC_LVL" > inspec_inputs.yml
-            
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input-file inspec_inputs.yml --reporter cli json:heimdall_after_CIS_WIN_${IP}.json
+            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input-file inspec_inputs.yml --reporter cli json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - TM] Verifying $IP...${NC}"
