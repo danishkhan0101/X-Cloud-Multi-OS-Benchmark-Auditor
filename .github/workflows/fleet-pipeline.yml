@@ -159,13 +159,14 @@ jobs:
         if: steps.check_reports.outputs.has_reports == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: audit-${{ env.DATE_TAG }}
-          name: 🛡️ Fleet Audit Report (${{ env.DATE_TAG }})
+          tag_name: audit-2026-05-05-0457-${{ github.event.inputs.cis_level }}
+          name: Fleet Audit Report - ${{ github.event.inputs.cis_level }}
           body: |
             ## 📊 DevSecOps Audit Execution
             **Target Environment:** `${{ env.TARGET_ENV }}`
             **Compliance Profile:** `${{ env.PROFILE }}`
             **Execution Mode:** `${{ env.MODE }}`
+            **Execution Mode:** `${{ env.CIS_LEVEL }}`
           files: |
             **/*.html
             **/*.json
