@@ -200,14 +200,10 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
         fi
         
     elif [[ "$os" == *"Windows"* ]]; then
-        # 🛡️ THE AUTO-HEALER (NUCLEAR OVERRIDE)
-        echo -e "${YELLOW}   ☢️ Forcing WinRM Unlock & CIS Policy Bypass for $ip...${NC}"
+        # 🛡️ THE AUTO-HEALER (NUCLEAR OVERRIDE V2)
+        echo -e "${YELLOW}   ☢️ Forcing WinRM Unlock & Rebuilding User Inside VM for $ip...${NC}"
         
-        # 1. Force the password reset to clear any Windows Account Lockouts instantly
-        echo -e "${YELLOW}   💉 1/2: Resetting Lockout Timer via Azure...${NC}"
-        az vm user update -g "$RG_NAME" -n "$vm_name" -u "$AUDIT_USER" --password "$AUDIT_PASS" -o none
-        
-        # 2. Secure the Network Security Group
+        # 1. Secure the Network Security Group
         RUNNER_IP=$(curl -s https://api.ipify.org)
         NIC_ID=$(az vm show -g "$RG_NAME" -n "$vm_name" --query "networkProfile.networkInterfaces[0].id" -o tsv)
         NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
@@ -226,24 +222,29 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
                 -o none > /dev/null 2>&1 || true
         fi
                     
-        # 3. Nuclear PowerShell Payload: Destroys CIS WinRM Blocks & Rebuilds from scratch
-        echo -e "${YELLOW}   🛠️ 2/2: Rebuilding WinRM Listeners & Permissions...${NC}"
+        # 2. Indestructible PowerShell Payload (Native OS Execution)
+        echo -e "${YELLOW}   🛠️ Bypassing CIS & Hard-Coding Permissions...${NC}"
         az vm run-command invoke \
             --resource-group "$RG_NAME" \
             --name "$vm_name" \
             --command-id RunPowerShellScript \
             --scripts "
+                # Destroy CIS WinRM blocks
                 Remove-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM' -Recurse -Force -ErrorAction SilentlyContinue; 
-                Enable-LocalUser -Name '${AUDIT_USER}' -ErrorAction SilentlyContinue; 
-                Unlock-LocalUser -Name '${AUDIT_USER}' -ErrorAction SilentlyContinue; 
-                Add-LocalGroupMember -Group 'Administrators' -Member '${AUDIT_USER}' -ErrorAction SilentlyContinue; 
+                
+                # Forcefully create/update the user locally (Bypasses Azure Agent failures)
+                net user ${AUDIT_USER} '${AUDIT_PASS}' /add /y 2>&1 | Out-Null;
+                net user ${AUDIT_USER} '${AUDIT_PASS}' 2>&1 | Out-Null;
+                net localgroup Administrators ${AUDIT_USER} /add 2>&1 | Out-Null;
+                WMIC USERACCOUNT WHERE Name='${AUDIT_USER}' SET PasswordExpires=FALSE 2>&1 | Out-Null;
+                
+                # Rebuild WinRM natively
                 Enable-PSRemoting -SkipNetworkProfileCheck -Force; 
-                Set-Item WSMan:\localhost\Service\Auth\Basic -Value \$true -Force; 
-                Set-Item WSMan:\localhost\Service\Auth\Negotiate -Value \$true -Force; 
-                Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value \$true -Force; 
-                Set-Item WSMan:\localhost\Service\IPv4Filter -Value * -Force;
+                winrm set winrm/config/service/auth '@{Basic=\"true\"}'; 
+                winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'; 
                 New-ItemProperty -Name LocalAccountTokenFilterPolicy -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -PropertyType DWord -Value 1 -Force; 
-                Restart-Service WinRM -Force
+                Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' -Enabled True -Profile Any -ErrorAction SilentlyContinue;
+                Restart-Service WinRM -Force;
             " -o none
             
         echo -e "${YELLOW}   ⏳ Waiting 20 seconds for WinRM to bind...${NC}"
