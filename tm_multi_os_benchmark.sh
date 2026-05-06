@@ -187,6 +187,11 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
 
             echo -e "${YELLOW}   💉 2/2: Auto-injecting SSH key via Azure...${NC}"
             az vm user update -g "$RG_NAME" -n "$vm_name" -u "$LINUX_USER" --ssh-key-value "$(cat ~/.ssh/id_rsa.pub)" -o none
+            
+            # 🚀 THE FIX: Give Azure 15 seconds to actually apply the key to the VM
+            echo -e "${YELLOW}   ⏳ Waiting 15s for Azure to propagate the SSH key...${NC}"
+            sleep 15
+            
             echo -e "${GREEN}   ✅ Key injected and SSH connection secured!${NC}"
         fi
         
