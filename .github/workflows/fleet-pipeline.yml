@@ -3,22 +3,7 @@ name: 🛡️ Fleet Commander Pipeline
 on:
   workflow_dispatch:
     inputs:
-      profile:
-        description: 'Compliance Profile'
-        required: true
-        default: 'tm'
-        type: choice
-        options:
-          - tm
-          - cis
-      cis_level:
-        description: 'CIS Level (ONLY applies if profile is "cis")'
-        required: true
-        type: choice
-        default: 'Level 1'
-        options:
-          - 'Level 1'
-          - 'Level 2'
+      # 🚨 Removed Profile and CIS Level inputs because the Matrix handles them automatically!
       mode:
         description: 'Execution Mode'
         required: true
@@ -67,12 +52,24 @@ jobs:
   run-audit:
     runs-on: ubuntu-latest
 
-    # Global block so ALL steps can see these variables
+    # 🧮 THE PRO METHOD: THE MATRIX ARRAY
+    strategy:
+      max-parallel: 1      # 🚦 THE MAGIC LINE: Forces them to run one at a time to protect the server!
+      fail-fast: false     # 🛡️ If Level 1 fails, don't cancel Level 2. Keep going!
+      matrix:
+        target:
+          - { profile: 'cis', level: 'Level 1', name: 'CIS-Level-1' }
+          - { profile: 'cis', level: 'Level 2', name: 'CIS-Level-2' }
+          - { profile: 'tm', level: 'Level 1',  name: 'TM-Baseline' } 
+          # (Note: 'tm' ignores the level variable in your script, but the matrix requires a placeholder)
+
+    # 🔄 Dynamic Environment Variables (Injected from the Matrix)
     env:
-      TARGET_ENV: ${{ github.event.client_payload.target_env || github.event.inputs.environment_tag || 'Prod' }}
-      PROFILE: ${{ github.event.inputs.profile || 'tm' }}
+      TARGET_ENV: ${{ github.event.inputs.environment_tag || 'Prod' }}
       MODE: ${{ github.event.inputs.mode || 'scan' }}
-      CIS_LEVEL: ${{ github.event.inputs.cis_level || 'Level 1' }}
+      PROFILE: ${{ matrix.target.profile }}
+      CIS_LEVEL: ${{ matrix.target.level }}
+      MATRIX_NAME: ${{ matrix.target.name }}
 
     steps:
       - name: 📥 Pull Repository Code
@@ -138,7 +135,6 @@ jobs:
       - name: 🏷️ Generate Version Tag
         id: versioning
         run: |
-          # THE FIX: Standardized the variable name to DATE_TAG
           echo "DATE_TAG=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
 
       - name: 🔎 Verify Report Generation
@@ -161,20 +157,16 @@ jobs:
         run: |
           echo "TIMESTAMP=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
 
-      # 2. 🧹 Configure Smart Release Variables
+      # 2. 🧹 Configure Smart Release Variables (UPDATED FOR MATRIX)
       - name: 🧹 Configure Release Variables
         if: steps.check_reports.outputs.has_reports == 'true'
         run: |
-          RAW_LEVEL="${{ github.event.inputs.cis_level }}"
+          echo "RELEASE_TAG=audit-${{ env.TIMESTAMP }}-${{ env.MATRIX_NAME }}" >> $GITHUB_ENV
+          echo "RELEASE_NAME=Fleet Audit Report - ${{ env.MATRIX_NAME }}" >> $GITHUB_ENV
           
-          # 🚨 THE FIX: If TM is selected, hide CIS Level and rename the release!
           if [ "${{ env.PROFILE }}" == "tm" ]; then
-            echo "RELEASE_TAG=audit-${{ env.TIMESTAMP }}-TM" >> $GITHUB_ENV
-            echo "RELEASE_NAME=Fleet Audit Report - TM Baseline" >> $GITHUB_ENV
             echo "CIS_DISPLAY=" >> $GITHUB_ENV
           else
-            echo "RELEASE_TAG=audit-${{ env.TIMESTAMP }}-${RAW_LEVEL// /-}" >> $GITHUB_ENV
-            echo "RELEASE_NAME=Fleet Audit Report - ${RAW_LEVEL}" >> $GITHUB_ENV
             echo "CIS_DISPLAY=**CIS Level:** \`${{ env.CIS_LEVEL }}\`" >> $GITHUB_ENV
           fi
 
