@@ -63,6 +63,13 @@ on:
 permissions:
   contents: write
 
+# 🚦 THE DevSecOps WAITING ROOM (Concurrency Queue)
+# This prevents race conditions by forcing workflows targeting the 
+# same environment to wait in line and run one after the other.
+concurrency:
+  group: audit-queue-${{ github.event.inputs.environment_tag || 'Prod' }}
+  cancel-in-progress: false
+
 jobs:
   run-audit:
     runs-on: ubuntu-latest
