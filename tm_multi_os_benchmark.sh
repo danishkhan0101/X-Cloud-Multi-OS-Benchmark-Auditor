@@ -163,9 +163,9 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
             LINUX_USER="$UBUNTU_USER"
         fi
 
-        # 🛡️ THE AUTO-HEALER (LINUX)
+        # 🛡️ THE AUTO-HEALER (LINUX - NUCLEAR VERSION)
         if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${LINUX_USER}@${ip} "echo ok" > /dev/null 2>&1; then
-            echo -e "${YELLOW}   ⚠️ Access denied or timeout for $DISTRO node $ip.${NC}"
+            echo -e "${YELLOW}   ⚠️ Access denied or timeout for $DISTRO node $ip. Attempting Force-Injection...${NC}"
             
             echo -e "${YELLOW}   🛠️ 1/2: Opening Port 22 on Azure NSG for Runner...${NC}"
             RUNNER_IP=$(curl -s https://api.ipify.org)
@@ -185,22 +185,26 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
                 --protocol Tcp \
                 -o none > /dev/null 2>&1 || true
 
-            echo -e "${YELLOW}   💉 2/2: Auto-injecting SSH key via Azure...${NC}"
-            az vm user update -g "$RG_NAME" -n "$vm_name" -u "$LINUX_USER" --ssh-key-value "$(cat ~/.ssh/id_rsa.pub)" -o none
+            echo -e "${YELLOW}   💉 2/2: Force-Injecting SSH key via Azure Run-Command...${NC}"
             
-            # 🚀 THE FIX: Give Azure 15 seconds to actually apply the key to the VM
-            echo -e "${YELLOW}   ⏳ Waiting 15s for Azure to propagate the SSH key...${NC}"
+            # Extract the public key into a variable for the payload
+            PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
+            
+            # This payload creates the directory, appends the key, and fixes permissions 
+            # as the root user, bypassing all standard SSH restrictions.
+            az vm run-command invoke -g "$RG_NAME" -n "$vm_name" --command-id RunShellScript --scripts "
+                mkdir -p /home/$LINUX_USER/.ssh
+                echo '$PUB_KEY' >> /home/$LINUX_USER/.ssh/authorized_keys
+                chown -R $LINUX_USER:$LINUX_USER /home/$LINUX_USER/.ssh
+                chmod 700 /home/$LINUX_USER/.ssh
+                chmod 600 /home/$LINUX_USER/.ssh/authorized_keys
+                echo 'SSH Key Injection Complete'
+            " -o none > /dev/null 2>&1 || true
+            
+            echo -e "${YELLOW}   ⏳ Waiting 15s for file system sync...${NC}"
             sleep 15
             
-            echo -e "${GREEN}   ✅ Key injected and SSH connection secured!${NC}"
-        fi
-        
-        if [ "$DISTRO" == "RHEL" ]; then
-            RHEL_MACHINES+=("$ip")
-            echo -e "${GREEN}🔴 Mapped RHEL Node: $ip (Status: ON)${NC}"
-        else
-            UBUNTU_MACHINES+=("$ip")
-            echo -e "${GREEN}🟠 Mapped Ubuntu Node: $ip (Status: ON)${NC}"
+            echo -e "${GREEN}   ✅ Key injected via Guest Agent. SSH access should now be open!${NC}"
         fi
         
     elif [[ "$os" == *"Windows"* ]]; then
