@@ -79,14 +79,16 @@ jobs:
           
           if [ "$PROFILE" == "all" ]; then
             echo "Building Full Queue: CIS L1, CIS L2, and TM..."
-            echo 'matrix=[{"profile":"cis","level":"Level 1","name":"CIS-Level-1"},{"profile":"cis","level":"Level 2","name":"CIS-Level-2"},{"profile":"tm","level":"Level 1","name":"TM-Baseline"}]' >> $GITHUB_OUTPUT
+            # 🚨 THE FIX: Removed the "level" property entirely from the TM JSON object
+            echo 'matrix=[{"profile":"cis","level":"Level 1","name":"CIS-Level-1"},{"profile":"cis","level":"Level 2","name":"CIS-Level-2"},{"profile":"tm","name":"TM-Baseline"}]' >> $GITHUB_OUTPUT
           elif [ "$PROFILE" == "cis" ]; then
             echo "Building Single Queue: CIS $LEVEL..."
             FORMATTED_LEVEL=$(echo "$LEVEL" | tr ' ' '-')
             echo "matrix=[{\"profile\":\"cis\",\"level\":\"$LEVEL\",\"name\":\"CIS-$FORMATTED_LEVEL\"}]" >> $GITHUB_OUTPUT
           else
             echo "Building Single Queue: TM Baseline..."
-            echo 'matrix=[{"profile":"tm","level":"Level 1","name":"TM-Baseline"}]' >> $GITHUB_OUTPUT
+            # 🚨 THE FIX: Removed the "level" property here too!
+            echo 'matrix=[{"profile":"tm","name":"TM-Baseline"}]' >> $GITHUB_OUTPUT
           fi
 
   # 🚀 JOB 2: THE EXECUTION ENGINE
