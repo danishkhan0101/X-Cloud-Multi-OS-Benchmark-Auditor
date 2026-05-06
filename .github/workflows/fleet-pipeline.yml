@@ -4,16 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: 'Compliance Profile'
+        description: '🛡️ STEP 1: Select Security Profile (Choose "all" for full audit)'
         required: true
         default: 'tm'
         type: choice
         options:
           - tm
           - cis
-          - all      # 👈 THE NEW OPTION: Select this to run all 3 safely!
+          - all
       cis_level:
-        description: 'CIS Level (ONLY applies if profile is "cis")'
+        description: '📊 STEP 2: CIS Strictness (Only matters for "cis" profile)'
         required: true
         type: choice
         default: 'Level 1'
@@ -21,7 +21,7 @@ on:
           - Level 1
           - Level 2
       mode:
-        description: 'Execution Mode'
+        description: '🚀 STEP 3: Action Mode (Scan = Read-Only | Remediate = Fix)'
         required: true
         default: 'scan'
         type: choice
@@ -30,7 +30,7 @@ on:
           - remediate
           - full
       environment_tag:
-        description: '🎯 Target Environment (Blast Radius)'
+        description: '🎯 STEP 4: Target Servers (Dev, Staging, or Prod)'
         required: true
         default: 'all'
         type: choice
@@ -40,16 +40,16 @@ on:
           - Prod
           - all
       ticket_id:
-        description: '🎫 Change Request / Ticket ID (For Audit Logs)'
+        description: '🎫 Change Request / Jira Ticket ID'
         required: false
         type: string
       debug_mode:
-        description: '🐞 Enable Debug/Verbose Logging'
+        description: '🐞 Troubleshooting: Enable Verbose Logs'
         required: false
         default: false
         type: boolean
       cleanup_mode:
-        description: '🧹 Post-Audit Cleanup (Uninstall tools from targets)'
+        description: '🧹 Post-Scan: Delete tools from target servers'
         required: false
         default: false
         type: boolean
