@@ -206,6 +206,16 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
             
             echo -e "${GREEN}   ✅ Key injected via Guest Agent. SSH access should now be open!${NC}"
         fi
+
+        # 🚨 THE FIX: YOU MUST ADD THESE LINES! 🚨
+        # This actually saves the IP addresses so the scanner knows they exist!
+        if [ "$DISTRO" == "RHEL" ]; then
+            RHEL_MACHINES+=("$ip")
+            echo -e "${CYAN}🐧 Mapped RHEL Node: $ip (Status: ON)${NC}"
+        else
+            UBUNTU_MACHINES+=("$ip")
+            echo -e "${CYAN}🐧 Mapped Ubuntu Node: $ip (Status: ON)${NC}"
+        fi
         
     elif [[ "$os" == *"Windows"* ]]; then
         # 🛡️ THE AUTO-HEALER (NUCLEAR OVERRIDE V2)
