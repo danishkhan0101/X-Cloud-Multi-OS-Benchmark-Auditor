@@ -4,23 +4,24 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: 'Compliance Profile'
+        description: '🛡️ STEP 1: Select Security Profile (Choose "all" for full audit)'
         required: true
         default: 'tm'
         type: choice
         options:
           - tm
           - cis
+          - all
       cis_level:
-        description: 'CIS Level (ONLY applies if profile is "cis")'
+        description: '📊 STEP 2: CIS Strictness (Only applies if profile is "cis")'
         required: true
         type: choice
         default: 'Level 1'
         options:
-          - 'Level 1'
-          - 'Level 2'
+          - Level 1
+          - Level 2
       mode:
-        description: 'Execution Mode'
+        description: '🚀 STEP 3: Action Mode (Scan = Read-Only | Remediate = Fix)'
         required: true
         default: 'scan'
         type: choice
@@ -29,7 +30,7 @@ on:
           - remediate
           - full
       environment_tag:
-        description: '🎯 Target Environment (Blast Radius)'
+        description: '🎯 STEP 4: Target Environment (Blast Radius)'
         required: true
         default: 'all'
         type: choice
@@ -39,40 +40,73 @@ on:
           - Prod
           - all
       ticket_id:
-        description: '🎫 Change Request / Ticket ID (For Audit Logs)'
+        description: '🎫 Change Request / Jira Ticket ID'
         required: false
         type: string
       debug_mode:
-        description: '🐞 Enable Debug/Verbose Logging'
+        description: '🐞 Troubleshooting: Enable Verbose Logs'
         required: false
         default: false
         type: boolean
       cleanup_mode:
-        description: '🧹 Post-Audit Cleanup (Uninstall tools from targets)'
+        description: '🧹 Post-Scan: Delete tools from targets'
         required: false
         default: false
         type: boolean
 
-  schedule:
-    - cron: '0 18 * * 5'
-
-  repository_dispatch:
-    types: [new_vm_provisioned]
-
-# 🚨 Required permissions to allow the pipeline to publish a Release
 permissions:
   contents: write
 
 jobs:
-  run-audit:
+  # 🧠 JOB 1: THE QUEUE MANAGER & SAFETY GATE
+  prepare-queue:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build-matrix.outputs.matrix }}
+      safe_mode: ${{ steps.safety-gate.outputs.safe_mode }}
+    steps:
+      - name: 🛡️ Safety Gate: Blast Radius Control
+        id: safety-gate
+        run: |
+          PROFILE="${{ github.event.inputs.profile }}"
+          MODE="${{ github.event.inputs.mode }}"
+          if [ "$PROFILE" == "all" ] && [ "$MODE" != "scan" ]; then
+            echo "⚠️ SAFETY WARNING: Mass remediation blocked. Overriding to 'scan'."
+            echo "safe_mode=scan" >> $GITHUB_OUTPUT
+          else
+            echo "safe_mode=$MODE" >> $GITHUB_OUTPUT
+          fi
 
-    # Global block so ALL steps can see these variables
+      - name: 🚦 Build Dynamic Matrix Queue
+        id: build-matrix
+        run: |
+          PROFILE="${{ github.event.inputs.profile }}"
+          LEVEL="${{ github.event.inputs.cis_level }}"
+          if [ "$PROFILE" == "all" ]; then
+            echo 'matrix=[{"profile":"cis","level":"Level 1","name":"CIS-Level-1"},{"profile":"cis","level":"Level 2","name":"CIS-Level-2"},{"profile":"tm","name":"TM-Baseline"}]' >> $GITHUB_OUTPUT
+          elif [ "$PROFILE" == "cis" ]; then
+            FORMATTED_LEVEL=$(echo "$LEVEL" | tr ' ' '-')
+            echo "matrix=[{\"profile\":\"cis\",\"level\":\"$LEVEL\",\"name\":\"CIS-$FORMATTED_LEVEL\"}]" >> $GITHUB_OUTPUT
+          else
+            echo 'matrix=[{"profile":"tm","name":"TM-Baseline"}]' >> $GITHUB_OUTPUT
+          fi
+
+  # 🚀 JOB 2: THE EXECUTION ENGINE
+  run-audit:
+    needs: prepare-queue
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1      # 🚦 Protects Azure VM CPU/RAM
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.prepare-queue.outputs.matrix) }}
+
     env:
-      TARGET_ENV: ${{ github.event.client_payload.target_env || github.event.inputs.environment_tag || 'Prod' }}
-      PROFILE: ${{ github.event.inputs.profile || 'tm' }}
-      MODE: ${{ github.event.inputs.mode || 'scan' }}
-      CIS_LEVEL: ${{ github.event.inputs.cis_level || 'Level 1' }}
+      TARGET_ENV: ${{ github.event.inputs.environment_tag || 'all' }}
+      MODE: ${{ needs.prepare-queue.outputs.safe_mode }}
+      PROFILE: ${{ matrix.target.profile }}
+      CIS_LEVEL: ${{ matrix.target.level || 'Level 1' }}
+      MATRIX_NAME: ${{ matrix.target.name }}
 
     steps:
       - name: 📥 Pull Repository Code
@@ -83,7 +117,7 @@ jobs:
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
-      - name: 🔑 Setup SSH Key for Ubuntu Targets
+      - name: 🔑 Setup SSH Key
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
@@ -93,26 +127,16 @@ jobs:
           mkdir -p ~/.ssh
           ssh-add -L > ~/.ssh/id_rsa.pub
 
-      - name: 🛠️ Install Core Tools & Ansible (Nuclear Option)
+      - name: 🛠️ Install Core Tools (Cinc Auditor + Ansible)
         run: |
           sudo apt-get update
-          # 1. Install standard Linux tools ONLY (No Ansible or WinRM here)
           sudo apt-get install -y openscap-scanner openscap-utils sshpass
-          
-          # 2. Force pip to install Ansible and WinRM together in the local user space
           python3 -m pip install --user --upgrade pip
           python3 -m pip install --user ansible pywinrm requests
-          
-          # 3. Add the local pip directory to the runner's PATH
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-          
-          # Bypass the Corporate Paywall using Cinc Auditor
           curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-auditor
           sudo ln -sf /usr/bin/cinc-auditor /usr/bin/inspec
-          
-          # Global Fix for OpenSCAP SSH
           sudo sh -c 'printf "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null\n" >> /etc/ssh/ssh_config'
-          
           export ANSIBLE_HOST_KEY_CHECKING=False
 
       - name: 🚀 Execute Fleet Commander
@@ -126,75 +150,45 @@ jobs:
           TICKET_ID: ${{ github.event.inputs.ticket_id }}
           DEBUG_MODE: ${{ github.event.inputs.debug_mode }}
           CLEANUP: ${{ github.event.inputs.cleanup_mode }}
-          
         run: |
-          echo "🎯 Targeting Environment: $TARGET_ENV"
-          echo "📋 Running Profile: $PROFILE in Mode: $MODE"
-          
           chmod +x tm_multi_os_benchmark.sh
           ./tm_multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP"
-      # --- 🚨 AUTOMATED RELEASE PUBLISHING ---
-
-      - name: 🏷️ Generate Version Tag
-        id: versioning
-        run: |
-          # THE FIX: Standardized the variable name to DATE_TAG
-          echo "DATE_TAG=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
 
       - name: 🔎 Verify Report Generation
         id: check_reports
         run: |
-          # Safely count any HTML or JSON files in the current directory
           REPORT_COUNT=$(find . -maxdepth 1 -type f \( -name "*.html" -o -name "*.json" \) | wc -l)
-          
           if [ "$REPORT_COUNT" -gt 0 ]; then
-            echo "✅ Found $REPORT_COUNT report(s) on disk. Proceeding to publish."
             echo "has_reports=true" >> $GITHUB_OUTPUT
           else
-            echo "⚠️ No reports found! The scan must have failed or skipped all VMs."
             echo "has_reports=false" >> $GITHUB_OUTPUT
           fi
 
-      # 1. 🕒 Generate a dynamic timestamp (Format: YYYY-MM-DD-HHMM)
-      - name: 🕒 Generate Dynamic Timestamp
-        if: steps.check_reports.outputs.has_reports == 'true'
-        run: |
-          echo "TIMESTAMP=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
-
-      # 2. 🧹 Configure Smart Release Variables
       - name: 🧹 Configure Release Variables
         if: steps.check_reports.outputs.has_reports == 'true'
         run: |
-          RAW_LEVEL="${{ github.event.inputs.cis_level }}"
-          
-          # 🚨 THE FIX: If TM is selected, hide CIS Level and rename the release!
+          TS=$(date +'%Y-%m-%d-%H%M')
+          echo "RELEASE_TAG=audit-${TS}-${{ env.MATRIX_NAME }}" >> $GITHUB_ENV
+          echo "RELEASE_NAME=Fleet Audit Report - ${{ env.MATRIX_NAME }}" >> $GITHUB_ENV
           if [ "${{ env.PROFILE }}" == "tm" ]; then
-            echo "RELEASE_TAG=audit-${{ env.TIMESTAMP }}-TM" >> $GITHUB_ENV
-            echo "RELEASE_NAME=Fleet Audit Report - TM Baseline" >> $GITHUB_ENV
             echo "CIS_DISPLAY=" >> $GITHUB_ENV
           else
-            echo "RELEASE_TAG=audit-${{ env.TIMESTAMP }}-${RAW_LEVEL// /-}" >> $GITHUB_ENV
-            echo "RELEASE_NAME=Fleet Audit Report - ${RAW_LEVEL}" >> $GITHUB_ENV
             echo "CIS_DISPLAY=**CIS Level:** \`${{ env.CIS_LEVEL }}\`" >> $GITHUB_ENV
           fi
 
-      # 3. 📢 Publish to GitHub Releases
       - name: 📢 Publish to GitHub Releases
         if: steps.check_reports.outputs.has_reports == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          # Injecting the smart variables we just built!
           tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ env.RELEASE_NAME }}
           body: |
             ## 📊 DevSecOps Audit Execution
-            **Ticket / Change Request:** `${{ github.event.inputs.ticket_id }}`
+            **Ticket / Jira ID:** `${{ github.event.inputs.ticket_id }}`
             **Target Environment:** `${{ env.TARGET_ENV }}`
             **Compliance Profile:** `${{ env.PROFILE }}`
             **Execution Mode:** `${{ env.MODE }}`
             ${{ env.CIS_DISPLAY }}
-            
-            > *This release contains the immutable compliance artifacts for the above authorization.*
           files: |
             **/*.html
             **/*.json
