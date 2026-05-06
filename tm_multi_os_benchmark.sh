@@ -48,7 +48,6 @@ WIN_CIS_PLAYBOOK="${WIN_CIS_DIR}/cis_remediate.yml"
 # ======================================================
 # GLOBAL SETTINGS
 # ======================================================
-export CHEF_LICENSE="accept-silent"
 export INSPEC_SSH_CONFIG_NO_SECURE=true
 BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 
@@ -422,13 +421,15 @@ run_phase_1() {
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}📦 [WINDOWS - CIS L${WIN_INSPEC_LVL}] Scanning $IP...${NC}"
             
-            # 🚨 THE ULTIMATE FIX: Removed the YAML file and injected --input directly!
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
+            # 🚨 SWAPPED: Now using Cinc Auditor natively without license flags
+            cinc-auditor exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
         fi
         
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - TM] Scanning $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_WIN_${IP}.json
+            
+            # 🚨 SWAPPED: Now using Cinc Auditor natively
+            cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_WIN_${IP}.json
         fi
     done
 }
@@ -544,13 +545,15 @@ run_phase_4() {
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}✅ [WINDOWS - CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
             
-            # 🚨 THE ULTIMATE FIX: Bypassing YAML here too!
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
+            # 🚨 SWAPPED: Running Cinc Auditor natively
+            cinc-auditor exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
         fi
         
         if [ "$RUN_TM" == true ]; then
             echo -e "${CYAN}✅ [WINDOWS - TM] Verifying $IP...${NC}"
-            CHEF_LICENSE="accept-silent" /usr/bin/inspec exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_TM_WIN_${IP}.json
+            
+            # 🚨 SWAPPED: Running Cinc Auditor natively
+            cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_TM_WIN_${IP}.json
         fi
     done
 }
