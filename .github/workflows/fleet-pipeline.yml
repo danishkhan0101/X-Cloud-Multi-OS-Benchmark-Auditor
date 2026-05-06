@@ -21,7 +21,7 @@ on:
           - Level 1
           - Level 2
       mode:
-        description: '🚀 STEP 3: Action Mode (Scan = Read-Only | Remediate = Fix)'
+        description: '🚀 STEP 3: Action Mode (Scan = Read-Only | Remediate = Fix | Full = Both)'
         required: true
         default: 'scan'
         type: choice
