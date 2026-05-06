@@ -71,7 +71,7 @@ jobs:
       matrix: ${{ steps.build-matrix.outputs.matrix }}
       safe_mode: ${{ steps.safety-gate.outputs.safe_mode }}
     steps:
-      - name: 🛡️ Safety Gate: Blast Radius Control
+      - name: '🛡️ Safety Gate: Blast Radius Control'
         id: safety-gate
         run: |
           PROFILE="${{ github.event.inputs.profile }}"
