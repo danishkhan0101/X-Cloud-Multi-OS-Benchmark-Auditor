@@ -8,14 +8,20 @@ if [ -f ".env" ]; then
     export $(grep -v '^#' .env | xargs)
 fi
 
+# --- ORGANIZATION VARIABLES (Public defaults, override in .env) ---
+ORG_NAME="${ORG_NAME:-Custom}"
+ORG_PREFIX="${ORG_PREFIX:-custom}"
+GHOST_USER="${GHOST_USER:-audit_ghost}"
+CUSTOM_XCCDF_PROFILE="${CUSTOM_XCCDF_PROFILE:-xccdf_com.org_profile_lsb}"
+
 # --- AZURE TARGET INFRASTRUCTURE ---
-RG_NAME="${AZURE_RG_NAME:-TM_RG}"
-KV_NAME="${AZURE_KV_NAME:-TM-Vault-Danish}"
+RG_NAME="${AZURE_RG_NAME:-DEFAULT_RG}"
+KV_NAME="${AZURE_KV_NAME:-YOUR-KEYVAULT-NAME}"
 SECRET_NAME="${AZURE_KV_SECRET:-AuditPassword}"
 
 # --- FLEET CREDENTIALS ---
 UBUNTU_USER="${LINUX_ADMIN_USER:-ubuntu}"
-AUDIT_USER="${WINDOWS_ADMIN_USER:-TM_Admin}"
+AUDIT_USER="${WINDOWS_ADMIN_USER:-Windows_Admin}"
 AUDIT_HOST_NAME="${EXCLUDE_HOST_NAME:-Audit-Host}"
 
 # ======================================================
@@ -26,20 +32,20 @@ AUDIT_HOST_NAME="${EXCLUDE_HOST_NAME:-Audit-Host}"
 
 # --- UBUNTU ---
 UBUNTU_CUSTOM_DIR="ubuntu-custom"
-UBUNTU_CUSTOM_XCCDF="${UBUNTU_CUSTOM_DIR}/tm_xccdf.xml"
-UBUNTU_CUSTOM_OVAL="${UBUNTU_CUSTOM_DIR}/tm_ubuntu_rules.xml"
+UBUNTU_CUSTOM_XCCDF="${UBUNTU_CUSTOM_DIR}/${ORG_PREFIX}_xccdf.xml"
+UBUNTU_CUSTOM_OVAL="${UBUNTU_CUSTOM_DIR}/${ORG_PREFIX}_ubuntu_rules.xml"
 UBUNTU_CUSTOM_PLAYBOOK="${UBUNTU_CUSTOM_DIR}/ubuntu_custom_playbook.yml"
 
 # --- RHEL ---
 RHEL_CUSTOM_DIR="rhel-custom"
-RHEL_CUSTOM_XCCDF="${RHEL_CUSTOM_DIR}/tm_rhel_xccdf.xml"
-RHEL_CUSTOM_OVAL="${RHEL_CUSTOM_DIR}/tm_rhel_rules.xml"
+RHEL_CUSTOM_XCCDF="${RHEL_CUSTOM_DIR}/${ORG_PREFIX}_rhel_xccdf.xml"
+RHEL_CUSTOM_OVAL="${RHEL_CUSTOM_DIR}/${ORG_PREFIX}_rhel_rules.xml"
 RHEL_CUSTOM_PLAYBOOK="${RHEL_CUSTOM_DIR}/rhel_custom_playbook.yml"
 
 # --- WINDOWS ---
 WIN_CUSTOM_DIR="window-custom"
-WIN_CUSTOM_BENCHMARK="${WIN_CUSTOM_DIR}/tm_baseline.rb"
-WIN_CUSTOM_PLAYBOOK="${WIN_CUSTOM_DIR}/tm_remediate.yml"
+WIN_CUSTOM_BENCHMARK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_baseline.rb"
+WIN_CUSTOM_PLAYBOOK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_remediate.yml"
 
 WIN_CIS_DIR="window-default-cis"
 WIN_CIS_BENCHMARK="${WIN_CIS_DIR}/window-baseline"
@@ -57,7 +63,7 @@ clear
 # HEADLESS MODE PARSER (For CI/CD Automation)
 # ======================================================
 HEADLESS=false
-H_PROFILE="tm"
+H_PROFILE="custom"
 H_MODE="scan"
 H_TARGETS="all"
 H_TICKET="None"
@@ -103,13 +109,13 @@ fi
 # SECURE CREDENTIAL FETCH
 # ======================================================
 if [ -z "$AUDIT_PASS" ]; then
-    echo -e "${YELLOW}🔐 Fetching TM Credentials from Azure KeyVault...${NC}"
+    echo -e "${YELLOW}🔐 Fetching Credentials from Azure KeyVault...${NC}"
     az login --identity --allow-no-subscriptions > /dev/null 2>&1 || true
     AUDIT_PASS=$(az keyvault secret show --name "$SECRET_NAME" --vault-name "$KV_NAME" --query value -o tsv 2>/dev/null | tr -d '\r\n')
 fi
 
 if [ -z "$AUDIT_PASS" ]; then
-    echo -e "${RED}❌ ERROR: Failed to retrieve AuditPassword from KeyVault! Aborting to prevent SSH lockouts.${NC}"
+    echo -e "${RED}❌ ERROR: Failed to retrieve password from KeyVault! Aborting to prevent SSH lockouts.${NC}"
     exit 1
 fi
 
@@ -157,7 +163,7 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
         # --- DISTRO ROUTER ---
         if [[ "$offer" == *"rhel"* ]] || [[ "${vm_name,,}" == *"rhel"* ]]; then
             DISTRO="RHEL"
-            LINUX_USER="azureuser"
+            LINUX_USER="$GHOST_USER"   
         else
             DISTRO="Ubuntu"
             LINUX_USER="$UBUNTU_USER"
@@ -190,15 +196,30 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
             # Extract the public key into a variable for the payload
             PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
             
-            # This payload creates the directory, appends the key, and fixes permissions 
-            # as the root user, bypassing all standard SSH restrictions.
+            # THE GHOST USER PAYLOAD
             az vm run-command invoke -g "$RG_NAME" -n "$vm_name" --command-id RunShellScript --scripts "
+                # 1. Create the Ghost User
+                useradd -m -s /bin/bash $LINUX_USER || true
+                
+                # 2. Grant Passwordless Sudo (God Mode)
+                echo '$LINUX_USER ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-${LINUX_USER}
+                chmod 440 /etc/sudoers.d/99-${LINUX_USER}
+                
+                # 3. Inject the SSH Key
                 mkdir -p /home/$LINUX_USER/.ssh
-                echo '$PUB_KEY' >> /home/$LINUX_USER/.ssh/authorized_keys
+                echo '$PUB_KEY' > /home/$LINUX_USER/.ssh/authorized_keys
                 chown -R $LINUX_USER:$LINUX_USER /home/$LINUX_USER/.ssh
                 chmod 700 /home/$LINUX_USER/.ssh
                 chmod 600 /home/$LINUX_USER/.ssh/authorized_keys
-                echo 'SSH Key Injection Complete'
+                
+                # 4. RHEL Overrides (SELinux & Crypto Policy)
+                if command -v restorecon &> /dev/null; then
+                    restorecon -Rv /home/$LINUX_USER/.ssh >/dev/null 2>&1 || true
+                fi
+                echo 'PubkeyAcceptedKeyTypes +ssh-rsa' > /etc/ssh/sshd_config.d/99-runner-key.conf 2>/dev/null || true
+                systemctl restart sshd
+                
+                echo 'Ghost User Injection Complete'
             " -o none > /dev/null 2>&1 || true
             
             echo -e "${YELLOW}   ⏳ Waiting 15s for file system sync...${NC}"
@@ -207,8 +228,6 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
             echo -e "${GREEN}   ✅ Key injected via Guest Agent. SSH access should now be open!${NC}"
         fi
 
-        # 🚨 THE FIX: YOU MUST ADD THESE LINES! 🚨
-        # This actually saves the IP addresses so the scanner knows they exist!
         if [ "$DISTRO" == "RHEL" ]; then
             RHEL_MACHINES+=("$ip")
             echo -e "${CYAN}🐧 Mapped RHEL Node: $ip (Status: ON)${NC}"
@@ -286,7 +305,7 @@ for ip in "${UBUNTU_MACHINES[@]}"; do echo "${ip} ansible_user=${UBUNTU_USER}" >
 echo "" >> inventory.ini
 
 echo "[rhel_nodes]" >> inventory.ini
-for ip in "${RHEL_MACHINES[@]}"; do echo "${ip} ansible_user=azureuser" >> inventory.ini; done
+for ip in "${RHEL_MACHINES[@]}"; do echo "${ip} ansible_user=${GHOST_USER}" >> inventory.ini; done
 echo "" >> inventory.ini
 
 echo "[windows_nodes]" >> inventory.ini
@@ -299,20 +318,22 @@ echo -e "\n${CYAN}${BOLD}======================================================"
 echo -e "📋 PHASE 0.75: COMPLIANCE PROFILE"
 echo -e "======================================================${NC}"
 
-RUN_TM=false
+RUN_ORG=false
 RUN_CIS=false
 
 if [ "$HEADLESS" == true ]; then
-    if [ "$H_PROFILE" == "tm" ] || [ "$H_PROFILE" == "both" ]; then RUN_TM=true; fi
+    # 🚨 THE FIX: Let the script accept "tm" (from your YAML Matrix) or the dynamic ORG_PREFIX
+    if [ "$H_PROFILE" == "tm" ] || [ "$H_PROFILE" == "$ORG_PREFIX" ] || [ "$H_PROFILE" == "both" ]; then RUN_ORG=true; fi
+    
     if [ "$H_PROFILE" == "cis" ] || [ "$H_PROFILE" == "both" ]; then RUN_CIS=true; fi
     echo -e "${GREEN}✅ CI/CD Pipeline: Running profile -> $H_PROFILE${NC}"
 else
-    echo -e "1) ${BOLD}TM CUSTOM BASELINE${NC}   (Run custom playbooks/rules)"
+    echo -e "1) ${BOLD}${ORG_NAME^^} CUSTOM BASELINE${NC}   (Run custom playbooks/rules)"
     echo -e "2) ${BOLD}CIS DEFAULT BASELINE${NC} (Run standard CIS playbooks/rules)"
     echo -e "3) ${BOLD}RUN BOTH SECURELY${NC}    (Comprehensive Audit)"
     read -p "Choose profile mode [1-3]: " profile_choice
 
-    if [ "$profile_choice" == "1" ] || [ "$profile_choice" == "3" ]; then RUN_TM=true; fi
+    if [ "$profile_choice" == "1" ] || [ "$profile_choice" == "3" ]; then RUN_ORG=true; fi
     if [ "$profile_choice" == "2" ] || [ "$profile_choice" == "3" ]; then RUN_CIS=true; fi
 fi
 
@@ -372,7 +393,7 @@ if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
     echo -e "======================================================${NC}"
     for IP in "${RHEL_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP & SSG Baselines on RHEL Node: $IP...${NC}"
-        ssh -t -o BatchMode=yes -o StrictHostKeyChecking=no azureuser@${IP} "sudo dnf install -y openscap-scanner scap-security-guide"
+        ssh -t -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf install -y openscap-scanner scap-security-guide"
     done
 fi
 
@@ -412,11 +433,11 @@ run_phase_1() {
             scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html ./report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
         
-        if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - TM] Scanning $IP...${NC}"
+        if [ "$RUN_ORG" == true ]; then
+            echo -e "${GREEN}📦 [UBUNTU $UBUNTU_VER - $ORG_NAME] Scanning $IP...${NC}"
             scp -o StrictHostKeyChecking=no "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" ${UBUNTU_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_before_TM_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
-            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_TM_UBUNTU_${IP}.html ./report_before_TM_UBUNTU_${IP}.html > /dev/null 2>&1 || true
+            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
+            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html ./report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
     done
     
@@ -424,14 +445,14 @@ run_phase_1() {
     for IP in "${RHEL_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL - CIS L${OS_LVL}] Scanning $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); if [ -z \"\$TARGET_XML\" ]; then echo '❌ ERROR: SCAP XML missing! scap-security-guide failed to install.'; exit 1; fi; echo \"   ↳ Discovered Baseline: \$TARGET_XML\"; sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$TARGET_XML\"" || true
-            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_before_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); if [ -z \"\$TARGET_XML\" ]; then echo '❌ ERROR: SCAP XML missing! scap-security-guide failed to install.'; exit 1; fi; echo \"   ↳ Discovered Baseline: \$TARGET_XML\"; sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$TARGET_XML\"" || true
+            scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_before_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
-        if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL - TM] Scanning $IP...${NC}"
-            scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" azureuser@${IP}:/tmp/ > /dev/null 2>&1 || true
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_before_TM_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" || true
-            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_TM_RHEL_${IP}.html ./report_before_TM_RHEL_${IP}.html > /dev/null 2>&1 || true
+        if [ "$RUN_ORG" == true ]; then
+            echo -e "${GREEN}🔴 [RHEL - $ORG_NAME] Scanning $IP...${NC}"
+            scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" || true
+            scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html ./report_before_${ORG_PREFIX^^}_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
     done
     
@@ -439,16 +460,12 @@ run_phase_1() {
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}📦 [WINDOWS - CIS L${WIN_INSPEC_LVL}] Scanning $IP...${NC}"
-            
-            # 🚨 SWAPPED: Now using Cinc Auditor natively without license flags
             cinc-auditor exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
         fi
         
-        if [ "$RUN_TM" == true ]; then
-            echo -e "${CYAN}🔍 [WINDOWS - TM] Scanning $IP...${NC}"
-            
-            # 🚨 SWAPPED: Now using Cinc Auditor natively
-            cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_TM_WIN_${IP}.json
+        if [ "$RUN_ORG" == true ]; then
+            echo -e "${CYAN}🔍 [WINDOWS - $ORG_NAME] Scanning $IP...${NC}"
+            cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json
         fi
     done
 }
@@ -469,15 +486,15 @@ run_remediation() {
                 ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "rm -f /tmp/report_remediation_CIS_${IP}.html"
             done
         fi   
-        if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}▶️ [TM] Running Custom Ubuntu Playbook...${NC}"
+        if [ "$RUN_ORG" == true ]; then
+            echo -e "${GREEN}▶️ [$ORG_NAME] Running Custom Ubuntu Playbook...${NC}"
             ansible-playbook -i inventory.ini $UBUNTU_CUSTOM_PLAYBOOK --limit ubuntu_nodes
         fi
     fi
 
     if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
-        if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}▶️ [TM] Running Custom RHEL Playbook...${NC}"
+        if [ "$RUN_ORG" == true ]; then
+            echo -e "${GREEN}▶️ [$ORG_NAME] Running Custom RHEL Playbook...${NC}"
             ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rhel_nodes
         fi
     fi
@@ -494,8 +511,8 @@ run_remediation() {
             fi
             ansible-playbook -i inventory.ini $WIN_CIS_PLAYBOOK --limit windows_nodes $EXTRA_VARS
         fi
-        if [ "$RUN_TM" == true ]; then
-            echo -e "${CYAN}▶️ [HARDENING - TM] Applying Baseline as $AUDIT_USER...${NC}"
+        if [ "$RUN_ORG" == true ]; then
+            echo -e "${CYAN}▶️ [HARDENING - $ORG_NAME] Applying Baseline as $AUDIT_USER...${NC}"
             ansible-playbook -i inventory.ini $WIN_CUSTOM_PLAYBOOK --limit windows_nodes
         fi
     fi
@@ -511,33 +528,17 @@ run_phase_4() {
         UBUNTU_VER=${RAW_VER:-2404}
         UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
 
-        FILE_EXISTS=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "[ -f $UBUNTU_CIS_XCCDF ] && echo 'YES' || echo 'NO'" 2>/dev/null)
-        
-        if [ "$FILE_EXISTS" == "NO" ]; then
-            echo -e "${YELLOW}   ⚠️ Missing official baseline for Ubuntu ${UBUNTU_VER}. Auto-injecting v0.1.80 via Python...${NC}"
-            ssh -t -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "
-                cd /tmp && \
-                wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.80/scap-security-guide-0.1.80.zip && \
-                python3 -m zipfile -e scap-security-guide-0.1.80.zip . && \
-                sudo mkdir -p /usr/share/xml/scap/ssg/content/ && \
-                sudo cp scap-security-guide-0.1.80/ssg-ubuntu${UBUNTU_VER}-ds.xml /usr/share/xml/scap/ssg/content/ 2>/dev/null || \
-                sudo cp scap-security-guide-0.1.80/ssg-ubuntu2204-ds.xml /usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml && \
-                rm -rf scap-security-guide-0.1.80*
-            " > /dev/null 2>&1 || true
-            echo -e "${GREEN}   ✅ Baseline injected successfully!${NC}"
-        fi
-
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - CIS L${OS_LVL}] Verifying $IP...${NC}"
             ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF" > /dev/null 2>&1 || true
             scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html ./report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
         
-        if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - TM] Verifying $IP...${NC}"
+        if [ "$RUN_ORG" == true ]; then
+            echo -e "${GREEN}✅ [UBUNTU $UBUNTU_VER - $ORG_NAME] Verifying $IP...${NC}"
             scp -o StrictHostKeyChecking=no "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" ${UBUNTU_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_after_TM_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)" > /dev/null 2>&1 || true
-            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_TM_UBUNTU_${IP}.html ./report_after_TM_UBUNTU_${IP}.html > /dev/null 2>&1 || true
+            ssh -t -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)" > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html ./report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html > /dev/null 2>&1 || true
         fi
     done
     
@@ -545,17 +546,17 @@ run_phase_4() {
     for IP in "${RHEL_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL - CIS L${OS_LVL}] Verifying $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "
+            ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                 XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
                 sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$XML_FILE\"
             " || true
-            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
-        if [ "$RUN_TM" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL - TM] Verifying $IP...${NC}"
-            scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" azureuser@${IP}:/tmp/ > /dev/null 2>&1 || true
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_after_TM_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" || true
-            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_after_TM_RHEL_${IP}.html ./report_after_TM_RHEL_${IP}.html > /dev/null 2>&1 || true
+        if [ "$RUN_ORG" == true ]; then
+            echo -e "${GREEN}🔴 [RHEL - $ORG_NAME] Verifying $IP...${NC}"
+            scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" || true
+            scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html ./report_after_${ORG_PREFIX^^}_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
     done
     
@@ -563,16 +564,12 @@ run_phase_4() {
     for IP in "${WINDOWS_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}✅ [WINDOWS - CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
-            
-            # 🚨 SWAPPED: Running Cinc Auditor natively
             cinc-auditor exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
         fi
         
-        if [ "$RUN_TM" == true ]; then
-            echo -e "${CYAN}✅ [WINDOWS - TM] Verifying $IP...${NC}"
-            
-            # 🚨 SWAPPED: Running Cinc Auditor natively
-            cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_TM_WIN_${IP}.json
+        if [ "$RUN_ORG" == true ]; then
+            echo -e "${CYAN}✅ [WINDOWS - $ORG_NAME] Verifying $IP...${NC}"
+            cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_${ORG_PREFIX^^}_WIN_${IP}.json
         fi
     done
 }
@@ -607,7 +604,7 @@ run_cleanup() {
             echo -e "   ${YELLOW}Removing tools & nuking user from RHEL: $IP...${NC}"
             
             # 1. Uninstall tools normally over SSH
-            ssh -n -o BatchMode=yes azureuser@${IP} "
+            ssh -n -o BatchMode=yes ${GHOST_USER}@${IP} "
                 sudo dnf remove -y openscap-scanner scap-security-guide -C --setopt=metadata_expire=never
             " > /dev/null 2>&1
             
@@ -632,7 +629,7 @@ run_cleanup() {
                     az network nsg rule delete -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_WinRM_Runner_Only" -o none > /dev/null 2>&1 || true
                 fi
 
-                echo -e "      🔌 Disabling WinRM & Deleting TM_Admin..."
+                echo -e "      🔌 Disabling WinRM & Deleting $AUDIT_USER..."
                 az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunPowerShellScript --scripts "
                     Stop-Service WinRM -WarningAction SilentlyContinue; 
                     Set-Service WinRM -StartupType Disabled; 
