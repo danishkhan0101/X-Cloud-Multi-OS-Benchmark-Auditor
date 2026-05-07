@@ -387,7 +387,7 @@ if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
     echo -e "======================================================${NC}"
     for IP in "${RHEL_MACHINES[@]}"; do
         echo -e "   ${YELLOW}Installing OpenSCAP & SSG Baselines on RHEL Node: $IP...${NC}"
-        ssh -t -o BatchMode=yes -o StrictHostKeyChecking=no azureuser@${IP} "sudo dnf install -y openscap-scanner scap-security-guide"
+        ssh -t -o BatchMode=yes -o StrictHostKeyChecking=no tm_audit@${IP} "sudo dnf install -y openscap-scanner scap-security-guide"
     done
 fi
 
@@ -439,14 +439,14 @@ run_phase_1() {
     for IP in "${RHEL_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL - CIS L${OS_LVL}] Scanning $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); if [ -z \"\$TARGET_XML\" ]; then echo '❌ ERROR: SCAP XML missing! scap-security-guide failed to install.'; exit 1; fi; echo \"   ↳ Discovered Baseline: \$TARGET_XML\"; sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$TARGET_XML\"" || true
-            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_before_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no tm_audit@${IP} "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); if [ -z \"\$TARGET_XML\" ]; then echo '❌ ERROR: SCAP XML missing! scap-security-guide failed to install.'; exit 1; fi; echo \"   ↳ Discovered Baseline: \$TARGET_XML\"; sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$TARGET_XML\"" || true
+            scp -o StrictHostKeyChecking=no tm_audit@${IP}:/tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_before_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}🔴 [RHEL - TM] Scanning $IP...${NC}"
-            scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" azureuser@${IP}:/tmp/ > /dev/null 2>&1 || true
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_before_TM_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" || true
-            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_before_TM_RHEL_${IP}.html ./report_before_TM_RHEL_${IP}.html > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" tm_audit@${IP}:/tmp/ > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no tm_audit@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_before_TM_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" || true
+            scp -o StrictHostKeyChecking=no tm_audit@${IP}:/tmp/report_before_TM_RHEL_${IP}.html ./report_before_TM_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
     done
     
@@ -560,17 +560,17 @@ run_phase_4() {
     for IP in "${RHEL_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}🔴 [RHEL - CIS L${OS_LVL}] Verifying $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "
+            ssh -n -o StrictHostKeyChecking=no tm_audit@${IP} "
                 XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
                 sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$XML_FILE\"
             " || true
-            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no tm_audit@${IP}:/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
         if [ "$RUN_TM" == true ]; then
             echo -e "${GREEN}🔴 [RHEL - TM] Verifying $IP...${NC}"
-            scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" azureuser@${IP}:/tmp/ > /dev/null 2>&1 || true
-            ssh -n -o StrictHostKeyChecking=no azureuser@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_after_TM_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" || true
-            scp -o StrictHostKeyChecking=no azureuser@${IP}:/tmp/report_after_TM_RHEL_${IP}.html ./report_after_TM_RHEL_${IP}.html > /dev/null 2>&1 || true
+            scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" tm_audit@${IP}:/tmp/ > /dev/null 2>&1 || true
+            ssh -n -o StrictHostKeyChecking=no tm_audit@${IP} "sudo /usr/bin/oscap xccdf eval --profile xccdf_com.tm_profile_lsb --report /tmp/report_after_TM_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" || true
+            scp -o StrictHostKeyChecking=no tm_audit@${IP}:/tmp/report_after_TM_RHEL_${IP}.html ./report_after_TM_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
     done
     
@@ -622,7 +622,7 @@ run_cleanup() {
             echo -e "   ${YELLOW}Removing tools & nuking user from RHEL: $IP...${NC}"
             
             # 1. Uninstall tools normally over SSH
-            ssh -n -o BatchMode=yes azureuser@${IP} "
+            ssh -n -o BatchMode=yes tm_audit@${IP} "
                 sudo dnf remove -y openscap-scanner scap-security-guide -C --setopt=metadata_expire=never
             " > /dev/null 2>&1
             
