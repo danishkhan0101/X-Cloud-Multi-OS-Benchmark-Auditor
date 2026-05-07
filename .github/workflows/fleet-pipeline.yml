@@ -170,6 +170,7 @@ jobs:
           echo "🎯 Targeting Environment: $TARGET_ENV"
           echo "📋 Running Profile: $PROFILE in Mode: $MODE"
           
+          # Change this line to match your ACTUAL filename in the repo
           chmod +x tm_multi_os_benchmark.sh
           ./tm_multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP"
       
