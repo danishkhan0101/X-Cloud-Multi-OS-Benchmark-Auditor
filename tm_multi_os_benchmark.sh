@@ -190,19 +190,26 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
             # Extract the public key into a variable for the payload
             PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
             
-            # This payload creates the directory, appends the key, and fixes permissions 
-            # as the root user, bypassing all standard SSH restrictions.
+            # This payload injects the key, fixes permissions, resets SELinux, 
+            # AND overrides RHEL's strict crypto policy to allow GitHub Runner keys.
             az vm run-command invoke -g "$RG_NAME" -n "$vm_name" --command-id RunShellScript --scripts "
+                # 1. Inject the Key
                 mkdir -p /home/$LINUX_USER/.ssh
                 echo '$PUB_KEY' >> /home/$LINUX_USER/.ssh/authorized_keys
+                
+                # 2. Fix Permissions
                 chown -R $LINUX_USER:$LINUX_USER /home/$LINUX_USER/.ssh
                 chmod 700 /home/$LINUX_USER/.ssh
                 chmod 600 /home/$LINUX_USER/.ssh/authorized_keys
                 
-                # 🚨 THE RHEL FIX: Restore SELinux contexts so SSH daemon can actually read the key!
+                # 3. Reset SELinux (For RHEL)
                 if command -v restorecon &> /dev/null; then
                     restorecon -Rv /home/$LINUX_USER/.ssh
                 fi
+                
+                # 4. THE RHEL FIX: Override Crypto Policy to allow RSA keys
+                echo 'PubkeyAcceptedKeyTypes +ssh-rsa' > /etc/ssh/sshd_config.d/99-runner-key.conf 2>/dev/null || echo 'PubkeyAcceptedKeyTypes +ssh-rsa' >> /etc/ssh/sshd_config
+                systemctl restart sshd
                 
                 echo 'SSH Key Injection Complete'
             " -o none > /dev/null 2>&1 || true
