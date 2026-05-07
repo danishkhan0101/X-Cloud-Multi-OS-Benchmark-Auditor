@@ -236,18 +236,16 @@ jobs:
           pattern: raw-json-*
           merge-multiple: true
 
-      - name: 🛠️ Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: 📦 Install MITRE SAF CLI
-        run: npm install -g @mitre/saf
-
-      - name: 🏗️ Generate Heimdall HTML
+      - name: 🏗️ Generate Heimdall HTML (Via Docker)
         run: |
-          mkdir heimdall-report
-          saf generate heimdall -i all-reports/*.json -o heimdall-report/Fleet-Security-Dashboard.html
+          mkdir -p heimdall-report
+          
+          # We use the official Docker image to completely bypass NPM errors!
+          # We mount the GitHub workspace to '/share' inside the container.
+          docker run --rm -v ${{ github.workspace }}:/share mitre/saf \
+            generate heimdall \
+            -i /share/all-reports \
+            -o /share/heimdall-report/Fleet-Security-Dashboard.html
 
       - name: 💾 Upload Heimdall Artifact
         uses: actions/upload-artifact@v4
