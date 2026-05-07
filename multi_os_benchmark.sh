@@ -322,7 +322,9 @@ RUN_ORG=false
 RUN_CIS=false
 
 if [ "$HEADLESS" == true ]; then
-    if [ "$H_PROFILE" == "custom" ] || [ "$H_PROFILE" == "both" ]; then RUN_ORG=true; fi
+    # 🚨 THE FIX: Let the script accept "tm" (from your YAML Matrix) or the dynamic ORG_PREFIX
+    if [ "$H_PROFILE" == "tm" ] || [ "$H_PROFILE" == "$ORG_PREFIX" ] || [ "$H_PROFILE" == "both" ]; then RUN_ORG=true; fi
+    
     if [ "$H_PROFILE" == "cis" ] || [ "$H_PROFILE" == "both" ]; then RUN_CIS=true; fi
     echo -e "${GREEN}✅ CI/CD Pipeline: Running profile -> $H_PROFILE${NC}"
 else
