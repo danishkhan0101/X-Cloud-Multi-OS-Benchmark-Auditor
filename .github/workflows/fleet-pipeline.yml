@@ -236,17 +236,33 @@ jobs:
           pattern: raw-json-*
           merge-multiple: true
 
-      - name: 🏗️ Generate Heimdall HTML (Fixed Docker)
+      - name: 🏗️ Generate Heimdall HTML (Time-Capsule Method)
         run: |
           mkdir -p heimdall-report
           
-          # THE FIX: We use --entrypoint sh to force the container's shell to expand the *.json wildcard.
-          # This guarantees it reads the files, not the folder!
-          docker run --rm -v ${{ github.workspace }}:/share --entrypoint sh mitre/saf:latest -c "saf generate heimdall -i /share/all-reports/*.json -o /share/heimdall-report/Fleet-Security-Dashboard.html"
+          # We use a Ruby 2.7 Docker container to bypass the OpenSSL 3.0 crashes on modern Ubuntu runners!
+          docker run --rm -v ${{ github.workspace }}:/share ruby:2.7 sh -c "
+            echo '📦 Installing Heimdall Tools inside Time-Capsule...'
+            gem install heimdall_tools --no-document
+            
+            cd /share
+            
+            echo '🧠 Merging Matrix JSON reports into Heimdall Database...'
+            for file in all-reports/*.json; do
+              echo \"   -> Adding \$file\"
+              heimdall_tools results add \"\$file\"
+            done
+            
+            echo '🏗️ Generating standalone HTML dashboard...'
+            heimdall_tools report view --output heimdall-report
+            
+            # Fix permissions so the GitHub runner can zip the files
+            chmod -R 777 heimdall-report
+          "
 
       - name: 💾 Upload Heimdall Artifact
         uses: actions/upload-artifact@v4
         with:
           name: 📊 Interactive-Heimdall-Dashboard
-          path: heimdall-report/Fleet-Security-Dashboard.html
+          path: heimdall-report/
           retention-days: 30
