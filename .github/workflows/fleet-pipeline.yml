@@ -236,20 +236,28 @@ jobs:
           pattern: raw-json-*
           merge-multiple: true
 
-      - name: 🏗️ Generate Heimdall HTML (Via Docker)
+      - name: 🛠️ Setup Ruby Environment
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2' # Stable version for Heimdall Tools
+
+      - name: 📦 Install Heimdall Tools
+        run: gem install heimdall_tools
+
+      - name: 🏗️ Generate Unified Heimdall HTML
         run: |
-          mkdir -p heimdall-report
+          # 1. Loop through ALL JSONs from the Matrix and add them to the Heimdall Database
+          for file in all-reports/*.json; do
+            echo "Processing: $file"
+            heimdall_tools results add "$file"
+          done
           
-          # We use the official Docker image to completely bypass NPM errors!
-          # We mount the GitHub workspace to '/share' inside the container.
-          docker run --rm -v ${{ github.workspace }}:/share mitre/saf \
-            generate heimdall \
-            -i /share/all-reports \
-            -o /share/heimdall-report/Fleet-Security-Dashboard.html
+          # 2. Export the combined database as a standalone HTML site
+          heimdall_tools report view --output heimdall-report
 
       - name: 💾 Upload Heimdall Artifact
         uses: actions/upload-artifact@v4
         with:
           name: 📊 Interactive-Heimdall-Dashboard
-          path: heimdall-report/Fleet-Security-Dashboard.html
+          path: heimdall-report/
           retention-days: 30
