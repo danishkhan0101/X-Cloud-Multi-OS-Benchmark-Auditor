@@ -240,19 +240,29 @@ jobs:
         run: |
           mkdir -p Fleet-Security-Dashboard
           
-          # 1. Download the official, pre-compiled Heimdall Lite static web app
-          echo "📥 Downloading Heimdall Lite..."
-          curl -L https://github.com/mitre/heimdall2/releases/latest/download/heimdall-lite.zip -o heimdall-lite.zip
+          # 1. Claude's NPM Pack Trick: Download the static app directly from the NPM registry
+          echo "📥 Downloading Heimdall Lite from NPM..."
+          npm pack @mitre/heimdall-lite --pack-destination /tmp/
           
-          # 2. Extract it into our dashboard folder
-          unzip -q heimdall-lite.zip -d Fleet-Security-Dashboard/
+          # 2. Extract the Vue application package
+          mkdir -p Fleet-Security-Dashboard/viewer
+          tar -xzf /tmp/mitre-heimdall-lite-*.tgz -C Fleet-Security-Dashboard/viewer --strip-components=1
           
-          # 3. Create a folder for the scan data and copy your JSONs into it
+          # 3. Create a secure, offline folder for your corporate scan data
           mkdir -p Fleet-Security-Dashboard/scan_results
           cp all-reports/*.json Fleet-Security-Dashboard/scan_results/
           
-          # Clean up the zip file
-          rm heimdall-lite.zip
+          # 4. Create an easy Launcher file so you don't have to dig for the index.html
+          cat > Fleet-Security-Dashboard/Double-Click-Me.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta http-equiv="refresh" content="0; url=viewer/dist/index.html" />
+              <title>TM DevSecOps Dashboard</title>
+          </head>
+          <body>Redirecting to secure offline viewer...</body>
+          </html>
+          EOF
 
       - name: 💾 Upload Offline Dashboard Artifact
         uses: actions/upload-artifact@v4
