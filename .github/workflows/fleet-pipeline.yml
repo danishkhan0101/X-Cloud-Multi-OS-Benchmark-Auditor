@@ -236,14 +236,15 @@ jobs:
           pattern: raw-json-*
           merge-multiple: true
 
-      - name: 🏗️ Generate Heimdall HTML (Time-Capsule + Legacy Pin)
+      - name: 🏗️ Generate Heimdall HTML (Time-Capsule + Double Legacy Pin)
         run: |
           mkdir -p heimdall-report
           
           # Spin up the Ruby 2.7 container to bypass modern OpenSSL restrictions
           docker run --rm -v ${{ github.workspace }}:/share ruby:2.7 sh -c "
-            echo '📦 Pinning legacy Nokogiri dependency...'
+            echo '📦 Pinning legacy dependencies...'
             gem install nokogiri -v 1.15.7 --no-document
+            gem install multi_xml -v 0.6.0 --no-document
             
             echo '📦 Installing Heimdall Tools...'
             gem install heimdall_tools --no-document
