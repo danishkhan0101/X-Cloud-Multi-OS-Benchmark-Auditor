@@ -1,6 +1,3 @@
-You got it. Here is the entire, complete README in a single raw markdown block so you can copy it with one click and drop it straight into your repository.
-
-```markdown
 <div align="center">
 
 # 🛡️ Fleet Commander
