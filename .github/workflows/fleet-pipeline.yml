@@ -236,18 +236,19 @@ jobs:
           pattern: raw-json-*
           merge-multiple: true
 
-      - name: 🏗️ Generate Heimdall HTML (Time-Capsule + Double Legacy Pin)
+      - name: 🏗️ Generate Heimdall HTML (Fully Locked Time-Capsule)
         run: |
           mkdir -p heimdall-report
           
-          # Spin up the Ruby 2.7 container to bypass modern OpenSSL restrictions
+          # Spin up the Ruby 2.7 container to bypass modern OS restrictions
           docker run --rm -v ${{ github.workspace }}:/share ruby:2.7 sh -c "
             echo '📦 Pinning legacy dependencies...'
             gem install nokogiri -v 1.15.7 --no-document
             gem install multi_xml -v 0.6.0 --no-document
             
-            echo '📦 Installing Heimdall Tools...'
-            gem install heimdall_tools --no-document
+            echo '📦 Installing Heimdall Tools (Pre-Deprecation Version)...'
+            # 🚨 THE FIX: Force version 1.3.0 before MITRE deleted the commands!
+            gem install heimdall_tools -v 1.3.0 --no-document
             
             cd /share
             
