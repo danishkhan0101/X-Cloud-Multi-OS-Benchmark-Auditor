@@ -157,7 +157,7 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
         # --- DISTRO ROUTER ---
         if [[ "$offer" == *"rhel"* ]] || [[ "${vm_name,,}" == *"rhel"* ]]; then
             DISTRO="RHEL"
-            LINUX_USER="azureuser"
+            LINUX_USER="tm_audit"   # 🚨 CHANGED: We are abandoning azureuser!
         else
             DISTRO="Ubuntu"
             LINUX_USER="$UBUNTU_USER"
