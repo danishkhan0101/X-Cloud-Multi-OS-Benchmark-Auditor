@@ -190,28 +190,30 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
             # Extract the public key into a variable for the payload
             PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
             
-            # This payload injects the key, fixes permissions, resets SELinux, 
-            # AND overrides RHEL's strict crypto policy to allow GitHub Runner keys.
+            # THE GHOST USER PAYLOAD: Abandon azureuser, build a new backdoor
             az vm run-command invoke -g "$RG_NAME" -n "$vm_name" --command-id RunShellScript --scripts "
-                # 1. Inject the Key
-                mkdir -p /home/$LINUX_USER/.ssh
-                echo '$PUB_KEY' >> /home/$LINUX_USER/.ssh/authorized_keys
+                # 1. Create the Ghost User
+                useradd -m -s /bin/bash $LINUX_USER || true
                 
-                # 2. Fix Permissions
+                # 2. Grant Passwordless Sudo (God Mode)
+                echo '$LINUX_USER ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-tm-audit
+                chmod 440 /etc/sudoers.d/99-tm-audit
+                
+                # 3. Inject the SSH Key
+                mkdir -p /home/$LINUX_USER/.ssh
+                echo '$PUB_KEY' > /home/$LINUX_USER/.ssh/authorized_keys
                 chown -R $LINUX_USER:$LINUX_USER /home/$LINUX_USER/.ssh
                 chmod 700 /home/$LINUX_USER/.ssh
                 chmod 600 /home/$LINUX_USER/.ssh/authorized_keys
                 
-                # 3. Reset SELinux (For RHEL)
+                # 4. RHEL Overrides (SELinux & Crypto Policy)
                 if command -v restorecon &> /dev/null; then
-                    restorecon -Rv /home/$LINUX_USER/.ssh
+                    restorecon -Rv /home/$LINUX_USER/.ssh >/dev/null 2>&1 || true
                 fi
-                
-                # 4. THE RHEL FIX: Override Crypto Policy to allow RSA keys
-                echo 'PubkeyAcceptedKeyTypes +ssh-rsa' > /etc/ssh/sshd_config.d/99-runner-key.conf 2>/dev/null || echo 'PubkeyAcceptedKeyTypes +ssh-rsa' >> /etc/ssh/sshd_config
+                echo 'PubkeyAcceptedKeyTypes +ssh-rsa' > /etc/ssh/sshd_config.d/99-runner-key.conf 2>/dev/null || true
                 systemctl restart sshd
                 
-                echo 'SSH Key Injection Complete'
+                echo 'Ghost User Injection Complete'
             " -o none > /dev/null 2>&1 || true
             
             echo -e "${YELLOW}   ⏳ Waiting 15s for file system sync...${NC}"
@@ -299,7 +301,7 @@ for ip in "${UBUNTU_MACHINES[@]}"; do echo "${ip} ansible_user=${UBUNTU_USER}" >
 echo "" >> inventory.ini
 
 echo "[rhel_nodes]" >> inventory.ini
-for ip in "${RHEL_MACHINES[@]}"; do echo "${ip} ansible_user=azureuser" >> inventory.ini; done
+for ip in "${RHEL_MACHINES[@]}"; do echo "${ip} ansible_user=tm_audit" >> inventory.ini; done
 echo "" >> inventory.ini
 
 echo "[windows_nodes]" >> inventory.ini
