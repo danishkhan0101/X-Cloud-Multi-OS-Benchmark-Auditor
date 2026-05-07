@@ -1,3 +1,6 @@
+You got it. Here is the entire, complete README in a single raw markdown block so you can copy it with one click and drop it straight into your repository.
+
+```markdown
 <div align="center">
 
 # 🛡️ Fleet Commander
@@ -60,25 +63,27 @@ graph TD
     N --> O((Phase 5: The Ghost Method Cleanup))
     
     style O fill:#ff4d4d,stroke:#333,stroke-width:2px,color:#fff
-
-
 ```
-🚀 Getting Started
-1. Prerequisites
-Ensure the machine or CI/CD runner executing this orchestrator has the following tools installed:
 
-az (Azure CLI) - Authenticated with your service principal.
+---
 
-ansible - For remediation routing.
+## 🚀 Quick Start Guide
 
-cinc-auditor (or Chef InSpec) - For Windows compliance scanning.
+Get Fleet Commander up and running in minutes.
 
-python3 - For extracting legacy SCAP packages.
+### 1️⃣ Prerequisites
+Ensure your runner (or local machine) is equipped with the following toolchain:
+* ☁️ **`az` (Azure CLI)** - Authenticated with your service principal.
+* ⚙️ **`ansible`** - For routing remediation playbooks.
+* 🔍 **`cinc-auditor`** (or Chef InSpec) - For Windows compliance scanning.
+* 🐍 **`python3`** - For unpacking legacy SCAP packages dynamically.
 
-2. Configuration (.env)
-Fleet Commander is completely dynamic. For local testing, copy the .env.example file to .env and add your target infrastructure variables. (Note: Never commit your .env file to version control).
+### 2️⃣ Configuration (`.env`)
+Fleet Commander is **100% dynamic**. For local testing, copy the `.env.example` file to `.env` and inject your infrastructure variables.
 
-Code snippet
+> ⚠️ **SECURITY WARNING:** Never commit your `.env` file to version control. If using GitHub Actions, inject these via **Repository Secrets & Variables**.
+
+```env
 # --- Azure Infrastructure ---
 AZURE_RG_NAME="YOUR_RESOURCE_GROUP"
 AZURE_KV_NAME="YOUR_KEYVAULT_NAME"
@@ -93,35 +98,55 @@ CUSTOM_XCCDF_PROFILE="xccdf_com.mycorp_profile_lsb"
 # --- Default Fallback Admins ---
 LINUX_ADMIN_USER="ubuntu"
 WINDOWS_ADMIN_USER="Windows_Admin"
-3. Directory Structure
-Populate the corresponding directories with your organization's custom SCAP (XCCDF/OVAL) XML files, InSpec Ruby benchmarks, and Ansible Playbooks:
+```
 
-Plaintext
-├── multi_os_benchmark.sh        # Core Orchestrator
-├── ubuntu-custom/               # Custom Ubuntu Rules
-├── rhel-custom/                 # Custom RHEL Rules
-├── window-custom/               # Custom Windows Rules
-└── window-default-cis/          # Standard Windows CIS Rules
-💻 Execution Methods
-Option A: Interactive Mode (Local)
-Run the script without arguments to launch the interactive terminal GUI. Ideal for local testing and manual execution.
+### 3️⃣ Directory Structure
+Drop your organization's custom SCAP (XCCDF/OVAL) files, InSpec Ruby benchmarks, and Ansible Playbooks into their respective operational folders:
 
-Bash
+```text
+📦 Fleet-Commander
+├── 📜 multi_os_benchmark.sh        # Core Orchestrator
+├── 📂 ubuntu-custom/               # Custom Ubuntu Rules
+├── 📂 rhel-custom/                 # Custom RHEL Rules
+├── 📂 window-custom/               # Custom Windows Rules
+└── 📂 window-default-cis/          # Standard Windows CIS Rules
+```
+
+---
+
+## 💻 Execution Methods
+
+Whether you are testing locally or running a full DevSecOps pipeline, Fleet Commander adapts to your workflow.
+
+### 🕹️ Option A: Interactive Mode (Local)
+Run the script without arguments to launch the **Interactive Terminal GUI**. Perfect for localized testing and manual execution.
+
+```bash
 chmod +x multi_os_benchmark.sh
 ./multi_os_benchmark.sh
-Option B: Headless Mode (CI/CD Pipeline)
-Pass parameters to fully automate the pipeline in GitHub Actions, GitLab CI, or Jenkins.
+```
 
-Syntax:
+### 🤖 Option B: Headless Mode (CI/CD Pipeline)
+Pass parameters to completely automate the pipeline in GitHub Actions, GitLab CI, or Jenkins.
 
-Bash
+**Base Syntax:**
+```bash
 ./multi_os_benchmark.sh --headless --profile <custom|cis|both> --mode <scan|remediate|full> --targets <Tag|all>
-Example 1: Full Audit on 'Prod' Tag
+```
 
-Bash
+**🎯 Example 1: Full Audit on the 'Prod' Tag**
+```bash
 ./multi_os_benchmark.sh --headless --profile both --mode scan --targets Prod
-Example 2: CIS Level 1 Scan & Fix on All VMs (with cleanup)
+```
 
-Bash
+**🎯 Example 2: CIS Level 1 Scan & Auto-Fix (With Zero-Trust Cleanup)**
+```bash
 export CIS_LEVEL="Level 1"
 ./multi_os_benchmark.sh --headless --profile cis --mode full --targets all --cleanup true
+```
+
+---
+<div align="center">
+  <i>Engineered for robust compliance and zero-trust automation.</i>
+</div>
+```
