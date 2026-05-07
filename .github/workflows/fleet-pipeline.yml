@@ -222,7 +222,7 @@ jobs:
           path: '**/*.json'
           retention-days: 1
 
-  # 🌐 JOB 3: GENERATE OFFLINE HEIMDALL DASHBOARD
+  # 🌐 JOB 3: GENERATE AUTO-LOADING HEIMDALL DASHBOARD
   generate-heimdall:
     needs: run-audit
     if: always() 
@@ -236,37 +236,17 @@ jobs:
           pattern: raw-json-*
           merge-multiple: true
 
-      - name: 🏗️ Package Offline Heimdall Viewer
+      - name: 🏗️ Bake JSON Data into HTML Dashboard
         run: |
           mkdir -p Fleet-Security-Dashboard
           
-          # 1. Claude's NPM Pack Trick: Download the static app directly from the NPM registry
-          echo "📥 Downloading Heimdall Lite from NPM..."
-          npm pack @mitre/heimdall-lite --pack-destination /tmp/
-          
-          # 2. Extract the Vue application package
-          mkdir -p Fleet-Security-Dashboard/viewer
-          tar -xzf /tmp/mitre-heimdall-lite-*.tgz -C Fleet-Security-Dashboard/viewer --strip-components=1
-          
-          # 3. Create a secure, offline folder for your corporate scan data
-          mkdir -p Fleet-Security-Dashboard/scan_results
-          cp all-reports/*.json Fleet-Security-Dashboard/scan_results/
-          
-          # 4. Create an easy Launcher file so you don't have to dig for the index.html
-          cat > Fleet-Security-Dashboard/Double-Click-Me.html << 'EOF'
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta http-equiv="refresh" content="0; url=viewer/dist/index.html" />
-              <title>TM DevSecOps Dashboard</title>
-          </head>
-          <body>Redirecting to secure offline viewer...</body>
-          </html>
-          EOF
+          # We use the official Docker image to bypass all NPM dependency errors.
+          # The 'view heimdall' command permanently embeds your JSON data inside the HTML file!
+          docker run --rm -v ${{ github.workspace }}:/share --entrypoint sh mitre/saf:latest -c "saf view heimdall -i /share/all-reports/*.json -o /share/Fleet-Security-Dashboard/TM-Audit-Dashboard.html"
 
-      - name: 💾 Upload Offline Dashboard Artifact
+      - name: 💾 Upload Auto-Loading Dashboard
         uses: actions/upload-artifact@v4
         with:
-          name: 📊 Fleet-Security-Dashboard
+          name: 📊 TM-Audit-Dashboard
           path: Fleet-Security-Dashboard/
           retention-days: 30
