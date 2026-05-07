@@ -198,6 +198,12 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
                 chown -R $LINUX_USER:$LINUX_USER /home/$LINUX_USER/.ssh
                 chmod 700 /home/$LINUX_USER/.ssh
                 chmod 600 /home/$LINUX_USER/.ssh/authorized_keys
+                
+                # 🚨 THE RHEL FIX: Restore SELinux contexts so SSH daemon can actually read the key!
+                if command -v restorecon &> /dev/null; then
+                    restorecon -Rv /home/$LINUX_USER/.ssh
+                fi
+                
                 echo 'SSH Key Injection Complete'
             " -o none > /dev/null 2>&1 || true
             
