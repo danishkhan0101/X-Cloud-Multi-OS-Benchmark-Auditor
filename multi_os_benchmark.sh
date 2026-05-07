@@ -86,7 +86,10 @@ done
 
 # Catch GitHub CIS_LEVEL or default to Level 1
 CIS_LEVEL="${CIS_LEVEL:-Level 1}"
-
+# 🚨 ADD THE TRAP HERE: Ensure cleanup runs on exit, terminal close, or script crash
+if [ "$H_CLEANUP" == "true" ]; then
+    trap run_cleanup EXIT ERR INT TERM
+fi
 # ======================================================
 # ENTERPRISE GUARDRAILS (Audit & Debug)
 # ======================================================
@@ -458,15 +461,26 @@ run_phase_1() {
     
     # --- WINDOWS SCANNING ---
     for IP in "${WINDOWS_MACHINES[@]}"; do
+        
+        # 🛡️ SECURITY FIX: Export the password to the environment to prevent process-level leaks
+        export INSPEC_PASSWORD="${AUDIT_PASS}"
+        
         if [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}📦 [WINDOWS - CIS L${WIN_INSPEC_LVL}] Scanning $IP...${NC}"
-            cinc-auditor exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
+            
+            # Executed securely without the --password flag
+            cinc-auditor exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
         fi
         
         if [ "$RUN_ORG" == true ]; then
             echo -e "${CYAN}🔍 [WINDOWS - $ORG_NAME] Scanning $IP...${NC}"
-            cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json
+            
+            # Executed securely without the --password flag
+            cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --reporter cli json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json
         fi
+        
+        # Unset the variable immediately after the loop for strict memory hygiene
+        unset INSPEC_PASSWORD
     done
 }
 
@@ -560,17 +574,28 @@ run_phase_4() {
         fi
     done
     
-    # --- WINDOWS VERIFICATION ---
+    # --- WINDOWS SCANNING ---
     for IP in "${WINDOWS_MACHINES[@]}"; do
+        
+        # 🛡️ SECURITY FIX: Export the password to the environment to prevent process-level leaks
+        export INSPEC_PASSWORD="${AUDIT_PASS}"
+        
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}✅ [WINDOWS - CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
-            cinc-auditor exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
+            echo -e "${GREEN}📦 [WINDOWS - CIS L${WIN_INSPEC_LVL}] Scanning $IP...${NC}"
+            
+            # Executed securely without the --password flag
+            cinc-auditor exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
         fi
         
         if [ "$RUN_ORG" == true ]; then
-            echo -e "${CYAN}✅ [WINDOWS - $ORG_NAME] Verifying $IP...${NC}"
-            cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_after_${ORG_PREFIX^^}_WIN_${IP}.json
+            echo -e "${CYAN}🔍 [WINDOWS - $ORG_NAME] Scanning $IP...${NC}"
+            
+            # Executed securely without the --password flag
+            cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --reporter cli json:heimdall_after_${ORG_PREFIX^^}_WIN_${IP}.json
         fi
+        
+        # Unset the variable immediately after the loop for strict memory hygiene
+        unset INSPEC_PASSWORD
     done
 }
 
