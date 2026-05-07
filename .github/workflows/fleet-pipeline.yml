@@ -153,20 +153,31 @@ jobs:
 
       - name: 🚀 Execute Fleet Commander
         env:
+          # --- Azure Infrastructure ---
           AZURE_RG_NAME: ${{ vars.AZURE_RG_NAME }}
           AZURE_KV_NAME: ${{ vars.AZURE_KV_NAME }}
           AZURE_KV_SECRET: ${{ vars.AZURE_KV_SECRET }}
+          
+          # --- Administrator Overrides ---
           LINUX_ADMIN_USER: ${{ vars.LINUX_ADMIN_USER }}
           WINDOWS_ADMIN_USER: ${{ vars.WINDOWS_ADMIN_USER }}
-          EXCLUDE_HOST_NAME: ${{ vars.EXCLUDE_HOST_NAME }}
+          
+          # --- 🚨 NEW: Open-Source Customization Variables ---
+          ORG_NAME: ${{ vars.ORG_NAME }}
+          ORG_PREFIX: ${{ vars.ORG_PREFIX }}
+          GHOST_USER: ${{ vars.GHOST_USER }}
+          CUSTOM_XCCDF_PROFILE: ${{ vars.CUSTOM_XCCDF_PROFILE }}
+          
+          # --- Pipeline States ---
           TICKET_ID: ${{ github.event.inputs.ticket_id }}
           DEBUG_MODE: ${{ github.event.inputs.debug_mode }}
           CLEANUP: ${{ github.event.inputs.cleanup_mode }}
         run: |
           echo "🎯 Targeting Environment: $TARGET_ENV"
           echo "📋 Running Profile: $PROFILE in Mode: $MODE"
-          chmod +x tm_multi_os_benchmark.sh
-          ./tm_multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP"
+          
+          chmod +x multi_os_benchmark.sh
+          ./multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP"
       
       - name: 🏷️ Generate Version Tag
         id: versioning
