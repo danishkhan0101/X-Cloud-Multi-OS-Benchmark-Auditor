@@ -1,55 +1,103 @@
-# 🛡️ Unified Compliance Pipeline (Multi-OS)
+🛡️ Fleet Commander: Multi-OS DevSecOps Compliance Auditor
+Fleet Commander is an enterprise-grade, zero-trust DevSecOps orchestrator designed to automatically discover, audit, and remediate multi-OS fleets (Ubuntu, RHEL, Windows) hosted in Microsoft Azure.
 
-An automated, Zero-Trust DevSecOps pipeline for cross-platform Azure infrastructure. This tool discovers, audits, and remediates both Ubuntu and Windows Virtual Machines against Default CIS Benchmarks and Custom Corporate (TM) Baselines.
+Built for seamless CI/CD integration, it utilizes a unique "Ghost User" auto-healing architecture to bypass locked-down SSH/WinRM configurations, dynamically injects credentials, runs Center for Internet Security (CIS) or custom organizational baselines, and completely covers its tracks post-execution.
 
-## 🚀 Features
+✨ Core Capabilities
+🧠 Dynamic Azure Discovery: Automatically queries Azure Resource Groups by Environment Tags to build real-time inventory lists of running VMs.
 
-* **Zero-Trust Identity Injection:** Bypasses default OS credentials by automatically injecting secure Audit Admin identities via the Azure Hypervisor *before* SSH/WinRM connections are established.
-* **Intelligent Auto-Discovery:** Dynamically queries Azure Resource Groups to detect running nodes, map IP addresses, and identify operating systems (Linux vs. Windows) on the fly.
-* **Stateful Execution:** Utilizes local cache tracking (`.tm_injected_vms.log`) to remember previously injected nodes, reducing pipeline execution time on subsequent runs.
-* **Multi-Protocol Scanning:** * **Ubuntu:** Agentless scanning via `oscap-ssh` with Passwordless Sudo.
-  * **Windows:** Remote compliance validation using Chef InSpec.
-* **Automated Remediation:** Seamlessly deploys Ansible Playbooks to auto-remediate failing controls.
+💉 "Ghost User" Auto-Healing: Bypasses broken cloud-init or locked default users by temporarily injecting a JIT (Just-In-Time) privileged user (audit_ghost), fixing SELinux/Crypto policies on the fly.
 
-## 🏗️ Architecture & Phases
+📊 Multi-OS Scanning: Natively routes Ubuntu/RHEL targets to OpenSCAP and Windows targets to Cinc Auditor (InSpec).
 
-The pipeline (`tm_fleet_commander.sh`) operates in a strict, modular phase execution:
+🛠️ Automated Remediation: Deploys Ansible playbooks and OpenSCAP remediation routines to fix failing compliance controls.
 
-1. **Phase 0 (Discovery & Identity):** Azure CLI queries the fabric, injects Key Vault credentials, and builds a dynamic `inventory.ini` file.
-2. **Phase 1 (Initial Baseline):** OpenSCAP and InSpec perform non-destructive security scans against CIS Level 1 and Custom Baselines.
-3. **Phase 2 & 3 (Remediation):** Ansible playbooks are deployed to harden the operating systems based on the Phase 1 findings.
-4. **Phase 4 (Verification):** A final post-remediation scan is executed to prove compliance, generating HTML and JSON artifacts.
+🧹 Post-Audit Scrubbing: Safely removes temporary NSG firewall rules, uninstalls scanner dependencies, and deletes the injected Ghost Users to return the environment to a secure state.
 
-## 📋 Prerequisites
+🤖 Headless CI/CD Mode: Fully parameterized execution for GitHub Actions, GitLab CI, or Jenkins.
 
-To run this pipeline from your Audit-Host, the following tools must be installed:
+🏗️ Project Structure
+To use this orchestrator, populate the corresponding directories with your organization's custom SCAP (XCCDF/OVAL) XML files, InSpec Ruby benchmarks, and Ansible Playbooks:
 
-* `azure-cli` (Authenticated with Contributor/User Access Admin roles)
-* `ansible`
-* `openscap-utils` (oscap-ssh)
-* `inspec` (Chef InSpec)
+Plaintext
+├── multi_os_benchmark.sh        # The Core Orchestrator
+├── .env.example                 # Template for local environment variables
+├── ubuntu-custom/               # Custom Ubuntu Rules
+│   ├── custom_xccdf.xml
+│   ├── custom_ubuntu_rules.xml
+│   └── ubuntu_custom_playbook.yml
+├── rhel-custom/                 # Custom RHEL Rules
+│   ├── custom_rhel_xccdf.xml
+│   ├── custom_rhel_rules.xml
+│   └── rhel_custom_playbook.yml
+├── window-custom/               # Custom Windows Rules
+│   ├── custom_baseline.rb
+│   └── custom_remediate.yml
+└── window-default-cis/          # Standard Windows CIS Rules
+    ├── window-baseline/
+    └── cis_remediate.yml
+(Note: Standard Linux CIS profiles are downloaded and mapped dynamically from scap-security-guide during execution).
 
-## ⚙️ Configuration & Setup
+⚙️ Configuration & Secrets
+Fleet Commander is 100% dynamic and relies on Environment Variables.
 
-This pipeline is fully parameter-driven. You must provide your own Azure infrastructure details. Do not hardcode your values into the bash script.
+For Local Execution (Terminal)
+Create a .env file in the root directory (ensure .env is in your .gitignore!):
 
-### For Local Execution (Linux Audit-Host)
-1. Copy the template: `cp .env.example .env`
-2. Edit `.env` with your specific Azure Resource Group, Key Vault, and Users.
-3. Run the script: `./tm_fleet_commander.sh`
+Code snippet
+# --- Azure Infrastructure ---
+AZURE_RG_NAME="YOUR_RESOURCE_GROUP"
+AZURE_KV_NAME="YOUR_KEYVAULT_NAME"
+AZURE_KV_SECRET="WindowsAdminPasswordSecretName"
 
-### For CI/CD Execution (GitHub Actions)
-If you fork this repository to run in your own environment, you must configure both **Variables** and **Secrets** in your GitHub repository.
+# --- Organization Customization ---
+ORG_NAME="MyCorp"
+ORG_PREFIX="custom"
+GHOST_USER="audit_ghost"
+CUSTOM_XCCDF_PROFILE="xccdf_com.mycorp_profile_lsb"
 
-#### 1. Repository Variables (Non-Sensitive)
-Go to **Settings -> Secrets and variables -> Actions -> Variables** and add the following:
-* `AZURE_RG_NAME` (e.g., Prod_Servers_RG)
-* `AZURE_KV_NAME` (e.g., Corp-Security-Vault)
-* `AZURE_KV_SECRET` (e.g., WindowsAdminPass)
-* `WINDOWS_ADMIN_USER` (e.g., svc_audit_admin)
+# --- Default Fallback Admins ---
+LINUX_ADMIN_USER="ubuntu"
+WINDOWS_ADMIN_USER="Windows_Admin"
+For CI/CD Execution (GitHub Actions)
+Map the above variables into your GitHub Repository settings under Settings > Secrets and variables > Actions.
 
-#### 2. Repository Secrets (Authentication)
-Go to **Settings -> Secrets and variables -> Actions -> Secrets** and add the following:
-* `AZURE_CREDENTIALS`: Your Azure Service Principal JSON block (used by the pipeline to authenticate with your Azure Cloud).
-* `UBUNTU_SSH_KEY`: Your private SSH key (e.g., the contents of your `~/.ssh/id_rsa` or `id_ed25519` file).
-  > **⚠️ Linux Authentication Note:** This pipeline adheres to Zero-Trust principles and does not use plain-text passwords for Linux nodes. The GitHub runner uses this private `UBUNTU_SSH_KEY` for agentless OpenSCAP and Ansible connections. You must ensure the corresponding **public key** is already present in the `~/.ssh/authorized_keys` file on all target Ubuntu VMs before running the pipeline.
+🚀 Usage
+Option A: Interactive Mode (Local)
+Run the script without arguments to launch the interactive terminal menu. Ideal for local testing and manual execution.
+
+Bash
+chmod +x multi_os_benchmark.sh
+./multi_os_benchmark.sh
+Option B: Headless Mode (CI/CD Pipeline)
+Pass arguments to fully automate the pipeline.
+
+Syntax:
+
+Bash
+./multi_os_benchmark.sh --headless --profile <custom|cis|both> --mode <scan|remediate|full> --targets <Tag|all>
+Examples:
+
+Full Audit on 'Prod' Tag:
+
+Bash
+./multi_os_benchmark.sh --headless --profile both --mode scan --targets Prod
+CIS Level 1 Scan & Fix on All VMs (with cleanup):
+
+Bash
+export CIS_LEVEL="Level 1"
+./multi_os_benchmark.sh --headless --profile cis --mode full --targets all --cleanup true
+🛠️ Prerequisites (Runner / Local Machine)
+Ensure the machine running this orchestrator has the following tools installed:
+
+az (Azure CLI) - Authenticated with az login
+
+ansible - For remediation routing
+
+cinc-auditor (or Chef InSpec) - For Windows scanning
+
+python3 - For extracting legacy SCAP packages
+
+ssh-agent - With your private key loaded (~/.ssh/id_rsa)
+
+Note: The target Azure VMs do not need anything pre-installed. The orchestrator automatically bootstraps them with OpenSCAP and required dependencies during Phase 0.
