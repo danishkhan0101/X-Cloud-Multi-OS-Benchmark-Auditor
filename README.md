@@ -31,7 +31,7 @@
 
 ## 🗺️ Pipeline Architecture
 
-
+```mermaid
 graph TD
     A[Trigger CI/CD Pipeline] --> B(Azure Resource Discovery)
     B -->|Query VMs| C{Target OS}
@@ -60,9 +60,6 @@ graph TD
     N --> O((Phase 5: The Ghost Method Cleanup))
     
     style O fill:#ff4d4d,stroke:#333,stroke-width:2px,color:#fff
-
-
----
 
 ## 🚀 Getting Started
 
