@@ -317,9 +317,8 @@ run_phase_1() {
             fi
 
             if [ "$RUN_CIS" == true ]; then
-                echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL}] Forcing RHEL/CS10 Applicability on $IP...${NC}"
+                echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL}] Forcing Deep RHEL10 Applicability on $IP...${NC}"
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    # Find RHEL 10, CentOS Stream 10, or RHEL 9
                     TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel10-ds.xml' -o -name 'ssg-cs10-ds.xml' -o -name 'ssg-rhel9-ds.xml' | sort -V | tail -n 1)
                     
                     if [ -z \"\$TARGET_XML\" ]; then
@@ -328,14 +327,32 @@ run_phase_1() {
                     fi
                     
                     echo \"   ↳ Using Content: \$TARGET_XML\"
-                    echo \"   ↳ Spoofing /etc/os-release to bypass missing CPE Dict...\"
+                    echo \"   ↳ Deep-Spoofing OS identity for OVAL applicability...\"
 
+                    # 1. BACKUP IDENTITY FILES
                     sudo cp /etc/os-release /tmp/os-release.bak
-                    sudo sed -i 's/^ID=\"rocky\"/ID=\"rhel\"/' /etc/os-release
+                    sudo cp /etc/redhat-release /tmp/redhat-release.bak 2>/dev/null || true
+                    sudo cp /etc/system-release-cpe /tmp/system-release-cpe.bak 2>/dev/null || true
 
+                    # 2. INJECT 'GOD MODE' RHEL IDENTITY
+                    sudo bash -c 'cat > /etc/os-release <<EOF
+NAME=\"Red Hat Enterprise Linux\"
+VERSION=\"10.0\"
+ID=\"rhel\"
+ID_LIKE=\"fedora\"
+VERSION_ID=\"10\"
+PLATFORM_ID=\"platform:el10\"
+EOF'
+                    sudo bash -c 'echo \"Red Hat Enterprise Linux release 10.0\" > /etc/redhat-release'
+                    sudo bash -c 'echo \"cpe:/o:redhat:enterprise_linux:10::baseos\" > /etc/system-release-cpe'
+
+                    # 3. RUN THE SCAN
                     sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
 
+                    # 4. RESTORE TRUE IDENTITY
                     sudo mv /tmp/os-release.bak /etc/os-release
+                    sudo mv /tmp/redhat-release.bak /etc/redhat-release 2>/dev/null || true
+                    sudo mv /tmp/system-release-cpe.bak /etc/system-release-cpe 2>/dev/null || true
                 " || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
