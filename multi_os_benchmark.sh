@@ -416,32 +416,42 @@ run_phase_1() {
     # 🚨 --- ROCKY SCANNING ---
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         for IP in "${ROCKY_MACHINES[@]}"; do
+            
+            # 1. Guarantee OpenSCAP is installed right before we need it
+            echo -e "   ${YELLOW}⚙️ Bootstrapping OpenSCAP on Rocky Node...${NC}"
+            ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf install -y openscap-scanner scap-security-guide" > /dev/null 2>&1
+            
             if [ "$RUN_CIS" == true ]; then
                 echo -e "${GREEN}🏔️ [Rocky - CIS L${OS_LVL}] Scanning $IP...${NC}"
-                
-                # 🚨 FIX: Output Unhidden
                 ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                     TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
                     CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
-                    
                     sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
                 " || true
-                
                 scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
             
             if [ "$RUN_ORG" == true ]; then
                 echo -e "${GREEN}🏔️ [Rocky - $ORG_NAME] Scanning $IP...${NC}"
-                scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
                 
-                # 🚨 FIX: Output Unhidden so you can read the terminal!
+                # 2. 🛡️ Validate the file exists locally before we try to SCP it!
+                if [ ! -f "$RHEL_CUSTOM_XCCDF" ]; then
+                    echo -e "${RED}❌ ERROR: Cannot find custom XML file at '$RHEL_CUSTOM_XCCDF'. Check your ORG_PREFIX variable!${NC}"
+                    continue
+                fi
+                
+                echo -e "   ${CYAN}📤 Uploading custom rules to target...${NC}"
+                scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/
+                
+                # 3. 🚨 Unsuppressed Execution (So we can see the oscap terminal output!)
+                echo -e "   ${CYAN}🔍 Executing OpenSCAP Evaluation...${NC}"
                 ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                     CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
-                    
                     sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
                 " || true
                 
-                scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
+                echo -e "   ${CYAN}📥 Downloading HTML Report...${NC}"
+                scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html
             fi
         done
     fi
