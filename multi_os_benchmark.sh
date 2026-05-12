@@ -331,27 +331,28 @@ run_phase_1() {
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
         for IP in "${WINDOWS_MACHINES[@]}"; do
             
-            export INSPEC_PASSWORD="${AUDIT_PASS}"
-            
+            # Explicitly ensure AUDIT_PASS is not empty before proceeding
+            if [ -z "$AUDIT_PASS" ]; then
+                echo -e "${RED}❌ ERROR: AUDIT_PASS is empty. Skipping $IP${NC}"
+                continue
+            fi
+
             if [ "$RUN_CIS" == true ]; then
                 echo -e "${GREEN}📦 [WINDOWS - CIS L${WIN_INSPEC_LVL}] Scanning $IP...${NC}"
-                # Removed > /dev/null to see why it crashes
-                cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} --user="${AUDIT_USER}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json || true
+                cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json || true
             fi
             
             if [ "$RUN_ORG" == true ]; then
                 echo -e "${CYAN}🔍 [WINDOWS - $ORG_NAME] Scanning $IP...${NC}"
                 
-                # 🛡️ SECURITY CHECK: Ensure the benchmark file actually exists on the runner
                 if [ ! -f "$WIN_CUSTOM_BENCHMARK" ]; then
                     echo -e "${RED}❌ ERROR: Windows Benchmark file not found at: $WIN_CUSTOM_BENCHMARK${NC}"
                     continue
                 fi
 
-                cinc-auditor exec "$WIN_CUSTOM_BENCHMARK" -t winrm://${IP} --user="${AUDIT_USER}" --reporter cli json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json || true
+                # 🛡️ Using explicit --password flag to resolve "password is a required option"
+                cinc-auditor exec "$WIN_CUSTOM_BENCHMARK" -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json || true
             fi
-            
-            unset INSPEC_PASSWORD
         done
     fi
 }
