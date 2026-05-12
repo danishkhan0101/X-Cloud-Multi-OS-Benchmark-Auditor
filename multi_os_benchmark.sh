@@ -532,10 +532,35 @@ run_remediation() {
         fi
     fi
 
-    if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
-        if [ "$RUN_ORG" == true ]; then
-            echo -e "${GREEN}▶️ [$ORG_NAME] Running Custom RHEL Playbook...${NC}"
-            ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rhel_nodes
+    # --- RHEL / ROCKY REMEDIATION ---
+    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rhel" ]; then
+        if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
+            
+            if [ "$RUN_CIS" == true ]; then
+                echo -e "${GREEN}▶️ [CIS] Auto-Remediating RHEL/Rocky via Native OpenSCAP...${NC}"
+                for IP in "${RHEL_MACHINES[@]}"; do
+                    echo -e "   ${YELLOW}Fixing $IP...${NC}"
+                    
+                    # 🛡️ FIX: Multi-line payload with CPE spoofing to ensure Rocky Linux gets fixed
+                    ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                        XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                        CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
+                        
+                        sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\"
+                    " || true
+                    
+                    # Pull the remediation report back to the runner and clean up
+                    scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_remediation_CIS_${IP}.html ./report_remediation_CIS_${IP}.html > /dev/null 2>&1 || true
+                    ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "rm -f /tmp/report_remediation_CIS_${IP}.html"
+                done
+            fi
+            
+            if [ "$RUN_ORG" == true ]; then
+                echo -e "${GREEN}▶️ [$ORG_NAME] Running Custom RHEL/Rocky Playbook...${NC}"
+                # Ansible playbooks automatically apply to Rocky Linux without needing spoofing
+                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rhel_nodes
+            fi
+            
         fi
     fi
 
@@ -582,20 +607,31 @@ run_phase_4() {
         fi
     done
     
-    # --- RHEL VERIFICATION ---
+    # --- RHEL / ROCKY VERIFICATION ---
     for IP in "${RHEL_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL - CIS L${OS_LVL}] Verifying $IP...${NC}"
+            echo -e "${GREEN}🔴 [RHEL/Rocky - CIS L${OS_LVL}] Verifying $IP...${NC}"
             ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                 XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$XML_FILE\"
+                CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
+                
+                # 🛡️ FIX: Spoofing CPE Dict to guarantee Rocky Linux applicability
+                sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$XML_FILE\"
             " || true
             scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
+        
         if [ "$RUN_ORG" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL - $ORG_NAME] Verifying $IP...${NC}"
+            echo -e "${GREEN}🔴 [RHEL/Rocky - $ORG_NAME] Verifying $IP...${NC}"
             scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-            ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" || true
+            
+            # 🛡️ FIX: Broken into multi-line payload to inject the CPE Dictionary
+            ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
+                
+                # Spoofing CPE Dict to guarantee Rocky Linux applicability
+                sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
+            " || true
             scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html ./report_after_${ORG_PREFIX^^}_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
     done
