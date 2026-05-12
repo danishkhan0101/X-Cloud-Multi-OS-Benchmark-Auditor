@@ -301,13 +301,23 @@ run_phase_1() {
             for IP in "${ROCKY_MACHINES[@]}"; do
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf install -y openscap-scanner scap-security-guide" > /dev/null 2>&1
                 if [ "$RUN_CIS" == true ]; then
-                    echo -e "${GREEN}🏔️ [Rocky - CIS L${OS_LVL}] Scanning $IP...${NC}"
-                    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                        TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                        CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
-                        sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
-                    " || true
-                    scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
+                echo -e "${GREEN}🏔️ [Rocky - CIS L${OS_LVL}] Scanning $IP...${NC}"
+                ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                    # 1. Find the RHEL Data Stream
+                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                    
+                    # 2. Find the CPE Dictionary (This is the secret sauce for Rocky)
+                    CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
+                    CPE_OVAL=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-oval.xml' | sort -V | tail -n 1)
+                    
+                    # 3. Run with explicit CPE mapping to force RHEL rules onto Rocky
+                    sudo oscap xccdf eval \
+                        --cpe \"\$CPE_DICT\" \
+                        --profile $RHEL_CIS_PROFILE \
+                        --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \
+                        \"\$TARGET_XML\"
+                " || true
+                scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
                 fi
                 
                 if [ "$RUN_ORG" == true ]; then
@@ -445,11 +455,21 @@ run_phase_4() {
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         for IP in "${ROCKY_MACHINES[@]}"; do
             if [ "$RUN_CIS" == true ]; then
+                echo -e "${GREEN}🏔️  [Rocky - CIS L${OS_LVL} Verification] Scanning $IP...${NC}"
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                    # 1. Dynamically locate the RHEL content and dictionary
                     XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
                     CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
-                    sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$XML_FILE\"
-                " > /dev/null 2>&1 || true
+                    
+                    # 2. Execute using the --cpe flag to force RHEL rules to apply to Rocky
+                    sudo /usr/bin/oscap xccdf eval \
+                        --cpe \"\$CPE_DICT\" \
+                        --profile $RHEL_CIS_PROFILE \
+                        --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \
+                        \"\$XML_FILE\"
+                " || true
+                
+                # 3. Download the report
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
             if [ "$RUN_ORG" == true ]; then
