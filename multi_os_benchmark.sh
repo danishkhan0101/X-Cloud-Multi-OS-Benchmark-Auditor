@@ -164,7 +164,7 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
     if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
         
         # --- DISTRO ROUTER ---
-        if [[ "$offer" == *"rhel"* ]] || [[ "${vm_name,,}" == *"rhel"* ]]; then
+        if [[ "$offer" == *"rhel"* ]] || [[ "${vm_name,,}" == *"rhel"* ]] || [[ "$offer" == *"rocky"* ]] || [[ "${vm_name,,}" == *"rocky"* ]]; then
             DISTRO="RHEL"
             LINUX_USER="$GHOST_USER"   
         else
@@ -444,17 +444,43 @@ run_phase_1() {
         fi
     done
     
-    # --- RHEL SCANNING ---
+    # --- RHEL / ROCKY SCANNING ---
     for IP in "${RHEL_MACHINES[@]}"; do
         if [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL - CIS L${OS_LVL}] Scanning $IP...${NC}"
-            ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); if [ -z \"\$TARGET_XML\" ]; then echo '❌ ERROR: SCAP XML missing! scap-security-guide failed to install.'; exit 1; fi; echo \"   ↳ Discovered Baseline: \$TARGET_XML\"; sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$TARGET_XML\"" || true
+            echo -e "${GREEN}🔴 [RHEL/Rocky - CIS L${OS_LVL}] Scanning $IP...${NC}"
+            
+            # Executing multi-line SSH payload for readability and CPE spoofing
+            ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
+                
+                if [ -z \"\$TARGET_XML\" ]; then 
+                    echo '❌ ERROR: SCAP XML missing! scap-security-guide failed to install.'
+                    exit 1
+                fi
+                
+                echo \"   ↳ Discovered Baseline: \$TARGET_XML\"
+                echo \"   ↳ Discovered CPE Dict: \$CPE_DICT (Enabling Rocky Linux Support)\"
+                
+                # Use 'sudo env' to ensure the environment variable passes through sudo security restrictions
+                sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$TARGET_XML\"
+            " || true
+            
             scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_before_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
+        
         if [ "$RUN_ORG" == true ]; then
-            echo -e "${GREEN}🔴 [RHEL - $ORG_NAME] Scanning $IP...${NC}"
+            echo -e "${GREEN}🔴 [RHEL/Rocky - $ORG_NAME] Scanning $IP...${NC}"
             scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-            ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" || true
+            
+            # Same multi-line payload structure for custom organization rules
+            ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
+                
+                # Use 'sudo env' to ensure the environment variable passes through sudo security restrictions
+                sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
+            " || true
+            
             scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html ./report_before_${ORG_PREFIX^^}_RHEL_${IP}.html > /dev/null 2>&1 || true
         fi
     done
