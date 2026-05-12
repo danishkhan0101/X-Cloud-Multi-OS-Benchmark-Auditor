@@ -298,19 +298,22 @@ run_phase_1() {
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         for IP in "${ROCKY_MACHINES[@]}"; do
             
-            # 🚨 THE UPSTREAM AUTO-INJECTOR FOR ROCKY 10
-            FOLDER_EXISTS=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "[ -d /usr/share/xml/scap/ssg/content ] && echo 'YES' || echo 'NO'" 2>/dev/null)
-            
-            if [ "$FOLDER_EXISTS" == "NO" ]; then
-                echo -e "${YELLOW}   ⚠️ SCAP Content missing from Rocky repos. Auto-injecting upstream v0.1.74...${NC}"
-                ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    cd /tmp && wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.74/scap-security-guide-0.1.74.zip && \
-                    python3 -m zipfile -e scap-security-guide-0.1.74.zip . && \
-                    sudo mkdir -p /usr/share/xml/scap/ssg/content/ && \
-                    sudo cp scap-security-guide-0.1.74/ssg-rhel*.xml /usr/share/xml/scap/ssg/content/ 2>/dev/null || true && \
-                    sudo cp scap-security-guide-0.1.74/ssg-cs*.xml /usr/share/xml/scap/ssg/content/ 2>/dev/null || true && \
-                    rm -rf scap-security-guide-0.1.74*
-                " > /dev/null 2>&1 || true
+            if [ ${#ROCKY_MACHINES[@]} -gt 0 ] && [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rocky" ]]; then
+                echo -e "\n${CYAN}⚙️ PHASE 0.8c: ROCKY BOOTSTRAPPING${NC}"
+                for IP in "${ROCKY_MACHINES[@]}"; do
+                    # 1. Install EPEL just in case it's needed for the scanner on Rocky 10
+                    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf install -y epel-release" > /dev/null 2>&1
+                    
+                    # 2. Force install the scanner engine (we handle the guide manually later)
+                    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf install -y openscap-scanner" > /dev/null 2>&1
+                    
+                    # 3. Verify it actually installed
+                    SCANNER_EXISTS=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "command -v oscap" 2>/dev/null)
+                    if [ -z "$SCANNER_EXISTS" ]; then
+                        echo -e "${RED}❌ ERROR: Failed to install 'openscap-scanner' on Rocky 10. Check the VM's package manager.${NC}"
+                        exit 1
+                    fi
+                done
             fi
 
             if [ "$RUN_CIS" == true ]; then
