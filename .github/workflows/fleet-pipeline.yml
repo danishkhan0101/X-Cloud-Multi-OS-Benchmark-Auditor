@@ -105,11 +105,11 @@ jobs:
     runs-on: ubuntu-latest
     
     strategy:
-      # 🚨 REMOVED max-parallel: 1 to allow massive speed increases
-      fail-fast: false      # CRITICAL: If one runner fails, keep the others alive
+      fail-fast: false      
       matrix:
         target: ${{ fromJSON(needs.prepare-queue.outputs.matrix) }}
-        os_target: [Ubuntu, RHEL, Windows] # 🚨 ADDED OS PARALLELISM
+        # 🚨 ADD ROCKY HERE
+        os_target: [Ubuntu, RHEL, Rocky, Windows]
 
     env:
       TARGET_ENV: ${{ github.event.inputs.environment_tag || 'Prod' }}
