@@ -298,7 +298,17 @@ run_phase_1() {
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         for IP in "${ROCKY_MACHINES[@]}"; do
             
-            # Auto-Injector ensures RHEL 9 content is present
+            # 🚨 1. FORCE VISIBLE ENGINE INSTALLATION
+            echo -e "${YELLOW}   ⚙️ Verifying OpenSCAP Engine on Rocky 10...${NC}"
+            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                if ! command -v oscap &> /dev/null; then
+                    echo '   ↳ oscap binary missing. Installing from DNF...'
+                    sudo dnf install -y epel-release || true
+                    sudo dnf install -y openscap-scanner openscap-utils || true
+                fi
+            "
+
+            # 🚨 2. THE UPSTREAM AUTO-INJECTOR
             FOLDER_EXISTS=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "[ -d /usr/share/xml/scap/ssg/content ] && echo 'YES' || echo 'NO'" 2>/dev/null)
             if [ "$FOLDER_EXISTS" == "NO" ]; then
                 echo -e "${YELLOW}   ⚠️ SCAP Content missing. Auto-injecting upstream v0.1.74...${NC}"
@@ -314,6 +324,12 @@ run_phase_1() {
             if [ "$RUN_CIS" == true ]; then
                 echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL}] Forcing Deep RHEL9 Applicability on $IP...${NC}"
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                    # Failsafe check
+                    if ! command -v oscap &> /dev/null; then
+                        echo '❌ FATAL: openscap-scanner failed to install. Cannot run audit.'
+                        exit 1
+                    fi
+
                     TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel9-ds.xml' | sort -V | tail -n 1)
                     
                     if [ -z \"\$TARGET_XML\" ]; then
@@ -342,7 +358,7 @@ EOF'
                     sudo bash -c 'echo \"cpe:/o:redhat:enterprise_linux:9::baseos\" > /etc/system-release-cpe'
 
                     # 3. RUN SCAN
-                    sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
+                    sudo oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
 
                     # 4. RESTORE IDENTITY
                     sudo mv /tmp/os-release.bak /etc/os-release
@@ -372,7 +388,7 @@ EOF'
                     sudo bash -c 'echo \"Red Hat Enterprise Linux release 9.0\" > /etc/redhat-release'
                     sudo bash -c 'echo \"cpe:/o:redhat:enterprise_linux:9::baseos\" > /etc/system-release-cpe'
 
-                    sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
+                    sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
 
                     sudo mv /tmp/os-release.bak /etc/os-release
                     sudo mv /tmp/redhat-release.bak /etc/redhat-release 2>/dev/null || true
