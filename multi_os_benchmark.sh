@@ -294,30 +294,44 @@ run_phase_1() {
             done
         fi
     fi
-
+    # --- ROCKY SCANNING ---
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         for IP in "${ROCKY_MACHINES[@]}"; do
-            if [ "$RUN_CIS" == true ]; then
-                echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL}] Forcing RHEL10 Applicability on $IP...${NC}"
+            
+            # 🚨 THE UPSTREAM AUTO-INJECTOR FOR ROCKY 10
+            FOLDER_EXISTS=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "[ -d /usr/share/xml/scap/ssg/content ] && echo 'YES' || echo 'NO'" 2>/dev/null)
+            
+            if [ "$FOLDER_EXISTS" == "NO" ]; then
+                echo -e "${YELLOW}   ⚠️ SCAP Content missing from Rocky repos. Auto-injecting upstream v0.1.74...${NC}"
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel10-ds.xml' | head -n 1)
+                    cd /tmp && wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.74/scap-security-guide-0.1.74.zip && \
+                    python3 -m zipfile -e scap-security-guide-0.1.74.zip . && \
+                    sudo mkdir -p /usr/share/xml/scap/ssg/content/ && \
+                    sudo cp scap-security-guide-0.1.74/ssg-rhel*.xml /usr/share/xml/scap/ssg/content/ 2>/dev/null || true && \
+                    sudo cp scap-security-guide-0.1.74/ssg-cs*.xml /usr/share/xml/scap/ssg/content/ 2>/dev/null || true && \
+                    rm -rf scap-security-guide-0.1.74*
+                " > /dev/null 2>&1 || true
+            fi
+
+            if [ "$RUN_CIS" == true ]; then
+                echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL}] Forcing RHEL/CS10 Applicability on $IP...${NC}"
+                ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                    # Find RHEL 10, CentOS Stream 10, or RHEL 9
+                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel10-ds.xml' -o -name 'ssg-cs10-ds.xml' -o -name 'ssg-rhel9-ds.xml' | sort -V | tail -n 1)
                     
                     if [ -z \"\$TARGET_XML\" ]; then
-                        echo '❌ ERROR: RHEL 10 content missing!'
+                        echo '❌ ERROR: RHEL content still missing!'
                         exit 1
                     fi
-
+                    
                     echo \"   ↳ Using Content: \$TARGET_XML\"
                     echo \"   ↳ Spoofing /etc/os-release to bypass missing CPE Dict...\"
 
-                    # SPOOF THE OS
                     sudo cp /etc/os-release /tmp/os-release.bak
                     sudo sed -i 's/^ID=\"rocky\"/ID=\"rhel\"/' /etc/os-release
 
-                    # RUN THE SCAN
                     sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
 
-                    # RESTORE THE OS
                     sudo mv /tmp/os-release.bak /etc/os-release
                 " || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
@@ -325,17 +339,13 @@ run_phase_1() {
             
             if [ "$RUN_ORG" == true ]; then
                 echo -e "${GREEN}🏔️ [Rocky 10 - $ORG_NAME] Scanning $IP...${NC}"
-                
                 if [ ! -f "$RHEL_CUSTOM_XCCDF" ]; then
                     echo -e "${RED}❌ ERROR: Missing custom XML: '$RHEL_CUSTOM_XCCDF'${NC}"
                     continue
                 fi
-                
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-                
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                     echo \"   ↳ Spoofing /etc/os-release for Custom Scan...\"
-                    
                     sudo cp /etc/os-release /tmp/os-release.bak
                     sudo sed -i 's/^ID=\"rocky\"/ID=\"rhel\"/' /etc/os-release
 
@@ -343,7 +353,6 @@ run_phase_1() {
 
                     sudo mv /tmp/os-release.bak /etc/os-release
                 " || true
-                
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
         done
@@ -463,19 +472,16 @@ run_phase_4() {
             fi
         done
     fi
-
+    # --- ROCKY VERIFYING ---
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         for IP in "${ROCKY_MACHINES[@]}"; do
             if [ "$RUN_CIS" == true ]; then
                 echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL} Verify] Verifying $IP...${NC}"
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel10-ds.xml' | head -n 1)
-                    
+                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel10-ds.xml' -o -name 'ssg-cs10-ds.xml' -o -name 'ssg-rhel9-ds.xml' | sort -V | tail -n 1)
                     sudo cp /etc/os-release /tmp/os-release.bak
                     sudo sed -i 's/^ID=\"rocky\"/ID=\"rhel\"/' /etc/os-release
-
                     sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
-
                     sudo mv /tmp/os-release.bak /etc/os-release
                 " > /dev/null 2>&1 || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
@@ -486,9 +492,7 @@ run_phase_4() {
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                     sudo cp /etc/os-release /tmp/os-release.bak
                     sudo sed -i 's/^ID=\"rocky\"/ID=\"rhel\"/' /etc/os-release
-
                     sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
-
                     sudo mv /tmp/os-release.bak /etc/os-release
                 " > /dev/null 2>&1 || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
