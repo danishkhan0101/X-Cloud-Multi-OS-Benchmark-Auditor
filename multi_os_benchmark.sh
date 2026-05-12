@@ -298,101 +298,41 @@ run_phase_1() {
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         for IP in "${ROCKY_MACHINES[@]}"; do
             
-            # 🚨 1. FORCE VISIBLE ENGINE INSTALLATION
             echo -e "${YELLOW}   ⚙️ Verifying OpenSCAP Engine on Rocky 10...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                 if ! command -v oscap &> /dev/null; then
                     echo '   ↳ oscap binary missing. Installing from DNF...'
                     sudo dnf install -y epel-release || true
-                    sudo dnf install -y openscap-scanner openscap-utils || true
+                    sudo dnf install -y openscap-scanner scap-security-guide || true
                 fi
             "
 
-            # 🚨 2. THE UPSTREAM AUTO-INJECTOR
-            FOLDER_EXISTS=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "[ -d /usr/share/xml/scap/ssg/content ] && echo 'YES' || echo 'NO'" 2>/dev/null)
-            if [ "$FOLDER_EXISTS" == "NO" ]; then
-                echo -e "${YELLOW}   ⚠️ SCAP Content missing. Auto-injecting upstream v0.1.74...${NC}"
-                ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    cd /tmp && wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.74/scap-security-guide-0.1.74.zip && \
-                    python3 -m zipfile -e scap-security-guide-0.1.74.zip . && \
-                    sudo mkdir -p /usr/share/xml/scap/ssg/content/ && \
-                    sudo cp scap-security-guide-0.1.74/ssg-rhel*.xml /usr/share/xml/scap/ssg/content/ 2>/dev/null || true && \
-                    rm -rf scap-security-guide-0.1.74*
-                " > /dev/null 2>&1 || true
-            fi
-
             if [ "$RUN_CIS" == true ]; then
-                echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL}] Forcing Deep RHEL9 Applicability on $IP...${NC}"
+                echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL}] Scanning natively on $IP...${NC}"
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    # Failsafe check
-                    if ! command -v oscap &> /dev/null; then
-                        echo '❌ FATAL: openscap-scanner failed to install. Cannot run audit.'
-                        exit 1
-                    fi
-
-                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel9-ds.xml' | sort -V | tail -n 1)
+                    # Use the native Rocky 10 datastream you found!
+                    TARGET_XML='/usr/share/xml/scap/ssg/content/ssg-rl10-ds.xml'
                     
-                    if [ -z \"\$TARGET_XML\" ]; then
-                        echo '❌ ERROR: RHEL 9 content missing!'
+                    if [ ! -f \"\$TARGET_XML\" ]; then
+                        echo '❌ ERROR: Native Rocky 10 content missing!'
                         exit 1
                     fi
                     
-                    echo \"   ↳ Using Content: \$TARGET_XML\"
-                    echo \"   ↳ Deep-Spoofing OS identity to RHEL 9...\"
+                    echo \"   ↳ Using Native Content: \$TARGET_XML\"
 
-                    # 1. BACKUP IDENTITY
-                    sudo cp /etc/os-release /tmp/os-release.bak
-                    sudo cp /etc/redhat-release /tmp/redhat-release.bak 2>/dev/null || true
-                    sudo cp /etc/system-release-cpe /tmp/system-release-cpe.bak 2>/dev/null || true
-
-                    # 2. INJECT 'RHEL 9' IDENTITY TRIAD
-                    sudo bash -c 'cat > /etc/os-release <<EOF
-NAME=\"Red Hat Enterprise Linux\"
-VERSION=\"9.0\"
-ID=\"rhel\"
-ID_LIKE=\"fedora\"
-VERSION_ID=\"9\"
-PLATFORM_ID=\"platform:el9\"
-EOF'
-                    sudo bash -c 'echo \"Red Hat Enterprise Linux release 9.0\" > /etc/redhat-release'
-                    sudo bash -c 'echo \"cpe:/o:redhat:enterprise_linux:9::baseos\" > /etc/system-release-cpe'
-
-                    # 3. RUN SCAN
+                    # Run the scan natively, no spoofing required
                     sudo oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
-
-                    # 4. RESTORE IDENTITY
-                    sudo mv /tmp/os-release.bak /etc/os-release
-                    sudo mv /tmp/redhat-release.bak /etc/redhat-release 2>/dev/null || true
-                    sudo mv /tmp/system-release-cpe.bak /etc/system-release-cpe 2>/dev/null || true
                 " || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
             
             if [ "$RUN_ORG" == true ]; then
-                echo -e "${GREEN}🏔️ [Rocky 10 - $ORG_NAME] Scanning $IP (RHEL9 Mode)...${NC}"
+                echo -e "${GREEN}🏔️ [Rocky 10 - $ORG_NAME] Scanning natively on $IP...${NC}"
                 if [ ! -f "$RHEL_CUSTOM_XCCDF" ]; then continue; fi
                 
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    sudo cp /etc/os-release /tmp/os-release.bak
-                    sudo cp /etc/redhat-release /tmp/redhat-release.bak 2>/dev/null || true
-                    sudo cp /etc/system-release-cpe /tmp/system-release-cpe.bak 2>/dev/null || true
-
-                    sudo bash -c 'cat > /etc/os-release <<EOF
-NAME=\"Red Hat Enterprise Linux\"
-VERSION=\"9.0\"
-ID=\"rhel\"
-VERSION_ID=\"9\"
-PLATFORM_ID=\"platform:el9\"
-EOF'
-                    sudo bash -c 'echo \"Red Hat Enterprise Linux release 9.0\" > /etc/redhat-release'
-                    sudo bash -c 'echo \"cpe:/o:redhat:enterprise_linux:9::baseos\" > /etc/system-release-cpe'
-
                     sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
-
-                    sudo mv /tmp/os-release.bak /etc/os-release
-                    sudo mv /tmp/redhat-release.bak /etc/redhat-release 2>/dev/null || true
-                    sudo mv /tmp/system-release-cpe.bak /etc/system-release-cpe 2>/dev/null || true
                 " || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
@@ -454,18 +394,27 @@ run_remediation() {
     fi
 
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
-        if [ ${#ROCKY_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
-            echo -e "${GREEN}▶️ [CIS] Auto-Remediating Rocky via Native OpenSCAP...${NC}"
-            for IP in "${ROCKY_MACHINES[@]}"; do
-                ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                    CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
-                    sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE --report /tmp/report_remediation_CIS_ROCKY_${IP}.html \"\$XML_FILE\"
-                " > /dev/null 2>&1 || true
-                scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_remediation_CIS_ROCKY_${IP}.html ./report_remediation_CIS_ROCKY_${IP}.html > /dev/null 2>&1 || true
-            done
+        if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
+            if [ "$RUN_CIS" == true ]; then
+                echo -e "${GREEN}▶️ [CIS] Auto-Remediating Rocky 10 natively...${NC}"
+                for IP in "${ROCKY_MACHINES[@]}"; do
+                    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                        TARGET_XML='/usr/share/xml/scap/ssg/content/ssg-rl10-ds.xml'
+                        if [ ! -f \"\$TARGET_XML\" ]; then
+                            echo '❌ ERROR: Native Rocky 10 content missing during remediation!'
+                            exit 1
+                        fi
+                        # Run native remediation
+                        sudo /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE --report /tmp/report_remediation_CIS_ROCKY_${IP}.html \"\$TARGET_XML\"
+                    " || true
+                    scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_remediation_CIS_ROCKY_${IP}.html ./report_remediation_CIS_ROCKY_${IP}.html > /dev/null 2>&1 || true
+                done
+            fi
+            if [ "$RUN_ORG" == true ]; then
+                echo -e "${GREEN}▶️ [$ORG_NAME] Running Custom RHEL Playbook on Rocky...${NC}"
+                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rocky_nodes > /dev/null 2>&1 || true
+            fi
         fi
-        if [ ${#ROCKY_MACHINES[@]} -gt 0 ] && [ "$RUN_ORG" == true ]; then ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rocky_nodes > /dev/null 2>&1 || true; fi
     fi
 
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
@@ -515,61 +464,37 @@ run_phase_4() {
     fi
     # --- ROCKY VERIFYING ---
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
-        for IP in "${ROCKY_MACHINES[@]}"; do
-            if [ "$RUN_CIS" == true ]; then
-                echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL} Verify] Verifying $IP...${NC}"
-                ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel9-ds.xml' | sort -V | tail -n 1)
+        if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
+            for IP in "${ROCKY_MACHINES[@]}"; do
+                
+                if [ "$RUN_CIS" == true ]; then
+                    echo -e "${GREEN}✅ [Rocky 10 - CIS L${OS_LVL} Verify] Scanning natively on $IP...${NC}"
+                    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                        TARGET_XML='/usr/share/xml/scap/ssg/content/ssg-rl10-ds.xml'
+                        if [ ! -f \"\$TARGET_XML\" ]; then
+                            echo '❌ ERROR: Native Rocky 10 content missing during verification!'
+                            exit 1
+                        fi
+                        # Run native verification scan
+                        sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
+                    " || true
+                    scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
+                fi
+                
+                if [ "$RUN_ORG" == true ]; then
+                    echo -e "${GREEN}✅ [Rocky 10 - $ORG_NAME Verify] Scanning natively on $IP...${NC}"
+                    if [ ! -f "$RHEL_CUSTOM_XCCDF" ]; then continue; fi
                     
-                    sudo cp /etc/os-release /tmp/os-release.bak
-                    sudo cp /etc/redhat-release /tmp/redhat-release.bak 2>/dev/null || true
-                    sudo cp /etc/system-release-cpe /tmp/system-release-cpe.bak 2>/dev/null || true
-
-                    sudo bash -c 'cat > /etc/os-release <<EOF
-NAME=\"Red Hat Enterprise Linux\"
-VERSION=\"9.0\"
-ID=\"rhel\"
-VERSION_ID=\"9\"
-PLATFORM_ID=\"platform:el9\"
-EOF'
-                    sudo bash -c 'echo \"Red Hat Enterprise Linux release 9.0\" > /etc/redhat-release'
-                    sudo bash -c 'echo \"cpe:/o:redhat:enterprise_linux:9::baseos\" > /etc/system-release-cpe'
-
-                    sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
-
-                    sudo mv /tmp/os-release.bak /etc/os-release
-                    sudo mv /tmp/redhat-release.bak /etc/redhat-release 2>/dev/null || true
-                    sudo mv /tmp/system-release-cpe.bak /etc/system-release-cpe 2>/dev/null || true
-                " > /dev/null 2>&1 || true
-                scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
-            fi
-            if [ "$RUN_ORG" == true ]; then
-                echo -e "${GREEN}🏔️ [Rocky 10 - $ORG_NAME Verify] Verifying $IP...${NC}"
-                scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-                ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    sudo cp /etc/os-release /tmp/os-release.bak
-                    sudo cp /etc/redhat-release /tmp/redhat-release.bak 2>/dev/null || true
-                    sudo cp /etc/system-release-cpe /tmp/system-release-cpe.bak 2>/dev/null || true
-
-                    sudo bash -c 'cat > /etc/os-release <<EOF
-NAME=\"Red Hat Enterprise Linux\"
-VERSION=\"9.0\"
-ID=\"rhel\"
-VERSION_ID=\"9\"
-PLATFORM_ID=\"platform:el9\"
-EOF'
-                    sudo bash -c 'echo \"Red Hat Enterprise Linux release 9.0\" > /etc/redhat-release'
-                    sudo bash -c 'echo \"cpe:/o:redhat:enterprise_linux:9::baseos\" > /etc/system-release-cpe'
-
-                    sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
-
-                    sudo mv /tmp/os-release.bak /etc/os-release
-                    sudo mv /tmp/redhat-release.bak /etc/redhat-release 2>/dev/null || true
-                    sudo mv /tmp/system-release-cpe.bak /etc/system-release-cpe 2>/dev/null || true
-                " > /dev/null 2>&1 || true
-                scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
-            fi
-        done
+                    scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
+                    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                        # Run native custom verification scan
+                        sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
+                    " || true
+                    scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
+                fi
+                
+            done
+        fi
     fi
     
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
