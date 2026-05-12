@@ -301,21 +301,30 @@ run_phase_1() {
             for IP in "${ROCKY_MACHINES[@]}"; do
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf install -y openscap-scanner scap-security-guide" > /dev/null 2>&1
                 if [ "$RUN_CIS" == true ]; then
-                    echo -e "${GREEN}🏔️ [Rocky - CIS L${OS_LVL}] Forcing Applicability Scan on $IP...${NC}"
+                    echo -e "${GREEN}🏔️ [Rocky - CIS L${OS_LVL}] Forcing RHEL9 Applicability on $IP...${NC}"
                     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                        # 1. Locate all three required files
-                        TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                        CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
-                        CPE_OVAL=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-oval.xml' | sort -V | tail -n 1)
+                        # 1. Target RHEL 9 specifically (Rocky 9's upstream)
+                        TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel9-ds.xml' | head -n 1)
+                        CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel9-cpe-dictionary.xml' | head -n 1)
+                        
+                        # 2. FALLBACK: If RHEL9 isn't found, try RHEL8
+                        if [ -z \"\$TARGET_XML\" ]; then
+                            TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel8-ds.xml' | head -n 1)
+                            CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel8-cpe-dictionary.xml' | head -n 1)
+                        fi
                 
-                        echo \"   ↳ Content: \$TARGET_XML\"
-                        echo \"   ↳ Dictionary: \$CPE_DICT\"
-                        echo \"   ↳ Oval Map: \$CPE_OVAL\"
+                        # 3. CRITICAL: If still empty, we must stop to prevent the '' file crash
+                        if [ -z \"\$TARGET_XML\" ]; then
+                            echo '❌ ERROR: No RHEL 8 or 9 SCAP content found in /usr/share/xml/scap/ssg/content/'
+                            exit 1
+                        fi
                 
-                        # 2. THE FORCE EVALUATION
-                        # We use --cpe twice (once for dict, once for oval) to bridge the Rocky-RHEL gap
+                        echo \"   ↳ Using Content: \$TARGET_XML\"
+                        echo \"   ↳ Using Dict: \$CPE_DICT\"
+                
+                        # 4. Execute with conditional CPE flag to prevent empty argument crash
                         sudo /usr/bin/oscap xccdf eval \
-                            --cpe \"\$CPE_DICT\" \
+                            \${CPE_DICT:+--cpe \"\$CPE_DICT\"} \
                             --profile $RHEL_CIS_PROFILE \
                             --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \
                             \"\$TARGET_XML\"
