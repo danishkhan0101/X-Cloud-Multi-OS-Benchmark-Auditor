@@ -74,7 +74,7 @@ while [[ "$#" -gt 0 ]]; do
         --ticket) H_TICKET="$2"; shift ;;
         --debug) DEBUG_MODE="$2"; shift ;;
         --cleanup) H_CLEANUP="$2"; shift ;;
-        --target-os) H_TARGET_OS="$2"; shift ;; # 🚨 NEW: Catch the OS argument
+        --target-os) H_TARGET_OS="$2"; shift ;; # 🚨 Catch the OS argument
         *) echo -e "${RED}Unknown parameter: $1${NC}"; exit 1 ;;
     esac
     shift
@@ -139,7 +139,7 @@ fi
 
 UBUNTU_MACHINES=()
 RHEL_MACHINES=()
-ROCKY_MACHINES=() # 🚨 NEW: Dedicated Rocky Array
+ROCKY_MACHINES=() # 🚨 Dedicated Rocky Array
 WINDOWS_MACHINES=()
 
 while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
@@ -161,7 +161,7 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
     
     if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
         
-        # 🚨 NEW: Separated Rocky Linux Distro Router
+        # 🚨 Separated Rocky Linux Distro Router
         if [[ "$offer" == *"rocky"* ]] || [[ "${vm_name,,}" == *"rocky"* ]]; then
             DISTRO="Rocky"
             LINUX_USER="$GHOST_USER"
@@ -215,7 +215,6 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
             echo -e "${GREEN}   ✅ Key injected via Guest Agent. SSH access should now be open!${NC}"
         fi
 
-        # 🚨 NEW: Appending to the correct distinct arrays
         if [ "$DISTRO" == "Rocky" ]; then
             ROCKY_MACHINES+=("$ip")
             echo -e "${CYAN}🏔️ Mapped Rocky Node: $ip (Status: ON)${NC}"
@@ -278,7 +277,7 @@ done <<< "$VM_DATA"
 
 echo -e "${GREEN}✅ Discovery Complete: Found ${#UBUNTU_MACHINES[@]} Ubuntu, ${#RHEL_MACHINES[@]} RHEL, ${#ROCKY_MACHINES[@]} Rocky, and ${#WINDOWS_MACHINES[@]} Windows targets RUNNING.${NC}"
 
-# 🚨 THE EARLY EXIT FIX: If the target OS array is empty, kill the script instantly
+# 🚨 THE EARLY EXIT FIX
 if [ "$HEADLESS" == true ] && [ "$H_TARGET_OS" != "all" ]; then
     if [ "${H_TARGET_OS,,}" == "ubuntu" ] && [ ${#UBUNTU_MACHINES[@]} -eq 0 ]; then echo -e "${YELLOW}⚠️ No running Ubuntu VMs found. Aborting gracefully.${NC}"; exit 0; fi
     if [ "${H_TARGET_OS,,}" == "rhel" ] && [ ${#RHEL_MACHINES[@]} -eq 0 ]; then echo -e "${YELLOW}⚠️ No running RHEL VMs found. Aborting gracefully.${NC}"; exit 0; fi
@@ -297,7 +296,6 @@ echo "[rhel_nodes]" >> inventory.ini
 for ip in "${RHEL_MACHINES[@]}"; do echo "${ip} ansible_user=${GHOST_USER}" >> inventory.ini; done
 echo "" >> inventory.ini
 
-# 🚨 NEW: Dedicated Rocky Inventory Group
 echo "[rocky_nodes]" >> inventory.ini
 for ip in "${ROCKY_MACHINES[@]}"; do echo "${ip} ansible_user=${GHOST_USER}" >> inventory.ini; done
 echo "" >> inventory.ini
@@ -340,6 +338,33 @@ if [ "$RUN_CIS" == true ]; then
         OS_LVL="2"
         WIN_INSPEC_LVL="2"
     fi
+fi
+
+# ======================================================
+# 🚨 PHASE 0.8: FLEET BOOTSTRAPPING (THE MISSING PIECE)
+# ======================================================
+if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
+    echo -e "\n${CYAN}⚙️ PHASE 0.8a: UBUNTU BOOTSTRAPPING${NC}"
+    for IP in "${UBUNTU_MACHINES[@]}"; do
+        echo -e "   ${YELLOW}Installing OpenSCAP on Ubuntu Node: $IP...${NC}"
+        ssh -t -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo systemctl stop unattended-upgrades.service 2>/dev/null; sudo fuser -kk /var/lib/dpkg/lock-frontend 2>/dev/null; sudo apt-get update -qq; sudo apt-get install -y openscap-scanner ssg-base ssg-debderived ssg-debian" > /dev/null 2>&1
+    done
+fi
+
+if [ ${#RHEL_MACHINES[@]} -gt 0 ] && [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rhel" ]]; then
+    echo -e "\n${CYAN}⚙️ PHASE 0.8b: RHEL BOOTSTRAPPING${NC}"
+    for IP in "${RHEL_MACHINES[@]}"; do
+        echo -e "   ${YELLOW}Installing OpenSCAP on RHEL Node: $IP...${NC}"
+        ssh -t -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf install -y openscap-scanner scap-security-guide" > /dev/null 2>&1
+    done
+fi
+
+if [ ${#ROCKY_MACHINES[@]} -gt 0 ] && [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rocky" ]]; then
+    echo -e "\n${CYAN}⚙️ PHASE 0.8c: ROCKY BOOTSTRAPPING${NC}"
+    for IP in "${ROCKY_MACHINES[@]}"; do
+        echo -e "   ${YELLOW}Installing OpenSCAP on Rocky Node: $IP...${NC}"
+        ssh -t -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf install -y openscap-scanner scap-security-guide" > /dev/null 2>&1
+    done
 fi
 
 # ======================================================
@@ -393,23 +418,29 @@ run_phase_1() {
         for IP in "${ROCKY_MACHINES[@]}"; do
             if [ "$RUN_CIS" == true ]; then
                 echo -e "${GREEN}🏔️ [Rocky - CIS L${OS_LVL}] Scanning $IP...${NC}"
+                
+                # 🚨 FIX: Output Unhidden
                 ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                     TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
                     CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
                     
-                    # Spoofing CPE to ensure Rocky applicability
                     sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
-                " > /dev/null 2>&1 || true
+                " || true
+                
                 scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
             
             if [ "$RUN_ORG" == true ]; then
                 echo -e "${GREEN}🏔️ [Rocky - $ORG_NAME] Scanning $IP...${NC}"
                 scp -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
+                
+                # 🚨 FIX: Output Unhidden so you can read the terminal!
                 ssh -n -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                     CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
+                    
                     sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
-                " > /dev/null 2>&1 || true
+                " || true
+                
                 scp -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
         done
@@ -476,7 +507,6 @@ run_remediation() {
         fi
     fi
 
-    # 🚨 ROCKY REMEDIATION
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
@@ -517,7 +547,6 @@ run_remediation() {
 run_phase_4() {
     echo -e "\n${BOLD}🔄 PHASE 4: Running Verification Scans...${NC}"
     
-    # --- UBUNTU VERIFICATION ---
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "ubuntu" ]; then
         for IP in "${UBUNTU_MACHINES[@]}"; do
             RAW_VER=$(ssh -n -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
@@ -538,7 +567,6 @@ run_phase_4() {
         done
     fi
     
-    # --- RHEL VERIFICATION ---
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rhel" ]; then
         for IP in "${RHEL_MACHINES[@]}"; do
             if [ "$RUN_CIS" == true ]; then
@@ -555,7 +583,6 @@ run_phase_4() {
         done
     fi
 
-    # 🚨 --- ROCKY VERIFICATION ---
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         for IP in "${ROCKY_MACHINES[@]}"; do
             if [ "$RUN_CIS" == true ]; then
@@ -579,7 +606,6 @@ run_phase_4() {
         done
     fi
     
-    # --- WINDOWS VERIFICATION ---
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
         for IP in "${WINDOWS_MACHINES[@]}"; do
             export INSPEC_PASSWORD="${AUDIT_PASS}"
