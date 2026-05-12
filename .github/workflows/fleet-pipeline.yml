@@ -70,6 +70,7 @@ jobs:
     outputs:
       matrix: ${{ steps.build-matrix.outputs.matrix }}
       safe_mode: ${{ steps.safety-gate.outputs.safe_mode }}
+      os_matrix: ${{ steps.discover-vms.outputs.os_matrix }} # 🚨 New Output for Dynamic OS Matrix
     steps:
       - name: '🛡️ Safety Gate: Blast Radius Control'
         id: safety-gate
@@ -84,7 +85,7 @@ jobs:
             echo "safe_mode=$MODE" >> $GITHUB_OUTPUT
           fi
 
-      - name: '🚦 Build Dynamic Matrix JSON'
+      - name: '🚦 Build Dynamic Profile Matrix JSON'
         id: build-matrix
         run: |
           PROFILE="${{ github.event.inputs.profile }}"
@@ -99,17 +100,66 @@ jobs:
             echo 'matrix=[{"profile":"tm","level":"Level 1","name":"TM-Baseline"}]' >> $GITHUB_OUTPUT
           fi
 
+      - name: 🔐 Login to Azure CLI for OS Discovery
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      - name: '📡 Discover Online Azure VMs (Dynamic OS Matrix)'
+        id: discover-vms
+        run: |
+          TARGET_ENV="${{ github.event.inputs.environment_tag || 'all' }}"
+          RG_NAME="${{ vars.AZURE_RG_NAME }}"
+          
+          echo "📡 Querying Azure for online VMs in [$RG_NAME]..."
+          
+          if [ "$TARGET_ENV" == "all" ]; then
+              VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[?powerState=='VM running'].[storageProfile.osDisk.osType, storageProfile.imageReference.offer, name]" -o tsv)
+          else
+              VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[?tags.Environment=='$TARGET_ENV' && powerState=='VM running'].[storageProfile.osDisk.osType, storageProfile.imageReference.offer, name]" -o tsv)
+          fi
+
+          HAS_UBUNTU=false; HAS_RHEL=false; HAS_ROCKY=false; HAS_WINDOWS=false
+
+          while IFS=$'\t' read -r os offer name; do
+              offer_lower="${offer,,}"
+              name_lower="${name,,}"
+              
+              if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
+                  if [[ "$offer_lower" == *"rocky"* ]] || [[ "$name_lower" == *"rocky"* ]]; then HAS_ROCKY=true
+                  elif [[ "$offer_lower" == *"rhel"* ]] || [[ "$name_lower" == *"rhel"* ]]; then HAS_RHEL=true
+                  else HAS_UBUNTU=true
+                  fi
+              elif [[ "$os" == *"Windows"* ]]; then
+                  HAS_WINDOWS=true
+              fi
+          done <<< "$VM_DATA"
+
+          # Build the dynamic JSON Array
+          OS_JSON="["
+          [ "$HAS_UBUNTU" == true ] && OS_JSON+="\"Ubuntu\","
+          [ "$HAS_RHEL" == true ] && OS_JSON+="\"RHEL\","
+          [ "$HAS_ROCKY" == true ] && OS_JSON+="\"Rocky\","
+          [ "$HAS_WINDOWS" == true ] && OS_JSON+="\"Windows\","
+
+          # Strip trailing comma and close array
+          OS_JSON="${OS_JSON%,}]"
+          if [ "$OS_JSON" == "]" ]; then OS_JSON="[]"; fi
+
+          echo "✅ Active OSes discovered: $OS_JSON"
+          echo "os_matrix=$OS_JSON" >> $GITHUB_OUTPUT
+
   # 🚀 JOB 2: THE 2D EXECUTION ENGINE (Profiles x Operating Systems)
   run-audit:
     needs: prepare-queue
+    if: ${{ needs.prepare-queue.outputs.os_matrix != '[]' }} # 🚨 Skip entirely if NO VMs are online
     runs-on: ubuntu-latest
     
     strategy:
       fail-fast: false      
       matrix:
         target: ${{ fromJSON(needs.prepare-queue.outputs.matrix) }}
-        # 🚨 ADD ROCKY HERE
-        os_target: [Ubuntu, RHEL, Rocky, Windows]
+        os_target: ${{ fromJSON(needs.prepare-queue.outputs.os_matrix) }} # 🚨 DYNAMIC INJECTION!
 
     env:
       TARGET_ENV: ${{ github.event.inputs.environment_tag || 'Prod' }}
@@ -117,7 +167,7 @@ jobs:
       PROFILE: ${{ matrix.target.profile }}
       CIS_LEVEL: ${{ matrix.target.level }}
       MATRIX_NAME: ${{ matrix.target.name }}
-      TARGET_OS: ${{ matrix.os_target }} # 🚨 Expose Matrix OS to Bash
+      TARGET_OS: ${{ matrix.os_target }}
 
     steps:
       - name: 📥 Pull Repository Code
@@ -180,7 +230,6 @@ jobs:
           echo "🖥️  Assigned OS Runner: $TARGET_OS"
           
           chmod +x multi_os_benchmark.sh
-          # 🚨 Pass the dynamic --target-os flag to the bash script
           ./multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP" --target-os "$TARGET_OS"
       
       - name: 🏷️ Generate Version Tag
@@ -204,7 +253,6 @@ jobs:
       - name: 🧹 Configure Release Variables (Collision-Proof)
         if: steps.check_reports.outputs.has_reports == 'true'
         run: |
-          # 🚨 Added OS to release tag so parallel jobs don't overwrite each other
           echo "RELEASE_TAG=audit-${{ env.TIMESTAMP }}-${{ env.MATRIX_NAME }}-${{ matrix.os_target }}" >> $GITHUB_ENV
           echo "RELEASE_NAME=Fleet Audit (${{ matrix.os_target }}) - ${{ env.MATRIX_NAME }}" >> $GITHUB_ENV
           if [ "${{ env.PROFILE }}" == "tm" ] || [ "${{ env.PROFILE }}" == "both" ]; then
@@ -234,7 +282,6 @@ jobs:
         if: steps.check_reports.outputs.has_reports == 'true'
         uses: actions/upload-artifact@v4
         with:
-          # 🚨 Dynamically name the artifact so they don't overwrite each other
           name: raw-json-${{ env.MATRIX_NAME }}-${{ matrix.os_target }}
           path: '**/*.json'
           retention-days: 1
