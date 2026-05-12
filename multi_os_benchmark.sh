@@ -298,58 +298,53 @@ run_phase_1() {
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         for IP in "${ROCKY_MACHINES[@]}"; do
             
-            if [ ${#ROCKY_MACHINES[@]} -gt 0 ] && [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rocky" ]]; then
-                echo -e "\n${CYAN}⚙️ PHASE 0.8c: ROCKY BOOTSTRAPPING${NC}"
-                for IP in "${ROCKY_MACHINES[@]}"; do
-                    # 1. Install EPEL just in case it's needed for the scanner on Rocky 10
-                    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf install -y epel-release" > /dev/null 2>&1
-                    
-                    # 2. Force install the scanner engine (we handle the guide manually later)
-                    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf install -y openscap-scanner" > /dev/null 2>&1
-                    
-                    # 3. Verify it actually installed
-                    SCANNER_EXISTS=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "command -v oscap" 2>/dev/null)
-                    if [ -z "$SCANNER_EXISTS" ]; then
-                        echo -e "${RED}❌ ERROR: Failed to install 'openscap-scanner' on Rocky 10. Check the VM's package manager.${NC}"
-                        exit 1
-                    fi
-                done
+            # Auto-Injector ensures RHEL 9 content is present
+            FOLDER_EXISTS=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "[ -d /usr/share/xml/scap/ssg/content ] && echo 'YES' || echo 'NO'" 2>/dev/null)
+            if [ "$FOLDER_EXISTS" == "NO" ]; then
+                echo -e "${YELLOW}   ⚠️ SCAP Content missing. Auto-injecting upstream v0.1.74...${NC}"
+                ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                    cd /tmp && wget -q https://github.com/ComplianceAsCode/content/releases/download/v0.1.74/scap-security-guide-0.1.74.zip && \
+                    python3 -m zipfile -e scap-security-guide-0.1.74.zip . && \
+                    sudo mkdir -p /usr/share/xml/scap/ssg/content/ && \
+                    sudo cp scap-security-guide-0.1.74/ssg-rhel*.xml /usr/share/xml/scap/ssg/content/ 2>/dev/null || true && \
+                    rm -rf scap-security-guide-0.1.74*
+                " > /dev/null 2>&1 || true
             fi
 
             if [ "$RUN_CIS" == true ]; then
-                echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL}] Forcing Deep RHEL10 Applicability on $IP...${NC}"
+                echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL}] Forcing Deep RHEL9 Applicability on $IP...${NC}"
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel10-ds.xml' -o -name 'ssg-cs10-ds.xml' -o -name 'ssg-rhel9-ds.xml' | sort -V | tail -n 1)
+                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel9-ds.xml' | sort -V | tail -n 1)
                     
                     if [ -z \"\$TARGET_XML\" ]; then
-                        echo '❌ ERROR: RHEL content still missing!'
+                        echo '❌ ERROR: RHEL 9 content missing!'
                         exit 1
                     fi
                     
                     echo \"   ↳ Using Content: \$TARGET_XML\"
-                    echo \"   ↳ Deep-Spoofing OS identity for OVAL applicability...\"
+                    echo \"   ↳ Deep-Spoofing OS identity to RHEL 9...\"
 
-                    # 1. BACKUP IDENTITY FILES
+                    # 1. BACKUP IDENTITY
                     sudo cp /etc/os-release /tmp/os-release.bak
                     sudo cp /etc/redhat-release /tmp/redhat-release.bak 2>/dev/null || true
                     sudo cp /etc/system-release-cpe /tmp/system-release-cpe.bak 2>/dev/null || true
 
-                    # 2. INJECT 'GOD MODE' RHEL IDENTITY
+                    # 2. INJECT 'RHEL 9' IDENTITY TRIAD
                     sudo bash -c 'cat > /etc/os-release <<EOF
 NAME=\"Red Hat Enterprise Linux\"
-VERSION=\"10.0\"
+VERSION=\"9.0\"
 ID=\"rhel\"
 ID_LIKE=\"fedora\"
-VERSION_ID=\"10\"
-PLATFORM_ID=\"platform:el10\"
+VERSION_ID=\"9\"
+PLATFORM_ID=\"platform:el9\"
 EOF'
-                    sudo bash -c 'echo \"Red Hat Enterprise Linux release 10.0\" > /etc/redhat-release'
-                    sudo bash -c 'echo \"cpe:/o:redhat:enterprise_linux:10::baseos\" > /etc/system-release-cpe'
+                    sudo bash -c 'echo \"Red Hat Enterprise Linux release 9.0\" > /etc/redhat-release'
+                    sudo bash -c 'echo \"cpe:/o:redhat:enterprise_linux:9::baseos\" > /etc/system-release-cpe'
 
-                    # 3. RUN THE SCAN
+                    # 3. RUN SCAN
                     sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
 
-                    # 4. RESTORE TRUE IDENTITY
+                    # 4. RESTORE IDENTITY
                     sudo mv /tmp/os-release.bak /etc/os-release
                     sudo mv /tmp/redhat-release.bak /etc/redhat-release 2>/dev/null || true
                     sudo mv /tmp/system-release-cpe.bak /etc/system-release-cpe 2>/dev/null || true
@@ -358,20 +353,30 @@ EOF'
             fi
             
             if [ "$RUN_ORG" == true ]; then
-                echo -e "${GREEN}🏔️ [Rocky 10 - $ORG_NAME] Scanning $IP...${NC}"
-                if [ ! -f "$RHEL_CUSTOM_XCCDF" ]; then
-                    echo -e "${RED}❌ ERROR: Missing custom XML: '$RHEL_CUSTOM_XCCDF'${NC}"
-                    continue
-                fi
+                echo -e "${GREEN}🏔️ [Rocky 10 - $ORG_NAME] Scanning $IP (RHEL9 Mode)...${NC}"
+                if [ ! -f "$RHEL_CUSTOM_XCCDF" ]; then continue; fi
+                
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    echo \"   ↳ Spoofing /etc/os-release for Custom Scan...\"
                     sudo cp /etc/os-release /tmp/os-release.bak
-                    sudo sed -i 's/^ID=\"rocky\"/ID=\"rhel\"/' /etc/os-release
+                    sudo cp /etc/redhat-release /tmp/redhat-release.bak 2>/dev/null || true
+                    sudo cp /etc/system-release-cpe /tmp/system-release-cpe.bak 2>/dev/null || true
+
+                    sudo bash -c 'cat > /etc/os-release <<EOF
+NAME=\"Red Hat Enterprise Linux\"
+VERSION=\"9.0\"
+ID=\"rhel\"
+VERSION_ID=\"9\"
+PLATFORM_ID=\"platform:el9\"
+EOF'
+                    sudo bash -c 'echo \"Red Hat Enterprise Linux release 9.0\" > /etc/redhat-release'
+                    sudo bash -c 'echo \"cpe:/o:redhat:enterprise_linux:9::baseos\" > /etc/system-release-cpe'
 
                     sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
 
                     sudo mv /tmp/os-release.bak /etc/os-release
+                    sudo mv /tmp/redhat-release.bak /etc/redhat-release 2>/dev/null || true
+                    sudo mv /tmp/system-release-cpe.bak /etc/system-release-cpe 2>/dev/null || true
                 " || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
@@ -498,11 +503,27 @@ run_phase_4() {
             if [ "$RUN_CIS" == true ]; then
                 echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL} Verify] Verifying $IP...${NC}"
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel10-ds.xml' -o -name 'ssg-cs10-ds.xml' -o -name 'ssg-rhel9-ds.xml' | sort -V | tail -n 1)
+                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel9-ds.xml' | sort -V | tail -n 1)
+                    
                     sudo cp /etc/os-release /tmp/os-release.bak
-                    sudo sed -i 's/^ID=\"rocky\"/ID=\"rhel\"/' /etc/os-release
+                    sudo cp /etc/redhat-release /tmp/redhat-release.bak 2>/dev/null || true
+                    sudo cp /etc/system-release-cpe /tmp/system-release-cpe.bak 2>/dev/null || true
+
+                    sudo bash -c 'cat > /etc/os-release <<EOF
+NAME=\"Red Hat Enterprise Linux\"
+VERSION=\"9.0\"
+ID=\"rhel\"
+VERSION_ID=\"9\"
+PLATFORM_ID=\"platform:el9\"
+EOF'
+                    sudo bash -c 'echo \"Red Hat Enterprise Linux release 9.0\" > /etc/redhat-release'
+                    sudo bash -c 'echo \"cpe:/o:redhat:enterprise_linux:9::baseos\" > /etc/system-release-cpe'
+
                     sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
+
                     sudo mv /tmp/os-release.bak /etc/os-release
+                    sudo mv /tmp/redhat-release.bak /etc/redhat-release 2>/dev/null || true
+                    sudo mv /tmp/system-release-cpe.bak /etc/system-release-cpe 2>/dev/null || true
                 " > /dev/null 2>&1 || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
@@ -511,9 +532,24 @@ run_phase_4() {
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                     sudo cp /etc/os-release /tmp/os-release.bak
-                    sudo sed -i 's/^ID=\"rocky\"/ID=\"rhel\"/' /etc/os-release
+                    sudo cp /etc/redhat-release /tmp/redhat-release.bak 2>/dev/null || true
+                    sudo cp /etc/system-release-cpe /tmp/system-release-cpe.bak 2>/dev/null || true
+
+                    sudo bash -c 'cat > /etc/os-release <<EOF
+NAME=\"Red Hat Enterprise Linux\"
+VERSION=\"9.0\"
+ID=\"rhel\"
+VERSION_ID=\"9\"
+PLATFORM_ID=\"platform:el9\"
+EOF'
+                    sudo bash -c 'echo \"Red Hat Enterprise Linux release 9.0\" > /etc/redhat-release'
+                    sudo bash -c 'echo \"cpe:/o:redhat:enterprise_linux:9::baseos\" > /etc/system-release-cpe'
+
                     sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
+
                     sudo mv /tmp/os-release.bak /etc/os-release
+                    sudo mv /tmp/redhat-release.bak /etc/redhat-release 2>/dev/null || true
+                    sudo mv /tmp/system-release-cpe.bak /etc/system-release-cpe 2>/dev/null || true
                 " > /dev/null 2>&1 || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
