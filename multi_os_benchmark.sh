@@ -277,12 +277,30 @@ done <<< "$VM_DATA"
 
 echo -e "${GREEN}✅ Discovery Complete: Found ${#UBUNTU_MACHINES[@]} Ubuntu, ${#RHEL_MACHINES[@]} RHEL, ${#ROCKY_MACHINES[@]} Rocky, and ${#WINDOWS_MACHINES[@]} Windows targets RUNNING.${NC}"
 
-# 🚨 THE EARLY EXIT FIX
+# ======================================================
+# 🚨 THE EARLY EXIT FIX (WITH GITHUB ANNOTATIONS)
+# ======================================================
 if [ "$HEADLESS" == true ] && [ "$H_TARGET_OS" != "all" ]; then
-    if [ "${H_TARGET_OS,,}" == "ubuntu" ] && [ ${#UBUNTU_MACHINES[@]} -eq 0 ]; then echo -e "${YELLOW}⚠️ No running Ubuntu VMs found. Aborting gracefully.${NC}"; exit 0; fi
-    if [ "${H_TARGET_OS,,}" == "rhel" ] && [ ${#RHEL_MACHINES[@]} -eq 0 ]; then echo -e "${YELLOW}⚠️ No running RHEL VMs found. Aborting gracefully.${NC}"; exit 0; fi
-    if [ "${H_TARGET_OS,,}" == "rocky" ] && [ ${#ROCKY_MACHINES[@]} -eq 0 ]; then echo -e "${YELLOW}⚠️ No running Rocky VMs found. Aborting gracefully.${NC}"; exit 0; fi
-    if [ "${H_TARGET_OS,,}" == "windows" ] && [ ${#WINDOWS_MACHINES[@]} -eq 0 ]; then echo -e "${YELLOW}⚠️ No running Windows VMs found. Aborting gracefully.${NC}"; exit 0; fi
+    if [ "${H_TARGET_OS,,}" == "ubuntu" ] && [ ${#UBUNTU_MACHINES[@]} -eq 0 ]; then 
+        echo "::notice title=Ubuntu Audit Skipped::No running Ubuntu VMs were found matching tag '$H_TARGETS'."
+        echo -e "${YELLOW}⚠️ Aborting gracefully to save runner time.${NC}"
+        exit 0
+    fi
+    if [ "${H_TARGET_OS,,}" == "rhel" ] && [ ${#RHEL_MACHINES[@]} -eq 0 ]; then 
+        echo "::notice title=RHEL Audit Skipped::No running RHEL VMs were found matching tag '$H_TARGETS'."
+        echo -e "${YELLOW}⚠️ Aborting gracefully to save runner time.${NC}"
+        exit 0
+    fi
+    if [ "${H_TARGET_OS,,}" == "rocky" ] && [ ${#ROCKY_MACHINES[@]} -eq 0 ]; then 
+        echo "::notice title=Rocky Audit Skipped::No running Rocky VMs were found matching tag '$H_TARGETS'."
+        echo -e "${YELLOW}⚠️ Aborting gracefully to save runner time.${NC}"
+        exit 0
+    fi
+    if [ "${H_TARGET_OS,,}" == "windows" ] && [ ${#WINDOWS_MACHINES[@]} -eq 0 ]; then 
+        echo "::notice title=Windows Audit Skipped::No running Windows VMs were found matching tag '$H_TARGETS'."
+        echo -e "${YELLOW}⚠️ Aborting gracefully to save runner time.${NC}"
+        exit 0
+    fi
 fi
 
 # ======================================================
