@@ -298,7 +298,7 @@ run_phase_1() {
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         for IP in "${ROCKY_MACHINES[@]}"; do
             
-            echo -e "${YELLOW}   ⚙️ Verifying OpenSCAP Engine on Rocky 10...${NC}"
+            echo -e "${YELLOW}   ⚙️ Verifying OpenSCAP Engine on Rocky Linux...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                 if ! command -v oscap &> /dev/null; then
                     echo '   ↳ oscap binary missing. Installing from DNF...'
@@ -308,31 +308,31 @@ run_phase_1() {
             "
 
             if [ "$RUN_CIS" == true ]; then
-                echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL}] Scanning natively on $IP...${NC}"
+                echo -e "${GREEN}🏔️ [Rocky - CIS L${OS_LVL}] Scanning natively on $IP...${NC}"
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    # Use the native Rocky 10 datastream you found!
-                    TARGET_XML='/usr/share/xml/scap/ssg/content/ssg-rl10-ds.xml'
+                    # Dynamically extract major version (e.g., 8, 9, or 10)
+                    ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
+                    TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
                     
                     if [ ! -f \"\$TARGET_XML\" ]; then
-                        echo '❌ ERROR: Native Rocky 10 content missing!'
+                        echo \"❌ ERROR: Native Rocky \${ROCKY_VER} content missing at \${TARGET_XML}!\"
                         exit 1
                     fi
                     
                     echo \"   ↳ Using Native Content: \$TARGET_XML\"
 
-                    # Run the scan natively, no spoofing required
-                    sudo oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
+                    sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
                 " || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
             
             if [ "$RUN_ORG" == true ]; then
-                echo -e "${GREEN}🏔️ [Rocky 10 - $ORG_NAME] Scanning natively on $IP...${NC}"
+                echo -e "${GREEN}🏔️ [Rocky - $ORG_NAME] Scanning natively on $IP...${NC}"
                 if [ ! -f "$RHEL_CUSTOM_XCCDF" ]; then continue; fi
                 
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
+                    sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
                 " || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
@@ -396,15 +396,16 @@ run_remediation() {
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
-                echo -e "${GREEN}▶️ [CIS] Auto-Remediating Rocky 10 natively...${NC}"
+                echo -e "${GREEN}▶️ [CIS] Auto-Remediating Rocky natively...${NC}"
                 for IP in "${ROCKY_MACHINES[@]}"; do
                     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                        TARGET_XML='/usr/share/xml/scap/ssg/content/ssg-rl10-ds.xml'
+                        ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
+                        TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
+                        
                         if [ ! -f \"\$TARGET_XML\" ]; then
-                            echo '❌ ERROR: Native Rocky 10 content missing during remediation!'
+                            echo \"❌ ERROR: Native Rocky \${ROCKY_VER} content missing!\"
                             exit 1
                         fi
-                        # Run native remediation
                         sudo /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE --report /tmp/report_remediation_CIS_ROCKY_${IP}.html \"\$TARGET_XML\"
                     " || true
                     scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_remediation_CIS_ROCKY_${IP}.html ./report_remediation_CIS_ROCKY_${IP}.html > /dev/null 2>&1 || true
@@ -468,31 +469,30 @@ run_phase_4() {
             for IP in "${ROCKY_MACHINES[@]}"; do
                 
                 if [ "$RUN_CIS" == true ]; then
-                    echo -e "${GREEN}✅ [Rocky 10 - CIS L${OS_LVL} Verify] Scanning natively on $IP...${NC}"
+                    echo -e "${GREEN}✅ [Rocky - CIS L${OS_LVL} Verify] Scanning natively on $IP...${NC}"
                     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                        TARGET_XML='/usr/share/xml/scap/ssg/content/ssg-rl10-ds.xml'
+                        ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
+                        TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
+                        
                         if [ ! -f \"\$TARGET_XML\" ]; then
-                            echo '❌ ERROR: Native Rocky 10 content missing during verification!'
+                            echo \"❌ ERROR: Native Rocky \${ROCKY_VER} content missing!\"
                             exit 1
                         fi
-                        # Run native verification scan
                         sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
                     " || true
                     scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
                 fi
                 
                 if [ "$RUN_ORG" == true ]; then
-                    echo -e "${GREEN}✅ [Rocky 10 - $ORG_NAME Verify] Scanning natively on $IP...${NC}"
+                    echo -e "${GREEN}✅ [Rocky - $ORG_NAME Verify] Scanning natively on $IP...${NC}"
                     if [ ! -f "$RHEL_CUSTOM_XCCDF" ]; then continue; fi
                     
                     scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
                     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                        # Run native custom verification scan
                         sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
                     " || true
                     scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
                 fi
-                
             done
         fi
     fi
