@@ -327,17 +327,30 @@ run_phase_1() {
         fi
     fi
     
+    # --- WINDOWS SCANNING ---
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
         for IP in "${WINDOWS_MACHINES[@]}"; do
+            
             export INSPEC_PASSWORD="${AUDIT_PASS}"
+            
             if [ "$RUN_CIS" == true ]; then
                 echo -e "${GREEN}📦 [WINDOWS - CIS L${WIN_INSPEC_LVL}] Scanning $IP...${NC}"
-                cinc-auditor exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json > /dev/null 2>&1 || true
+                # Removed > /dev/null to see why it crashes
+                cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} --user="${AUDIT_USER}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json || true
             fi
+            
             if [ "$RUN_ORG" == true ]; then
                 echo -e "${CYAN}🔍 [WINDOWS - $ORG_NAME] Scanning $IP...${NC}"
-                cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --reporter cli json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json > /dev/null 2>&1 || true
+                
+                # 🛡️ SECURITY CHECK: Ensure the benchmark file actually exists on the runner
+                if [ ! -f "$WIN_CUSTOM_BENCHMARK" ]; then
+                    echo -e "${RED}❌ ERROR: Windows Benchmark file not found at: $WIN_CUSTOM_BENCHMARK${NC}"
+                    continue
+                fi
+
+                cinc-auditor exec "$WIN_CUSTOM_BENCHMARK" -t winrm://${IP} --user="${AUDIT_USER}" --reporter cli json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json || true
             fi
+            
             unset INSPEC_PASSWORD
         done
     fi
