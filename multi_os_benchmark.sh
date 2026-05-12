@@ -310,32 +310,18 @@ run_phase_1() {
             if [ "$RUN_CIS" == true ]; then
                 echo -e "${GREEN}🏔️ [Rocky - CIS L${OS_LVL}] Scanning natively on $IP...${NC}"
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                    # Dynamically extract major version (e.g., 8, 9, or 10)
                     ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                     TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
                     
-                    # 🚨 DYNAMIC PROFILE ROUTER
-                    if [ \"$CIS_LEVEL\" == \"Level 1\" ]; then
-                        if [ \"\$ROCKY_VER\" -ge 9 ]; then
-                            TARGET_PROFILE=\"xccdf_org.ssgproject.content_profile_cis_1_server\"
-                        else
-                            TARGET_PROFILE=\"xccdf_org.ssgproject.content_profile_cis_server_l1\"
-                        fi
-                    else
-                        if [ \"\$ROCKY_VER\" -ge 9 ]; then
-                            TARGET_PROFILE=\"xccdf_org.ssgproject.content_profile_cis_2_server\"
-                        else
-                            TARGET_PROFILE=\"xccdf_org.ssgproject.content_profile_cis\"
-                        fi
-                    fi
-
                     if [ ! -f \"\$TARGET_XML\" ]; then
                         echo \"❌ ERROR: Native Rocky \${ROCKY_VER} content missing at \${TARGET_XML}!\"
                         exit 1
                     fi
                     
-                    echo \"   ↳ Using Profile: \$TARGET_PROFILE\"
+                    echo \"   ↳ Using Profile: $RHEL_CIS_PROFILE\"
 
-                    sudo /usr/bin/oscap xccdf eval --profile \$TARGET_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
+                    sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
                 " || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
@@ -415,28 +401,12 @@ run_remediation() {
                     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                         ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                         TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
-
-                        # 🚨 DYNAMIC PROFILE ROUTER
-                        if [ \"$CIS_LEVEL\" == \"Level 1\" ]; then
-                            if [ \"\$ROCKY_VER\" -ge 9 ]; then
-                                TARGET_PROFILE=\"xccdf_org.ssgproject.content_profile_cis_1_server\"
-                            else
-                                TARGET_PROFILE=\"xccdf_org.ssgproject.content_profile_cis_server_l1\"
-                            fi
-                        else
-                            if [ \"\$ROCKY_VER\" -ge 9 ]; then
-                                TARGET_PROFILE=\"xccdf_org.ssgproject.content_profile_cis_2_server\"
-                            else
-                                TARGET_PROFILE=\"xccdf_org.ssgproject.content_profile_cis\"
-                            fi
-                        fi
                         
                         if [ ! -f \"\$TARGET_XML\" ]; then
                             echo \"❌ ERROR: Native Rocky \${ROCKY_VER} content missing!\"
                             exit 1
                         fi
-                        
-                        sudo /usr/bin/oscap xccdf eval --remediate --profile \$TARGET_PROFILE --report /tmp/report_remediation_CIS_ROCKY_${IP}.html \"\$TARGET_XML\"
+                        sudo /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE --report /tmp/report_remediation_CIS_ROCKY_${IP}.html \"\$TARGET_XML\"
                     " || true
                     scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_remediation_CIS_ROCKY_${IP}.html ./report_remediation_CIS_ROCKY_${IP}.html > /dev/null 2>&1 || true
                 done
@@ -503,28 +473,12 @@ run_phase_4() {
                     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                         ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                         TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
-
-                        # 🚨 DYNAMIC PROFILE ROUTER
-                        if [ \"$CIS_LEVEL\" == \"Level 1\" ]; then
-                            if [ \"\$ROCKY_VER\" -ge 9 ]; then
-                                TARGET_PROFILE=\"xccdf_org.ssgproject.content_profile_cis_1_server\"
-                            else
-                                TARGET_PROFILE=\"xccdf_org.ssgproject.content_profile_cis_server_l1\"
-                            fi
-                        else
-                            if [ \"\$ROCKY_VER\" -ge 9 ]; then
-                                TARGET_PROFILE=\"xccdf_org.ssgproject.content_profile_cis_2_server\"
-                            else
-                                TARGET_PROFILE=\"xccdf_org.ssgproject.content_profile_cis\"
-                            fi
-                        fi
                         
                         if [ ! -f \"\$TARGET_XML\" ]; then
                             echo \"❌ ERROR: Native Rocky \${ROCKY_VER} content missing!\"
                             exit 1
                         fi
-                        
-                        sudo /usr/bin/oscap xccdf eval --profile \$TARGET_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
+                        sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
                     " || true
                     scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
                 fi
