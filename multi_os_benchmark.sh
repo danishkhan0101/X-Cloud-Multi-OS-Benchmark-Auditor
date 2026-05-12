@@ -296,58 +296,57 @@ run_phase_1() {
     fi
 
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
-        if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
-            echo -e "\n${CYAN}⚙️ PHASE 0.8c: ROCKY BOOTSTRAPPING${NC}"
-            for IP in "${ROCKY_MACHINES[@]}"; do
-                ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf install -y openscap-scanner scap-security-guide" > /dev/null 2>&1
-                if [ "$RUN_CIS" == true ]; then
-                    echo -e "${GREEN}🏔️ [Rocky - CIS L${OS_LVL}] Forcing RHEL9 Applicability on $IP...${NC}"
-                    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                        # 1. Target RHEL 9 specifically (Rocky 9's upstream)
-                        TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel9-ds.xml' | head -n 1)
-                        CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel9-cpe-dictionary.xml' | head -n 1)
-                        
-                        # 2. FALLBACK: If RHEL9 isn't found, try RHEL8
-                        if [ -z \"\$TARGET_XML\" ]; then
-                            TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel8-ds.xml' | head -n 1)
-                            CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel8-cpe-dictionary.xml' | head -n 1)
-                        fi
-                
-                        # 3. CRITICAL: If still empty, we must stop to prevent the '' file crash
-                        if [ -z \"\$TARGET_XML\" ]; then
-                            echo '❌ ERROR: No RHEL 8 or 9 SCAP content found in /usr/share/xml/scap/ssg/content/'
-                            exit 1
-                        fi
-                
-                        echo \"   ↳ Using Content: \$TARGET_XML\"
-                        echo \"   ↳ Using Dict: \$CPE_DICT\"
-                
-                        # 4. Execute with conditional CPE flag to prevent empty argument crash
-                        sudo /usr/bin/oscap xccdf eval \
-                            \${CPE_DICT:+--cpe \"\$CPE_DICT\"} \
-                            --profile $RHEL_CIS_PROFILE \
-                            --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \
-                            \"\$TARGET_XML\"
-                    " || true
+        for IP in "${ROCKY_MACHINES[@]}"; do
+            if [ "$RUN_CIS" == true ]; then
+                echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL}] Forcing RHEL10 Applicability on $IP...${NC}"
+                ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel10-ds.xml' | head -n 1)
                     
-                    scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
+                    if [ -z \"\$TARGET_XML\" ]; then
+                        echo '❌ ERROR: RHEL 10 content missing!'
+                        exit 1
+                    fi
+
+                    echo \"   ↳ Using Content: \$TARGET_XML\"
+                    echo \"   ↳ Spoofing /etc/os-release to bypass missing CPE Dict...\"
+
+                    # SPOOF THE OS
+                    sudo cp /etc/os-release /tmp/os-release.bak
+                    sudo sed -i 's/^ID=\"rocky\"/ID=\"rhel\"/' /etc/os-release
+
+                    # RUN THE SCAN
+                    sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
+
+                    # RESTORE THE OS
+                    sudo mv /tmp/os-release.bak /etc/os-release
+                " || true
+                scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
+            fi
+            
+            if [ "$RUN_ORG" == true ]; then
+                echo -e "${GREEN}🏔️ [Rocky 10 - $ORG_NAME] Scanning $IP...${NC}"
+                
+                if [ ! -f "$RHEL_CUSTOM_XCCDF" ]; then
+                    echo -e "${RED}❌ ERROR: Missing custom XML: '$RHEL_CUSTOM_XCCDF'${NC}"
+                    continue
                 fi
                 
-                if [ "$RUN_ORG" == true ]; then
-                    echo -e "${GREEN}🏔️ [Rocky - $ORG_NAME] Scanning $IP...${NC}"
-                    if [ ! -f "$RHEL_CUSTOM_XCCDF" ]; then
-                        echo -e "${RED}❌ ERROR: Missing custom XML: '$RHEL_CUSTOM_XCCDF'${NC}"
-                        continue
-                    fi
-                    scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-                    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                        CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
-                        sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
-                    " || true
-                    scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
-                fi
-            done
-        fi
+                scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
+                
+                ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                    echo \"   ↳ Spoofing /etc/os-release for Custom Scan...\"
+                    
+                    sudo cp /etc/os-release /tmp/os-release.bak
+                    sudo sed -i 's/^ID=\"rocky\"/ID=\"rhel\"/' /etc/os-release
+
+                    sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
+
+                    sudo mv /tmp/os-release.bak /etc/os-release
+                " || true
+                
+                scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
+            fi
+        done
     fi
     
     # --- WINDOWS SCANNING ---
@@ -468,28 +467,29 @@ run_phase_4() {
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         for IP in "${ROCKY_MACHINES[@]}"; do
             if [ "$RUN_CIS" == true ]; then
-                echo -e "${GREEN}🏔️  [Rocky - CIS L${OS_LVL} Verification] Scanning $IP...${NC}"
+                echo -e "${GREEN}🏔️ [Rocky 10 - CIS L${OS_LVL} Verify] Verifying $IP...${NC}"
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    # 1. Dynamically locate the RHEL content and dictionary
-                    XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                    CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
+                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel10-ds.xml' | head -n 1)
                     
-                    # 2. Execute using the --cpe flag to force RHEL rules to apply to Rocky
-                    sudo /usr/bin/oscap xccdf eval \
-                        --cpe \"\$CPE_DICT\" \
-                        --profile $RHEL_CIS_PROFILE \
-                        --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \
-                        \"\$XML_FILE\"
-                " || true
-                
-                # 3. Download the report
+                    sudo cp /etc/os-release /tmp/os-release.bak
+                    sudo sed -i 's/^ID=\"rocky\"/ID=\"rhel\"/' /etc/os-release
+
+                    sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
+
+                    sudo mv /tmp/os-release.bak /etc/os-release
+                " > /dev/null 2>&1 || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
             if [ "$RUN_ORG" == true ]; then
+                echo -e "${GREEN}🏔️ [Rocky 10 - $ORG_NAME Verify] Verifying $IP...${NC}"
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
-                    sudo env OSCAP_CPE_DICT_PATH=\"\$CPE_DICT\" /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
+                    sudo cp /etc/os-release /tmp/os-release.bak
+                    sudo sed -i 's/^ID=\"rocky\"/ID=\"rhel\"/' /etc/os-release
+
+                    sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)
+
+                    sudo mv /tmp/os-release.bak /etc/os-release
                 " > /dev/null 2>&1 || true
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true
             fi
