@@ -303,20 +303,30 @@ run_phase_1() {
                 if [ "$RUN_CIS" == true ]; then
                 echo -e "${GREEN}🏔️ [Rocky - CIS L${OS_LVL}] Scanning $IP...${NC}"
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                    # 1. Find the RHEL Data Stream
+                    # 1. More aggressive find to handle different SSG versions
                     TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                    
-                    # 2. Find the CPE Dictionary (This is the secret sauce for Rocky)
                     CPE_DICT=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1)
-                    CPE_OVAL=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-oval.xml' | sort -V | tail -n 1)
-                    
-                    # 3. Run with explicit CPE mapping to force RHEL rules onto Rocky
-                    sudo oscap xccdf eval \
-                        --cpe \"\$CPE_DICT\" \
+            
+                    # 2. FAIL-SAFE: Check if files were actually found
+                    if [ -z \"\$TARGET_XML\" ]; then
+                        echo '❌ ERROR: Could not find ssg-rhel-ds.xml content! Is scap-security-guide installed?';
+                        exit 1
+                    fi
+                    if [ -z \"\$CPE_DICT\" ]; then
+                        echo '⚠️ WARNING: CPE Dictionary not found. Attempting scan without it...';
+                    fi
+            
+                    echo \"   ↳ Content Path: \$TARGET_XML\"
+                    echo \"   ↳ CPE Path: \$CPE_DICT\"
+            
+                    # 3. Execute with explicit paths
+                    sudo /usr/bin/oscap xccdf eval \
+                        \${CPE_DICT:+--cpe \"\$CPE_DICT\"} \
                         --profile $RHEL_CIS_PROFILE \
                         --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \
                         \"\$TARGET_XML\"
                 " || true
+                
                 scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true
                 fi
                 
