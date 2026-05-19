@@ -91,6 +91,23 @@ if [ -z "$AUDIT_PASS" ]; then
 fi
 
 # ======================================================
+# ⚡ ACCELERATION: SSH MULTIPLEXING (CONTROLMASTER)
+# ======================================================
+echo -e "${CYAN}⚡ Configuring SSH Multiplexing for hyper-speed connections...${NC}"
+mkdir -p ~/.ssh/cm
+cat > ~/.ssh/config <<EOF
+Host *
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    ControlMaster auto
+    ControlPath ~/.ssh/cm/%r@%h:%p
+    ControlPersist 15m
+    ServerAliveInterval 30
+    Compression yes
+EOF
+chmod 600 ~/.ssh/config
+
+# ======================================================
 # PHASE 0.1: ZERO-TRUST DISCOVERY (MAP ONLY)
 # ======================================================
 echo -e "${CYAN}📡 Querying Azure for VMs and Power States in [$RG_NAME]...${NC}"
@@ -106,10 +123,16 @@ RHEL_MACHINES=()
 ROCKY_MACHINES=()
 WINDOWS_MACHINES=()
 
+# 🚨 INITIALIZE THE CACHE DICTIONARY
+declare -A IP_TO_VM_NAME
+
 while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
     vm_name=$(echo "$raw_name" | tr -d '\r' | xargs); ip=$(echo "$raw_ip" | tr -d '\r' | xargs); os=$(echo "$raw_os" | tr -d '\r' | xargs); power=$(echo "$raw_power" | tr -d '\r' | xargs); offer=$(echo "$raw_offer" | tr -d '\r' | tr '[:upper:]' '[:lower:]' | xargs)
     
     if [ -z "$ip" ] || [ "$ip" == "None" ] || [[ "$power" != *"VM running"* ]]; then continue; fi
+    
+    # 🚨 POPULATE THE CACHE (Takes 0.001 seconds!)
+    IP_TO_VM_NAME["$ip"]="$vm_name"
     
     if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
         if [[ "$offer" == *"rocky"* ]] || [[ "${vm_name,,}" == *"rocky"* ]]; then ROCKY_MACHINES+=("$ip"); echo -e "${CYAN}🏔️ Mapped Rocky Node: $ip${NC}"
@@ -147,12 +170,15 @@ fi
 # ======================================================
 echo -e "\n${CYAN}⚙️ PHASE 0.3: PARALLEL INFRASTRUCTURE BOOTSTRAPPING${NC}"
 
+# 🚨 Fetch Runner IP once, store in memory
+RUNNER_IP=$(curl -s https://api.ipify.org)
+
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
     for ip in "${UBUNTU_MACHINES[@]}"; do
         (
             if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${UBUNTU_USER}@${ip} "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
                 echo -e "${YELLOW}   ⚠️ Access denied for Ubuntu node $ip. Forcing SSH Injection...${NC}"
-                RUNNER_IP=$(curl -s https://api.ipify.org); VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$ip'].virtualMachine.name" -o tsv)
+                VM_NAME="${IP_TO_VM_NAME[$ip]}" # 🚨 Cached Lookup
                 NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv); NSG_NAME=$(basename "$NSG_ID")
                 az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_SSH_Runner_Only" --priority 998 --destination-port-ranges 22 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
                 PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
@@ -168,7 +194,7 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rhel" ]]; then
         (
             if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${GHOST_USER}@${ip} "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
                 echo -e "${YELLOW}   ⚠️ Access denied for RHEL node $ip. Forcing SSH Injection...${NC}"
-                RUNNER_IP=$(curl -s https://api.ipify.org); VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$ip'].virtualMachine.name" -o tsv)
+                VM_NAME="${IP_TO_VM_NAME[$ip]}" # 🚨 Cached Lookup
                 NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv); NSG_NAME=$(basename "$NSG_ID")
                 az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_SSH_Runner_Only" --priority 998 --destination-port-ranges 22 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
                 PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
@@ -184,7 +210,7 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rocky" ]]; then
         (
             if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${GHOST_USER}@${ip} "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
                 echo -e "${YELLOW}   ⚠️ Access denied for Rocky node $ip. Forcing SSH Injection...${NC}"
-                RUNNER_IP=$(curl -s https://api.ipify.org); VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$ip'].virtualMachine.name" -o tsv)
+                VM_NAME="${IP_TO_VM_NAME[$ip]}" # 🚨 Cached Lookup
                 NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv); NSG_NAME=$(basename "$NSG_ID")
                 az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_SSH_Runner_Only" --priority 998 --destination-port-ranges 22 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
                 PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
@@ -199,7 +225,7 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
     for ip in "${WINDOWS_MACHINES[@]}"; do
         (
             echo -e "${YELLOW}   ☢️ Forcing WinRM Unlock for $ip in background...${NC}"
-            RUNNER_IP=$(curl -s https://api.ipify.org); VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$ip'].virtualMachine.name" -o tsv)
+            VM_NAME="${IP_TO_VM_NAME[$ip]}" # 🚨 Cached Lookup
             NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
             if [ -n "$NSG_ID" ]; then
                 NSG_NAME=$(basename "$NSG_ID")
@@ -538,7 +564,7 @@ run_cleanup() {
         for IP in "${UBUNTU_MACHINES[@]}"; do
             echo -e "   ${YELLOW}Removing tools & nuking user from Ubuntu: $IP...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo apt-get purge -y openscap-scanner ssg-base && sudo apt-get autoremove -y" > /dev/null 2>&1
-            VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$IP'].virtualMachine.name" -o tsv)
+            VM_NAME="${IP_TO_VM_NAME[$IP]}" # 🚨 Cached Lookup
             if [ -n "$VM_NAME" ]; then az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "userdel -r ${UBUNTU_USER}" -o none > /dev/null 2>&1 || true; fi
         done
     fi
@@ -547,7 +573,7 @@ run_cleanup() {
         for IP in "${RHEL_MACHINES[@]}"; do
             echo -e "   ${YELLOW}Removing tools & nuking user from RHEL: $IP...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf remove -y openscap-scanner scap-security-guide -C --setopt=metadata_expire=never" > /dev/null 2>&1
-            VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$IP'].virtualMachine.name" -o tsv)
+            VM_NAME="${IP_TO_VM_NAME[$IP]}" # 🚨 Cached Lookup
             if [ -n "$VM_NAME" ]; then az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "userdel -r ${GHOST_USER}" -o none > /dev/null 2>&1 || true; fi
         done
     fi
@@ -556,7 +582,7 @@ run_cleanup() {
         for IP in "${ROCKY_MACHINES[@]}"; do
             echo -e "   ${YELLOW}Removing tools & nuking user from Rocky: $IP...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf remove -y openscap-scanner scap-security-guide -C --setopt=metadata_expire=never" > /dev/null 2>&1
-            VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$IP'].virtualMachine.name" -o tsv)
+            VM_NAME="${IP_TO_VM_NAME[$IP]}" # 🚨 Cached Lookup
             if [ -n "$VM_NAME" ]; then az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "userdel -r ${GHOST_USER}" -o none > /dev/null 2>&1 || true; fi
         done
     fi
@@ -564,7 +590,7 @@ run_cleanup() {
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
         for IP in "${WINDOWS_MACHINES[@]}"; do
             echo -e "   ${CYAN}🧹 Reversing security changes & nuking user on Windows: $IP...${NC}"
-            VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$IP'].virtualMachine.name" -o tsv)
+            VM_NAME="${IP_TO_VM_NAME[$IP]}" # 🚨 Cached Lookup
             if [ -n "$VM_NAME" ]; then
                 NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv)
                 NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
