@@ -230,25 +230,11 @@ jobs:
           echo "🖥️  Assigned OS Runner: $TARGET_OS"
           chmod +x multi_os_benchmark.sh
           
-          # 🚨 TRIPLE-RUN SEQUENCE FOR FULL AUDITS
+          # 🚨 SINGLE RUN FOR FULL AUDITS
           if [ "$PROFILE" == "all" ]; then
-            echo "🚀 FULL AUDIT MODE: Running sequentially to prevent VM crashes..."
-            
-            echo "▶️ 1/3: Scanning CIS Level 1..."
-            export CIS_LEVEL="Level 1"
-            ./multi_os_benchmark.sh --headless --profile "cis" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "false" --target-os "$TARGET_OS"
-            
-            echo "▶️ 2/3: Scanning CIS Level 2..."
-            export CIS_LEVEL="Level 2"
-            ./multi_os_benchmark.sh --headless --profile "cis" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "false" --target-os "$TARGET_OS"
-            
-            echo "▶️ 3/3: Scanning TM Baseline..."
-            export PROFILE="tm"
-            # We only apply the user's cleanup choice on the VERY LAST run
-            ./multi_os_benchmark.sh --headless --profile "tm" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP" --target-os "$TARGET_OS"
-            
+            echo "🚀 FULL AUDIT MODE: Executing comprehensive internal scan loop..."
+            ./multi_os_benchmark.sh --headless --profile "all" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP" --target-os "$TARGET_OS"
           else
-            # Standard single run for specific profiles
             echo "📋 Running Single Profile: $PROFILE"
             ./multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP" --target-os "$TARGET_OS"
           fi
