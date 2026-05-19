@@ -143,63 +143,75 @@ if [ "$HEADLESS" == true ] && [ "$H_TARGET_OS" != "all" ]; then
 fi
 
 # ======================================================
-# 🛡️ PHASE 0.3: THE AUTO-HEALER (INJECT ONLY IF ASSIGNED)
+# 🛡️ PHASE 0.3: THE AUTO-HEALER (PARALLEL BOOTSTRAP)
 # ======================================================
+echo -e "\n${CYAN}⚙️ PHASE 0.3: PARALLEL INFRASTRUCTURE BOOTSTRAPPING${NC}"
+
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
     for ip in "${UBUNTU_MACHINES[@]}"; do
-        if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${UBUNTU_USER}@${ip} "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
-            echo -e "${YELLOW}   ⚠️ Access denied for Ubuntu node $ip. Attempting Force-Injection...${NC}"
-            RUNNER_IP=$(curl -s https://api.ipify.org); VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$ip'].virtualMachine.name" -o tsv)
-            NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv); NSG_NAME=$(basename "$NSG_ID")
-            az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_SSH_Runner_Only" --priority 998 --destination-port-ranges 22 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
-            PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
-            az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "useradd -m -s /bin/bash ${UBUNTU_USER} || true; echo '${UBUNTU_USER} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-${UBUNTU_USER}; chmod 440 /etc/sudoers.d/99-${UBUNTU_USER}; mkdir -p /home/${UBUNTU_USER}/.ssh; echo '$PUB_KEY' > /home/${UBUNTU_USER}/.ssh/authorized_keys; chown -R ${UBUNTU_USER}:${UBUNTU_USER} /home/${UBUNTU_USER}/.ssh; chmod 700 /home/${UBUNTU_USER}/.ssh; chmod 600 /home/${UBUNTU_USER}/.ssh/authorized_keys; systemctl restart sshd" -o none > /dev/null 2>&1 || true
-            sleep 15
-        fi
+        (
+            if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${UBUNTU_USER}@${ip} "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
+                echo -e "${YELLOW}   ⚠️ Access denied for Ubuntu node $ip. Forcing SSH Injection...${NC}"
+                RUNNER_IP=$(curl -s https://api.ipify.org); VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$ip'].virtualMachine.name" -o tsv)
+                NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv); NSG_NAME=$(basename "$NSG_ID")
+                az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_SSH_Runner_Only" --priority 998 --destination-port-ranges 22 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
+                PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
+                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "useradd -m -s /bin/bash ${UBUNTU_USER} || true; echo '${UBUNTU_USER} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-${UBUNTU_USER}; chmod 440 /etc/sudoers.d/99-${UBUNTU_USER}; mkdir -p /home/${UBUNTU_USER}/.ssh; echo '$PUB_KEY' > /home/${UBUNTU_USER}/.ssh/authorized_keys; chown -R ${UBUNTU_USER}:${UBUNTU_USER} /home/${UBUNTU_USER}/.ssh; chmod 700 /home/${UBUNTU_USER}/.ssh; chmod 600 /home/${UBUNTU_USER}/.ssh/authorized_keys; systemctl restart sshd" -o none > /dev/null 2>&1 || true
+                sleep 15
+            fi
+        ) &
     done
 fi
 
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rhel" ]]; then
     for ip in "${RHEL_MACHINES[@]}"; do
-        if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${GHOST_USER}@${ip} "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
-            echo -e "${YELLOW}   ⚠️ Access denied for RHEL node $ip. Attempting Force-Injection...${NC}"
-            RUNNER_IP=$(curl -s https://api.ipify.org); VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$ip'].virtualMachine.name" -o tsv)
-            NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv); NSG_NAME=$(basename "$NSG_ID")
-            az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_SSH_Runner_Only" --priority 998 --destination-port-ranges 22 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
-            PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
-            az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "useradd -m -s /bin/bash ${GHOST_USER} || true; echo '${GHOST_USER} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-${GHOST_USER}; chmod 440 /etc/sudoers.d/99-${GHOST_USER}; mkdir -p /home/${GHOST_USER}/.ssh; echo '$PUB_KEY' > /home/${GHOST_USER}/.ssh/authorized_keys; chown -R ${GHOST_USER}:${GHOST_USER} /home/${GHOST_USER}/.ssh; chmod 700 /home/${GHOST_USER}/.ssh; chmod 600 /home/${GHOST_USER}/.ssh/authorized_keys; if command -v restorecon &> /dev/null; then restorecon -Rv /home/${GHOST_USER}/.ssh >/dev/null 2>&1 || true; fi; echo 'PubkeyAcceptedKeyTypes +ssh-rsa' > /etc/ssh/sshd_config.d/99-runner-key.conf 2>/dev/null || true; systemctl restart sshd" -o none > /dev/null 2>&1 || true
-            sleep 15
-        fi
+        (
+            if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${GHOST_USER}@${ip} "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
+                echo -e "${YELLOW}   ⚠️ Access denied for RHEL node $ip. Forcing SSH Injection...${NC}"
+                RUNNER_IP=$(curl -s https://api.ipify.org); VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$ip'].virtualMachine.name" -o tsv)
+                NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv); NSG_NAME=$(basename "$NSG_ID")
+                az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_SSH_Runner_Only" --priority 998 --destination-port-ranges 22 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
+                PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
+                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "useradd -m -s /bin/bash ${GHOST_USER} || true; echo '${GHOST_USER} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-${GHOST_USER}; chmod 440 /etc/sudoers.d/99-${GHOST_USER}; mkdir -p /home/${GHOST_USER}/.ssh; echo '$PUB_KEY' > /home/${GHOST_USER}/.ssh/authorized_keys; chown -R ${GHOST_USER}:${GHOST_USER} /home/${GHOST_USER}/.ssh; chmod 700 /home/${GHOST_USER}/.ssh; chmod 600 /home/${GHOST_USER}/.ssh/authorized_keys; if command -v restorecon &> /dev/null; then restorecon -Rv /home/${GHOST_USER}/.ssh >/dev/null 2>&1 || true; fi; echo 'PubkeyAcceptedKeyTypes +ssh-rsa' > /etc/ssh/sshd_config.d/99-runner-key.conf 2>/dev/null || true; systemctl restart sshd" -o none > /dev/null 2>&1 || true
+                sleep 15
+            fi
+        ) &
     done
 fi
 
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rocky" ]]; then
     for ip in "${ROCKY_MACHINES[@]}"; do
-        if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${GHOST_USER}@${ip} "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
-            echo -e "${YELLOW}   ⚠️ Access denied for Rocky node $ip. Attempting Force-Injection...${NC}"
-            RUNNER_IP=$(curl -s https://api.ipify.org); VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$ip'].virtualMachine.name" -o tsv)
-            NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv); NSG_NAME=$(basename "$NSG_ID")
-            az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_SSH_Runner_Only" --priority 998 --destination-port-ranges 22 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
-            PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
-            az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "useradd -m -s /bin/bash ${GHOST_USER} || true; echo '${GHOST_USER} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-${GHOST_USER}; chmod 440 /etc/sudoers.d/99-${GHOST_USER}; mkdir -p /home/${GHOST_USER}/.ssh; echo '$PUB_KEY' > /home/${GHOST_USER}/.ssh/authorized_keys; chown -R ${GHOST_USER}:${GHOST_USER} /home/${GHOST_USER}/.ssh; chmod 700 /home/${GHOST_USER}/.ssh; chmod 600 /home/${GHOST_USER}/.ssh/authorized_keys; if command -v restorecon &> /dev/null; then restorecon -Rv /home/${GHOST_USER}/.ssh >/dev/null 2>&1 || true; fi; echo 'PubkeyAcceptedKeyTypes +ssh-rsa' > /etc/ssh/sshd_config.d/99-runner-key.conf 2>/dev/null || true; systemctl restart sshd" -o none > /dev/null 2>&1 || true
-            sleep 15
-        fi
+        (
+            if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${GHOST_USER}@${ip} "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
+                echo -e "${YELLOW}   ⚠️ Access denied for Rocky node $ip. Forcing SSH Injection...${NC}"
+                RUNNER_IP=$(curl -s https://api.ipify.org); VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$ip'].virtualMachine.name" -o tsv)
+                NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv); NSG_NAME=$(basename "$NSG_ID")
+                az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_SSH_Runner_Only" --priority 998 --destination-port-ranges 22 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
+                PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
+                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "useradd -m -s /bin/bash ${GHOST_USER} || true; echo '${GHOST_USER} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-${GHOST_USER}; chmod 440 /etc/sudoers.d/99-${GHOST_USER}; mkdir -p /home/${GHOST_USER}/.ssh; echo '$PUB_KEY' > /home/${GHOST_USER}/.ssh/authorized_keys; chown -R ${GHOST_USER}:${GHOST_USER} /home/${GHOST_USER}/.ssh; chmod 700 /home/${GHOST_USER}/.ssh; chmod 600 /home/${GHOST_USER}/.ssh/authorized_keys; if command -v restorecon &> /dev/null; then restorecon -Rv /home/${GHOST_USER}/.ssh >/dev/null 2>&1 || true; fi; echo 'PubkeyAcceptedKeyTypes +ssh-rsa' > /etc/ssh/sshd_config.d/99-runner-key.conf 2>/dev/null || true; systemctl restart sshd" -o none > /dev/null 2>&1 || true
+                sleep 15
+            fi
+        ) &
     done
 fi
 
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
     for ip in "${WINDOWS_MACHINES[@]}"; do
-        echo -e "${YELLOW}   ☢️ Forcing WinRM Unlock for $ip...${NC}"
-        RUNNER_IP=$(curl -s https://api.ipify.org); VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$ip'].virtualMachine.name" -o tsv)
-        NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
-        if [ -n "$NSG_ID" ]; then
-            NSG_NAME=$(basename "$NSG_ID")
-            az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_WinRM_Runner_Only" --priority 999 --destination-port-ranges 5985 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
-        fi
-        az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunPowerShellScript --scripts "Remove-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM' -Recurse -Force -ErrorAction SilentlyContinue; net user ${AUDIT_USER} '${AUDIT_PASS}' /add /y 2>&1 | Out-Null; net user ${AUDIT_USER} '${AUDIT_PASS}' 2>&1 | Out-Null; net localgroup Administrators ${AUDIT_USER} /add 2>&1 | Out-Null; WMIC USERACCOUNT WHERE Name='${AUDIT_USER}' SET PasswordExpires=FALSE 2>&1 | Out-Null; Enable-PSRemoting -SkipNetworkProfileCheck -Force; winrm set winrm/config/service/auth '@{Basic=\"true\"}'; winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'; New-ItemProperty -Name LocalAccountTokenFilterPolicy -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -PropertyType DWord -Value 1 -Force; Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' -Enabled True -Profile Any -ErrorAction SilentlyContinue; Restart-Service WinRM -Force;" -o none > /dev/null 2>&1 || true
-        sleep 20
+        (
+            echo -e "${YELLOW}   ☢️ Forcing WinRM Unlock for $ip in background...${NC}"
+            RUNNER_IP=$(curl -s https://api.ipify.org); VM_NAME=$(az vm list-ip-addresses -g "$RG_NAME" --query "[?virtualMachine.network.publicIpAddresses[0].ipAddress=='$ip'].virtualMachine.name" -o tsv)
+            NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
+            if [ -n "$NSG_ID" ]; then
+                NSG_NAME=$(basename "$NSG_ID")
+                az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_WinRM_Runner_Only" --priority 999 --destination-port-ranges 5985 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
+            fi
+            az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunPowerShellScript --scripts "Remove-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM' -Recurse -Force -ErrorAction SilentlyContinue; net user ${AUDIT_USER} '${AUDIT_PASS}' /add /y 2>&1 | Out-Null; net user ${AUDIT_USER} '${AUDIT_PASS}' 2>&1 | Out-Null; net localgroup Administrators ${AUDIT_USER} /add 2>&1 | Out-Null; WMIC USERACCOUNT WHERE Name='${AUDIT_USER}' SET PasswordExpires=FALSE 2>&1 | Out-Null; Enable-PSRemoting -SkipNetworkProfileCheck -Force; winrm set winrm/config/service/auth '@{Basic=\"true\"}'; winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'; New-ItemProperty -Name LocalAccountTokenFilterPolicy -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -PropertyType DWord -Value 1 -Force; Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' -Enabled True -Profile Any -ErrorAction SilentlyContinue; Restart-Service WinRM -Force;" -o none > /dev/null 2>&1 || true
+            sleep 20
+        ) &
     done
 fi
+
+wait # 🚨 Pause script here until ALL OSes are simultaneously injected
 
 # ======================================================
 # INVENTORY BUILDER
