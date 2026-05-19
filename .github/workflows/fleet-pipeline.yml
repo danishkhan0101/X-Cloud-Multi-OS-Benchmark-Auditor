@@ -11,7 +11,7 @@ on:
         options:
           - tm
           - cis
-          - all
+          - all(only work for scanning only)
       cis_level:
         description: '📊 STEP 2: CIS Strictness (Only matters for "cis" profile)'
         required: true
