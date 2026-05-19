@@ -122,14 +122,17 @@ jobs:
               VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[?tags.Environment=='$TARGET_ENV' && powerState=='VM running'].[storageProfile.osDisk.osType, storageProfile.imageReference.offer, name]" -o tsv)
           fi
 
-          HAS_UBUNTU=false; HAS_RHEL=false; HAS_ROCKY=false; HAS_WINDOWS=false
+          HAS_UBUNTU=false; HAS_RHEL=false; HAS_ROCKY=false; HAS_ALMA=false; HAS_WINDOWS=false
 
           while IFS=$'\t' read -r os offer name; do
               offer_lower="${offer,,}"
               name_lower="${name,,}"
               
               if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
+                  # 🚨 ORDER MATTERS: Check Rocky/Alma BEFORE the generic 'rhel' catch
+                  # since AlmaLinux marketplace offers occasionally include "rhel" in the slug.
                   if [[ "$offer_lower" == *"rocky"* ]] || [[ "$name_lower" == *"rocky"* ]]; then HAS_ROCKY=true
+                  elif [[ "$offer_lower" == *"alma"* ]] || [[ "$name_lower" == *"alma"* ]]; then HAS_ALMA=true
                   elif [[ "$offer_lower" == *"rhel"* ]] || [[ "$name_lower" == *"rhel"* ]]; then HAS_RHEL=true
                   else HAS_UBUNTU=true
                   fi
@@ -142,6 +145,7 @@ jobs:
           [ "$HAS_UBUNTU" == true ] && OS_JSON+="\"Ubuntu\","
           [ "$HAS_RHEL" == true ] && OS_JSON+="\"RHEL\","
           [ "$HAS_ROCKY" == true ] && OS_JSON+="\"Rocky\","
+          [ "$HAS_ALMA" == true ] && OS_JSON+="\"Alma\","
           [ "$HAS_WINDOWS" == true ] && OS_JSON+="\"Windows\","
 
           OS_JSON="${OS_JSON%,}]"
