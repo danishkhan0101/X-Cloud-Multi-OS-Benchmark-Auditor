@@ -213,12 +213,13 @@ for ip in "${ROCKY_MACHINES[@]}"; do echo "${ip} ansible_user=${GHOST_USER}" >> 
 echo -e "\n[windows_nodes]" >> inventory.ini
 for ip in "${WINDOWS_MACHINES[@]}"; do echo "${ip} ansible_user=${AUDIT_USER} ansible_password=\"${AUDIT_PASS}\" ansible_port=5985 ansible_winrm_scheme=http ansible_connection=winrm ansible_winrm_transport=basic ansible_winrm_server_cert_validation=ignore" >> inventory.ini; done
 
+# Initialize default profile switches based on inputs
 RUN_ORG=false
 RUN_CIS=false
 
 if [ "$HEADLESS" == true ]; then
-    if [ "$H_PROFILE" == "tm" ] || [ "$H_PROFILE" == "$ORG_PREFIX" ] || [ "$H_PROFILE" == "both" ]; then RUN_ORG=true; fi
-    if [ "$H_PROFILE" == "cis" ] || [ "$H_PROFILE" == "both" ]; then RUN_CIS=true; fi
+    if [[ "${H_PROFILE,,}" == "tm" ]] || [[ "${H_PROFILE,,}" == "${ORG_PREFIX,,}" ]] || [[ "${H_PROFILE,,}" == "both" ]]; then RUN_ORG=true; fi
+    if [[ "${H_PROFILE,,}" == "cis" ]] || [[ "${H_PROFILE,,}" == "both" ]]; then RUN_CIS=true; fi
 else
     echo -e "\n1) CUSTOM BASELINE\n2) CIS BASELINE\n3) BOTH"
     read -p "Choose profile [1-3]: " pc
@@ -226,17 +227,20 @@ else
     if [ "$pc" == "2" ] || [ "$pc" == "3" ]; then RUN_CIS=true; fi
 fi
 
-if [ "$RUN_CIS" == true ]; then
-    if [ "$CIS_LEVEL" == "Level 1" ]; then
-        UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level1_server"
-        RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_server_l1"
-        OS_LVL="1"; WIN_INSPEC_LVL="1"
-    else
-        UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level2_server"
-        RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis"
-        OS_LVL="2"; WIN_INSPEC_LVL="2"
+# 🚨 DYNAMIC PROFILE UPDATER: Called right before scans to ensure L1/L2 vars are set correctly
+update_profile_vars() {
+    if [ "$RUN_CIS" == true ]; then
+        if [ "$CIS_LEVEL" == "Level 1" ]; then
+            UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level1_server"
+            RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_server_l1"
+            OS_LVL="1"; WIN_INSPEC_LVL="1"
+        else
+            UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level2_server"
+            RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis"
+            OS_LVL="2"; WIN_INSPEC_LVL="2"
+        fi
     fi
-fi
+}
 
 # ======================================================
 # FUNCTION DEFINITIONS (Core logic)
@@ -554,19 +558,59 @@ run_cleanup() {
 }
 
 # ======================================================
-# EXECUTION
+# EXECUTION ENGINE
 # ======================================================
-if [ "$HEADLESS" == true ]; then
-    echo -e "\n${CYAN}${BOLD}======================================================"
-    echo -e "🚀 EXECUTING CI/CD WORKFLOW: MODE -> $H_MODE"
-    echo -e "======================================================${NC}"
-    
+
+# Helper function to fire phases based on the chosen mode
+execute_phases() {
     case $H_MODE in
         scan) run_phase_1 ;;
         remediate) run_remediation ;;
         full) run_phase_1; run_remediation; run_phase_4 ;;
     esac
+}
 
+if [ "$HEADLESS" == true ]; then
+    echo -e "\n${CYAN}${BOLD}======================================================"
+    echo -e "🚀 EXECUTING CI/CD WORKFLOW: MODE -> $H_MODE"
+    echo -e "======================================================${NC}"
+    
+    # 🚨 THE NEW INTERNAL SCAN LOOP
+    if [ "${H_PROFILE,,}" == "all" ]; then
+        echo -e "\n${MAGENTA}======================================================${NC}"
+        echo -e "${MAGENTA} 🔄 INITIATING FULL FLEET AUDIT (L1, L2, TM)...${NC}"
+        echo -e "${MAGENTA}======================================================${NC}"
+
+        # --- RUN 1: CIS LEVEL 1 ---
+        export CIS_LEVEL="Level 1"
+        export RUN_CIS=true
+        export RUN_ORG=false
+        update_profile_vars
+        echo -e "\n${CYAN}▶️ STEP 1/3: EXECUTING CIS LEVEL 1${NC}"
+        execute_phases
+
+        # --- RUN 2: CIS LEVEL 2 ---
+        export CIS_LEVEL="Level 2"
+        export RUN_CIS=true
+        export RUN_ORG=false
+        update_profile_vars
+        echo -e "\n${CYAN}▶️ STEP 2/3: EXECUTING CIS LEVEL 2${NC}"
+        execute_phases
+
+        # --- RUN 3: TM BASELINE ---
+        export RUN_CIS=false
+        export RUN_ORG=true
+        update_profile_vars
+        echo -e "\n${CYAN}▶️ STEP 3/3: EXECUTING TM BASELINE${NC}"
+        execute_phases
+        
+    else
+        # STANDARD SINGLE-PROFILE RUN
+        update_profile_vars
+        execute_phases
+    fi
+
+    # CLEANUP SAFELY AT THE VERY END
     if [ "$H_CLEANUP" == "true" ]; then run_cleanup; fi
 
     chmod 755 *.json *.html 2>/dev/null || true
@@ -574,7 +618,9 @@ if [ "$HEADLESS" == true ]; then
     exit 0
 fi
 
+# INTERACTIVE MODE
 while true; do
+    update_profile_vars
     echo -e "\n${CYAN}------------------------------------------------------${NC}"
     echo -e "1) ${BOLD}SCAN ONLY${NC}      (Initial Baseline)"
     echo -e "2) ${BOLD}REMEDIATE ONLY${NC} (Ansible Fixes)"
