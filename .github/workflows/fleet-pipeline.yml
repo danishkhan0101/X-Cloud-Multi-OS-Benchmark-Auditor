@@ -100,7 +100,7 @@ jobs:
             echo "matrix=[{\"profile\":\"cis\",\"level\":\"$LEVEL\",\"name\":\"CIS-$FORMATTED_LEVEL\"}]" >> $GITHUB_OUTPUT
             
           else
-            echo 'matrix=[{"profile":"tm","level":"Level 1","name":"TM-Baseline"}]' >> $GITHUB_OUTPUT
+            echo 'matrix=[{"profile":"tm","level":"Standard","name":"TM-Baseline"}]' >> $GITHUB_OUTPUT
           fi
 
       - name: 🔐 Login to Azure CLI for OS Discovery
