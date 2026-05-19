@@ -88,14 +88,20 @@ jobs:
       - name: '🚦 Build Dynamic Profile Matrix JSON'
         id: build-matrix
         run: |
-          PROFILE="${{ github.event.inputs.profile }}"
+          PROFILE_RAW="${{ github.event.inputs.profile }}"
           LEVEL="${{ github.event.inputs.cis_level }}"
           
-          if [ "$PROFILE" == "all" ]; then
-            echo 'matrix=[{"profile":"cis","level":"Level 1","name":"CIS-L1"},{"profile":"cis","level":"Level 2","name":"CIS-L2"},{"profile":"both","level":"Level 1","name":"TM-Baseline"}]' >> $GITHUB_OUTPUT
-          elif [ "$PROFILE" == "cis" ]; then
+          # 1. Use wildcards (*) to safely catch the word "all" or "cis" regardless of extra text in the dropdown
+          if [[ "$PROFILE_RAW" == *"all"* ]]; then
+            # 🚨 THE FIX: Spawn exactly ONE job per OS using the 'both' profile. 
+            # The bash script will run CIS first, then TM, then safely cleanup once.
+            FORMATTED_LEVEL=$(echo "$LEVEL" | tr ' ' '-')
+            echo "matrix=[{\"profile\":\"both\",\"level\":\"$LEVEL\",\"name\":\"Full-Audit-$FORMATTED_LEVEL\"}]" >> $GITHUB_OUTPUT
+            
+          elif [[ "$PROFILE_RAW" == *"cis"* ]]; then
             FORMATTED_LEVEL=$(echo "$LEVEL" | tr ' ' '-')
             echo "matrix=[{\"profile\":\"cis\",\"level\":\"$LEVEL\",\"name\":\"CIS-$FORMATTED_LEVEL\"}]" >> $GITHUB_OUTPUT
+            
           else
             echo 'matrix=[{"profile":"tm","level":"Level 1","name":"TM-Baseline"}]' >> $GITHUB_OUTPUT
           fi
