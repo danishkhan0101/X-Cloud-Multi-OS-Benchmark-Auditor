@@ -404,7 +404,7 @@ run_phase_1() {
             wait # 🚨 Wait for all Rocky nodes to finish
         fi
     fi
-
+    
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "alma" ]; then
         if [ ${#ALMA_MACHINES[@]} -gt 0 ]; then
             echo -e "\n${CYAN}⚙️ PHASE 0.8d: ALMALINUX BOOTSTRAPPING & SCANNING${NC}"
@@ -423,11 +423,18 @@ run_phase_1() {
                             ALMA_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                             TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-almalinux\${ALMA_VER}-ds.xml\"
                             if [ ! -f \"\$TARGET_XML\" ]; then
-                                # Fallback: some SSG builds ship Alma content as the RHEL data stream
                                 TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
                             fi
                             if [ ! -f \"\$TARGET_XML\" ]; then exit 1; fi
-                            sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_before_CIS_L${OS_LVL}_ALMA_${IP}.html \"\$TARGET_XML\"
+                            
+                            # 🚨 DYNAMIC PROFILE MATCHING FOR ALMA 8/9 COMPATIBILITY
+                            if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then
+                                ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"
+                            else
+                                ALMA_PROF=\"$RHEL_CIS_PROFILE\"
+                            fi
+                            
+                            sudo /usr/bin/oscap xccdf eval --profile \$ALMA_PROF --report /tmp/report_before_CIS_L${OS_LVL}_ALMA_${IP}.html \"\$TARGET_XML\"
                         " > /dev/null 2>&1 || true
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ALMA_${IP}.html ./report_before_CIS_L${OS_LVL}_ALMA_${IP}.html > /dev/null 2>&1 || true
                     fi
@@ -456,13 +463,13 @@ run_phase_1() {
 
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}📦 [WINDOWS - CIS L${WIN_INSPEC_LVL}] Scanning $IP...${NC}"
-                        cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json > /dev/null 2>&1 || true
+                        cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json > /dev/null 2>&1 || true
                     fi
                     
                     if [ "$RUN_ORG" == true ]; then
                         if [ ! -f "$WIN_CUSTOM_BENCHMARK" ]; then exit 0; fi
                         echo -e "${CYAN}🔍 [WINDOWS - $ORG_NAME] Scanning $IP...${NC}"
-                        cinc-auditor exec "$WIN_CUSTOM_BENCHMARK" -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter cli json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json > /dev/null 2>&1 || true
+                        cinc-auditor exec "$WIN_CUSTOM_BENCHMARK" -t winrm://${IP} --user="${AUDIT_USER}" --password="${AUDIT_PASS}" --reporter json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json > /dev/null 2>&1 || true
                     fi
                 ) &
             done
@@ -538,7 +545,14 @@ run_remediation() {
                                 TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
                             fi
                             if [ ! -f \"\$TARGET_XML\" ]; then exit 1; fi
-                            sudo /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE --report /tmp/report_remediation_CIS_ALMA_${IP}.html \"\$TARGET_XML\"
+                            
+                            if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then
+                                ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"
+                            else
+                                ALMA_PROF=\"$RHEL_CIS_PROFILE\"
+                            fi
+                            
+                            sudo /usr/bin/oscap xccdf eval --remediate --profile \$ALMA_PROF --report /tmp/report_remediation_CIS_ALMA_${IP}.html \"\$TARGET_XML\"
                         " > /dev/null 2>&1 || true
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_remediation_CIS_ALMA_${IP}.html ./report_remediation_CIS_ALMA_${IP}.html > /dev/null 2>&1 || true
                     ) &
@@ -633,7 +647,7 @@ run_phase_4() {
             wait
         fi
     fi
-
+    
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "alma" ]; then
         if [ ${#ALMA_MACHINES[@]} -gt 0 ]; then
             for IP in "${ALMA_MACHINES[@]}"; do
@@ -647,7 +661,14 @@ run_phase_4() {
                                 TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
                             fi
                             if [ ! -f \"\$TARGET_XML\" ]; then exit 1; fi
-                            sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html \"\$TARGET_XML\"
+                            
+                            if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then
+                                ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"
+                            else
+                                ALMA_PROF=\"$RHEL_CIS_PROFILE\"
+                            fi
+                            
+                            sudo /usr/bin/oscap xccdf eval --profile \$ALMA_PROF --report /tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html \"\$TARGET_XML\"
                         " > /dev/null 2>&1 || true
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html ./report_after_CIS_L${OS_LVL}_ALMA_${IP}.html > /dev/null 2>&1 || true
                     fi
@@ -671,8 +692,8 @@ run_phase_4() {
         for IP in "${WINDOWS_MACHINES[@]}"; do
             (
                 export INSPEC_PASSWORD="${AUDIT_PASS}"
-                if [ "$RUN_CIS" == true ]; then cinc-auditor exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter cli json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json > /dev/null 2>&1 || true; fi
-                if [ "$RUN_ORG" == true ]; then cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --reporter cli json:heimdall_after_${ORG_PREFIX^^}_WIN_${IP}.json > /dev/null 2>&1 || true; fi
+                if [ "$RUN_CIS" == true ]; then cinc-auditor exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json > /dev/null 2>&1 || true; fi
+                if [ "$RUN_ORG" == true ]; then cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --reporter json:heimdall_after_${ORG_PREFIX^^}_WIN_${IP}.json > /dev/null 2>&1 || true; fi
                 unset INSPEC_PASSWORD
             ) &
         done
