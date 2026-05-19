@@ -294,7 +294,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: Audit-Run-${{ github.run_number }}
-          name: 🛡️ Fleet Compliance Audit: ${{ env.DISPLAY_PROFILE }} (#${{ github.run_number }})
+          name: "🛡️ Fleet Compliance Audit: ${{ env.DISPLAY_PROFILE }} (#${{ github.run_number }})"
           body: |
             ## 📊 Fleet-Wide Security Audit
             **Date:** `${{ env.DATE_TAG }}`
