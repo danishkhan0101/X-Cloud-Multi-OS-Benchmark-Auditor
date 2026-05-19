@@ -70,7 +70,7 @@ jobs:
     outputs:
       matrix: ${{ steps.build-matrix.outputs.matrix }}
       safe_mode: ${{ steps.safety-gate.outputs.safe_mode }}
-      os_matrix: ${{ steps.discover-vms.outputs.os_matrix }} # 🚨 New Output for Dynamic OS Matrix
+      os_matrix: ${{ steps.discover-vms.outputs.os_matrix }}
     steps:
       - name: '🛡️ Safety Gate: Blast Radius Control'
         id: safety-gate
@@ -91,10 +91,7 @@ jobs:
           PROFILE_RAW="${{ github.event.inputs.profile }}"
           LEVEL="${{ github.event.inputs.cis_level }}"
           
-          # 1. Use wildcards (*) to safely catch the word "all" or "cis" regardless of extra text in the dropdown
           if [[ "$PROFILE_RAW" == *"all"* ]]; then
-            # 🚨 THE FIX: Spawn exactly ONE job per OS using the 'both' profile. 
-            # The bash script will run CIS first, then TM, then safely cleanup once.
             FORMATTED_LEVEL=$(echo "$LEVEL" | tr ' ' '-')
             echo "matrix=[{\"profile\":\"both\",\"level\":\"$LEVEL\",\"name\":\"Full-Audit-$FORMATTED_LEVEL\"}]" >> $GITHUB_OUTPUT
             
@@ -158,14 +155,14 @@ jobs:
   # 🚀 JOB 2: THE 2D EXECUTION ENGINE (Profiles x Operating Systems)
   run-audit:
     needs: prepare-queue
-    if: ${{ needs.prepare-queue.outputs.os_matrix != '[]' }} # 🚨 Skip entirely if NO VMs are online
+    if: ${{ needs.prepare-queue.outputs.os_matrix != '[]' }} 
     runs-on: ubuntu-latest
     
     strategy:
       fail-fast: false      
       matrix:
         target: ${{ fromJSON(needs.prepare-queue.outputs.matrix) }}
-        os_target: ${{ fromJSON(needs.prepare-queue.outputs.os_matrix) }} # 🚨 DYNAMIC INJECTION!
+        os_target: ${{ fromJSON(needs.prepare-queue.outputs.os_matrix) }} 
 
     env:
       TARGET_ENV: ${{ github.event.inputs.environment_tag || 'Prod' }}
@@ -238,10 +235,6 @@ jobs:
           chmod +x multi_os_benchmark.sh
           ./multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP" --target-os "$TARGET_OS"
       
-      - name: 🏷️ Generate Version Tag
-        id: versioning
-        run: echo "DATE_TAG=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
-
       - name: 🔎 Verify Report Generation
         id: check_reports
         run: |
@@ -252,42 +245,65 @@ jobs:
             echo "has_reports=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: 🕒 Generate Dynamic Timestamp
-        if: steps.check_reports.outputs.has_reports == 'true'
-        run: echo "TIMESTAMP=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
-
-      - name: 🧹 Configure Release Variables (Collision-Proof)
-        if: steps.check_reports.outputs.has_reports == 'true'
-        run: |
-          echo "RELEASE_TAG=audit-${{ env.TIMESTAMP }}-${{ env.MATRIX_NAME }}-${{ matrix.os_target }}" >> $GITHUB_ENV
-          echo "RELEASE_NAME=Fleet Audit (${{ matrix.os_target }}) - ${{ env.MATRIX_NAME }}" >> $GITHUB_ENV
-          if [ "${{ env.PROFILE }}" == "tm" ] || [ "${{ env.PROFILE }}" == "both" ]; then
-            echo "CIS_DISPLAY=" >> $GITHUB_ENV
-          else
-            echo "CIS_DISPLAY=**CIS Level:** \`${{ env.CIS_LEVEL }}\`" >> $GITHUB_ENV
-          fi
-
-      - name: 📢 Publish OS-Specific GitHub Release
-        if: steps.check_reports.outputs.has_reports == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: ${{ env.RELEASE_NAME }}
-          body: |
-            ## 📊 DevSecOps Audit Execution (${{ matrix.os_target }})
-            **Ticket ID:** `${{ github.event.inputs.ticket_id }}`
-            **Target Environment:** `${{ env.TARGET_ENV }}`
-            **Compliance Profile:** `${{ env.PROFILE }}`
-            **Execution Mode:** `${{ env.MODE }}`
-            ${{ env.CIS_DISPLAY }}
-          files: |
-            **/*.html
-            **/*.json
-
-      - name: 💾 Save JSON Reports for Dashboard
+      - name: 💾 Save Reports as Temporary Artifacts
         if: steps.check_reports.outputs.has_reports == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: raw-json-${{ env.MATRIX_NAME }}-${{ matrix.os_target }}
-          path: '**/*.json'
+          name: temp-reports-${{ matrix.os_target }}-${{ env.MATRIX_NAME }}
+          path: |
+            **/*.html
+            **/*.json
           retention-days: 1
+
+  # 🏆 JOB 3: THE FAN-IN (Gathers all matrix data into one Zip & Release)
+  publish-release:
+    needs: run-audit # Waits for the entire matrix to finish!
+    if: always() && needs.run-audit.result == 'success'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 🕒 Set Up Release Variables
+        run: |
+          echo "DATE_TAG=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+          
+          # 🚨 DYNAMIC DISPLAY BUILDER
+          PROFILE_RAW="${{ github.event.inputs.profile }}"
+          LEVEL="${{ github.event.inputs.cis_level }}"
+          
+          if [[ "$PROFILE_RAW" == *"all"* ]]; then
+            echo "DISPLAY_PROFILE=Full Audit (CIS & TM)" >> $GITHUB_ENV
+          elif [[ "$PROFILE_RAW" == *"cis"* ]]; then
+            echo "DISPLAY_PROFILE=CIS Benchmark ($LEVEL)" >> $GITHUB_ENV
+          else
+            echo "DISPLAY_PROFILE=TM Custom Baseline" >> $GITHUB_ENV
+          fi
+
+      - name: 📥 Download All Matrix Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: temp-reports-*
+          path: consolidated-evidence
+          # Leaving out 'merge-multiple: true' so GitHub automatically builds OS-specific subfolders for you!
+
+      - name: 📦 Zip the Evidence Package
+        run: |
+          cd consolidated-evidence
+          zip -r ../Fleet_Compliance_Evidence_${{ env.DATE_TAG }}.zip .
+
+      - name: 📢 Publish Unified GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: Audit-Run-${{ github.run_number }}
+          name: 🛡️ Fleet Compliance Audit: ${{ env.DISPLAY_PROFILE }} (#${{ github.run_number }})
+          body: |
+            ## 📊 Fleet-Wide Security Audit
+            **Date:** `${{ env.DATE_TAG }}`
+            **Ticket ID:** `${{ github.event.inputs.ticket_id || 'N/A' }}`
+            **Target Environment:** `${{ github.event.inputs.environment_tag }}`
+            **Execution Mode:** `${{ github.event.inputs.mode }}`
+            **Compliance Profile:** `${{ env.DISPLAY_PROFILE }}`
+            
+            All matrix execution reports have been successfully aggregated into the attached Evidence ZIP archive.
+            
+            📥 **Download the ZIP below to access the HTML and JSON reports.**
+          files: Fleet_Compliance_Evidence_*.zip
