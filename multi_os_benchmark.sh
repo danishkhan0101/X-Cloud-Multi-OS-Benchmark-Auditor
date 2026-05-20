@@ -472,14 +472,16 @@ run_phase_4() {
 
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Ubuntu - CIS L${OS_LVL} Verify] Scanning $IP...${NC}"
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF"
-                        if [ $? -eq 0 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html ./report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html > /dev/null 2>&1 || true; fi
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html $UBUNTU_CIS_XCCDF" > /dev/null 2>&1
+                        OSCAP_EXIT=$?
+                        if [ $OSCAP_EXIT -eq 0 ] || [ $OSCAP_EXIT -eq 2 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html ./report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html > /dev/null 2>&1 || true; fi
                     fi
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Ubuntu - $ORG_NAME Verify] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" ${UBUNTU_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
-                        if [ $? -eq 0 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html ./report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html > /dev/null 2>&1 || true; fi
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)" > /dev/null 2>&1
+                        OSCAP_EXIT=$?
+                        if [ $OSCAP_EXIT -eq 0 ] || [ $OSCAP_EXIT -eq 2 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html ./report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html > /dev/null 2>&1 || true; fi
                     fi
                 ) &
             done
@@ -494,14 +496,16 @@ run_phase_4() {
                     wait_for_ssh "$IP" "$GHOST_USER" || exit 1
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [RHEL - CIS L${OS_LVL} Verify] Scanning $IP...${NC}"
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$XML_FILE\""
-                        if [ $? -eq 0 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true; fi
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$XML_FILE\"" > /dev/null 2>&1
+                        OSCAP_EXIT=$?
+                        if [ $OSCAP_EXIT -eq 0 ] || [ $OSCAP_EXIT -eq 2 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html ./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html > /dev/null 2>&1 || true; fi
                     fi
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [RHEL - $ORG_NAME Verify] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo env OSCAP_CPE_DICT_PATH=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1) /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
-                        if [ $? -eq 0 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html ./report_after_${ORG_PREFIX^^}_RHEL_${IP}.html > /dev/null 2>&1 || true; fi
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo env OSCAP_CPE_DICT_PATH=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1) /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" > /dev/null 2>&1
+                        OSCAP_EXIT=$?
+                        if [ $OSCAP_EXIT -eq 0 ] || [ $OSCAP_EXIT -eq 2 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html ./report_after_${ORG_PREFIX^^}_RHEL_${IP}.html > /dev/null 2>&1 || true; fi
                     fi
                 ) &
             done
@@ -516,15 +520,17 @@ run_phase_4() {
                     wait_for_ssh "$IP" "$GHOST_USER" || exit 1
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Rocky - CIS L${OS_LVL} Verify] Scanning $IP...${NC}"
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*}); TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"; if [ ! -f \"\$TARGET_XML\" ]; then exit 1; fi; sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\""
-                        if [ $? -eq 0 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true; fi
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*}); TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"; if [ ! -f \"\$TARGET_XML\" ]; then exit 1; fi; sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"" > /dev/null 2>&1
+                        OSCAP_EXIT=$?
+                        if [ $OSCAP_EXIT -eq 0 ] || [ $OSCAP_EXIT -eq 2 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html ./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html > /dev/null 2>&1 || true; fi
                     fi
                     
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Rocky - $ORG_NAME Verify] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
-                        if [ $? -eq 0 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true; fi
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" > /dev/null 2>&1
+                        OSCAP_EXIT=$?
+                        if [ $OSCAP_EXIT -eq 0 ] || [ $OSCAP_EXIT -eq 2 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html ./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html > /dev/null 2>&1 || true; fi
                     fi
                 ) &
             done
@@ -546,15 +552,17 @@ run_phase_4() {
                             if [ ! -f \"\$TARGET_XML\" ]; then exit 1; fi
                             if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"; else ALMA_PROF=\"$RHEL_CIS_PROFILE\"; fi
                             sudo /usr/bin/oscap xccdf eval --profile \$ALMA_PROF --report /tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html \"\$TARGET_XML\"
-                        "
-                        if [ $? -eq 0 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html ./report_after_CIS_L${OS_LVL}_ALMA_${IP}.html > /dev/null 2>&1 || true; fi
+                        " > /dev/null 2>&1
+                        OSCAP_EXIT=$?
+                        if [ $OSCAP_EXIT -eq 0 ] || [ $OSCAP_EXIT -eq 2 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html ./report_after_CIS_L${OS_LVL}_ALMA_${IP}.html > /dev/null 2>&1 || true; fi
                     fi
                     
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Alma - $ORG_NAME Verify] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ > /dev/null 2>&1 || true
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_ALMA_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
-                        if [ $? -eq 0 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_ALMA_${IP}.html ./report_after_${ORG_PREFIX^^}_ALMA_${IP}.html > /dev/null 2>&1 || true; fi
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report /tmp/report_after_${ORG_PREFIX^^}_ALMA_${IP}.html /tmp/$(basename $RHEL_CUSTOM_XCCDF)" > /dev/null 2>&1
+                        OSCAP_EXIT=$?
+                        if [ $OSCAP_EXIT -eq 0 ] || [ $OSCAP_EXIT -eq 2 ]; then scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_ALMA_${IP}.html ./report_after_${ORG_PREFIX^^}_ALMA_${IP}.html > /dev/null 2>&1 || true; fi
                     fi
                 ) &
             done
@@ -569,11 +577,11 @@ run_phase_4() {
                     export INSPEC_PASSWORD="${AUDIT_PASS}"
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Windows - CIS L${WIN_INSPEC_LVL} Verify] Scanning $IP...${NC}"
-                        cinc-auditor exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json > /dev/null || true
+                        cinc-auditor exec $WIN_CIS_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --input level_1_or_2=$WIN_INSPEC_LVL --reporter json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json > /dev/null 2>&1 || true
                     fi
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Windows - $ORG_NAME Verify] Scanning $IP...${NC}"
-                        cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --reporter json:heimdall_after_${ORG_PREFIX^^}_WIN_${IP}.json > /dev/null || true
+                        cinc-auditor exec $WIN_CUSTOM_BENCHMARK -t winrm://${IP} --user="${AUDIT_USER}" --reporter json:heimdall_after_${ORG_PREFIX^^}_WIN_${IP}.json > /dev/null 2>&1 || true
                     fi
                     unset INSPEC_PASSWORD
                 ) &
