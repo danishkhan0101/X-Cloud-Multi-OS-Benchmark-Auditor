@@ -222,16 +222,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y sshpass
           python3 -m pip install --user --upgrade pip
-          python3 -m pip install --user ansible
+          # Pin ansible to a version compatible with ansible-lockdown roles.
+          # ansible 10.x ships ansible-core 2.17.x, which the role supports.
+          # See: https://github.com/ansible-lockdown/Windows-2022-CIS
+          python3 -m pip install --user 'ansible>=10.0.0,<11.0.0'
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           sudo sh -c 'printf "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null\n" >> /etc/ssh/ssh_config'
           export ANSIBLE_HOST_KEY_CHECKING=False
-
+ 
       - name: 🛠️ Install Windows Tools (Cinc Auditor & WinRM)
         if: matrix.os_target.os == 'Windows'
         run: |
           python3 -m pip install --user --upgrade pip
-          python3 -m pip install --user ansible pywinrm requests
+          # Same Ansible pin for Windows runs — ansible-lockdown role needs it
+          python3 -m pip install --user 'ansible>=10.0.0,<11.0.0' pywinrm requests
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-auditor
           sudo ln -sf /usr/bin/cinc-auditor /usr/bin/inspec
