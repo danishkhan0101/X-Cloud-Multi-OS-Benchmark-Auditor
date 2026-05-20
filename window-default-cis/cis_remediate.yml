@@ -1,23 +1,55 @@
 ---
-- name: Remediate Windows Server 2022
-  hosts: all
-  vars:
-    # 🚨 Notice we removed the Level 1/Level 2 variables!
-    # They are now injected dynamically by your Bash script.
-    
-    # You can keep these section toggles enabled if you want the 
-    # role to apply all these specific control sections.
-    win2022cis_section1: true
-    win2022cis_section2: true
-    win2022cis_section3: true
-    win2022cis_section4: true
-    win2022cis_section5: true
-    win2022cis_section6: true
-    win2022cis_section7: true
-    win2022cis_section8: true
-    win2022cis_section9: true
+- name: Remediate Windows Server 2022 - CIS Benchmark
+  hosts: windows_nodes
+  gather_facts: true
 
-  tasks:
-    - name: Apply Windows Server 2022 CIS Baseline
-      include_role:
-        name: ansible-lockdown.windows_2022_cis
+  vars:
+    # ─────────────────────────────────────────────
+    # WinRM resilience — CIS hardening reboots the
+    # host mid-play. These timeouts give Ansible
+    # enough patience to reconnect after each reboot.
+    # ─────────────────────────────────────────────
+    ansible_winrm_read_timeout_sec: 180
+    ansible_winrm_operation_timeout_sec: 120
+
+    # ─────────────────────────────────────────────
+    # Section toggles — note the CORRECT prefix
+    # is win22cis_ (NOT win2022cis_).
+    # All sections enabled is the standard CIS run.
+    # ─────────────────────────────────────────────
+    win22cis_section1: true   # Account Policies
+    win22cis_section2: true   # Local Policies
+    win22cis_section5: true   # System Services
+    win22cis_section9: true   # Windows Firewall
+    win22cis_section17: true  # Advanced Audit Policy
+    win22cis_section18: true  # Administrative Templates (Computer)
+    win22cis_section19: true  # Administrative Templates (User)
+
+    # ─────────────────────────────────────────────
+    # Server role — member server (not DC).
+    # If you ever target a Domain Controller, set
+    # win22cis_section_domain_controller: true and
+    # win22cis_section_member_server: false instead.
+    # ─────────────────────────────────────────────
+    win22cis_section_member_server: true
+    win22cis_section_domain_controller: false
+
+    # ─────────────────────────────────────────────
+    # Critical safety overrides — these rules
+    # break automated remediation runners by
+    # locking down WinRM or removing the audit
+    # user. Disable them explicitly.
+    # ─────────────────────────────────────────────
+    # Don't disable anonymous SAM access — breaks WinRM in many setups
+    win22cis_rule_2_3_10_5: false
+    # Don't restrict named-pipe access — breaks remote service mgmt
+    win22cis_rule_2_3_10_8: false
+
+    # ─────────────────────────────────────────────
+    # Audit log location (lockdown writes here)
+    # ─────────────────────────────────────────────
+    win22cis_audit_log_dir: 'C:\Windows\Temp\AuditLogs'
+    win22cis_audit_output_dir: 'C:\Windows\Temp\AuditLogs'
+
+  roles:
+    - role: ansible-lockdown.windows_2022_cis
