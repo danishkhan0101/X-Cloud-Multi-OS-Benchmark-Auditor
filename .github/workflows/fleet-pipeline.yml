@@ -149,13 +149,11 @@ jobs:
                   HAS_WINDOWS=true; NODE_OS="Windows"
               fi
 
-              # Sharding: 1 Runner per IP
               if [ "$STRATEGY" == "per-node" ]; then
                   MATRIX_JSON+="{\"os\":\"$NODE_OS\", \"ip\":\"$ip\"},"
               fi
           done <<< "$VM_DATA"
 
-          # Grouped: 1 Runner per OS
           if [ "$STRATEGY" == "os-grouped" ]; then
               [ "$HAS_UBUNTU" == true ] && MATRIX_JSON+="{\"os\":\"Ubuntu\", \"ip\":\"all\"},"
               [ "$HAS_RHEL" == true ] && MATRIX_JSON+="{\"os\":\"RHEL\", \"ip\":\"all\"},"
@@ -251,10 +249,11 @@ jobs:
           echo "🖥️  Assigned OS Runner: $TARGET_OS ($TARGET_IP)"
           chmod +x multi_os_benchmark.sh
           
-          # 🚨 Passing the target-ip to the bash script
           if [ "$PROFILE" == "all" ]; then
+            echo "🚀 FULL AUDIT MODE: Executing comprehensive internal scan loop..."
             ./multi_os_benchmark.sh --headless --profile "all" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP" --target-os "$TARGET_OS" --target-ip "$TARGET_IP"
           else
+            echo "📋 Running Single Profile: $PROFILE"
             ./multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP" --target-os "$TARGET_OS" --target-ip "$TARGET_IP"
           fi
       
@@ -311,15 +310,12 @@ jobs:
         run: |
           cd consolidated-evidence
           
-          # 🚨 FIX: Separate the file moving from the directory deletion
+          # Move files
           find . -maxdepth 2 -type f \( -name "*.html" -o -name "*.json" \) | while read file; do
             BASENAME=$(basename "$file")
-            
-            # Extract IP safely using regex
             IP_ADDR=$(echo "$BASENAME" | grep -oE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
             [ -z "$IP_ADDR" ] && IP_ADDR="unknown-node"
             
-            # Determine Subfolder
             if [[ "$BASENAME" == *"CIS_L1"* ]]; then
               PROFILE_DIR="CIS Level 1"
             elif [[ "$BASENAME" == *"CIS_L2"* ]]; then
@@ -328,12 +324,11 @@ jobs:
               PROFILE_DIR="TM Baseline"
             fi
             
-            # Create structure and move file
             mkdir -p "$IP_ADDR/$PROFILE_DIR"
             mv "$file" "$IP_ADDR/$PROFILE_DIR/"
           done
           
-          # 🚨 FIX: Delete all empty temp folders AFTER the loop finishes
+          # Delete temp folders AFTER loop
           find . -maxdepth 1 -type d -name "temp-reports-*" -exec rm -rf {} +
 
       - name: 📦 Zip the Evidence Package
