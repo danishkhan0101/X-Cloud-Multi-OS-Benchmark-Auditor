@@ -1,6 +1,21 @@
 #!/bin/bash
 set +H
 
+# Per-host timeout for oscap --remediate. Tune per your slowest
+# CIS profile. Ubuntu Level 2 can take 30+ min on first run.
+REMEDIATION_TIMEOUT_SEC=1800   # 30 min
+ 
+# SSH options used for every remediation call.
+#  -o ControlMaster=no    → ignore the multiplex pool entirely
+#  -o ControlPath=none    → don't even try to reuse a socket
+#  -o ServerAliveInterval → send a keepalive every 15s
+#  -o ServerAliveCountMax → give up after 4 missed = 60s dead
+#  -o ConnectTimeout      → initial TCP connect fails fast
+REMEDIATION_SSH_OPTS="-n -o BatchMode=yes -o StrictHostKeyChecking=no \
+    -o ControlMaster=no -o ControlPath=none \
+    -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+    -o ConnectTimeout=10"
+
 # ======================================================
 # CONFIGURATION - DYNAMIC ENVIRONMENT VARIABLES
 # ======================================================
@@ -550,22 +565,31 @@ run_phase_1() {
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
-                    export INSPEC_PASSWORD="${AUDIT_PASS}"
                     if [ "$RUN_CIS" == true ]; then
+                        echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP...${NC}"
                         cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} \
-                            --user="${AUDIT_USER}" --input level_1_or_2=$WIN_INSPEC_LVL \
-                            --reporter json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json \
-                            > /dev/null 2>&1 || \
-                            echo -e "${RED}❌ [Phase1/Win/CIS] cinc-auditor failed on $IP${NC}"
+                            --user="${AUDIT_USER}" --password="${AUDIT_PASS}" \
+                            --input level_1_or_2=$WIN_INSPEC_LVL \
+                            --reporter json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
+                        rc=$?
+                        if [ $rc -eq 0 ] || [ $rc -eq 100 ] || [ $rc -eq 101 ]; then
+                            echo -e "${GREEN}✅ [Phase1/Win/CIS] $IP scan complete (rc=$rc)${NC}"
+                        else
+                            echo -e "${RED}❌ [Phase1/Win/CIS] cinc-auditor failed on $IP (rc=$rc)${NC}"
+                        fi
                     fi
                     if [ "$RUN_ORG" == true ]; then
+                        echo -e "${GREEN}🔎 [Phase1/Win/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         cinc-auditor exec "$WIN_CUSTOM_BENCHMARK" -t winrm://${IP} \
-                            --user="${AUDIT_USER}" \
-                            --reporter json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json \
-                            > /dev/null 2>&1 || \
-                            echo -e "${RED}❌ [Phase1/Win/${ORG_PREFIX^^}] cinc-auditor failed on $IP${NC}"
+                            --user="${AUDIT_USER}" --password="${AUDIT_PASS}" \
+                            --reporter json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json
+                        rc=$?
+                        if [ $rc -eq 0 ] || [ $rc -eq 100 ] || [ $rc -eq 101 ]; then
+                            echo -e "${GREEN}✅ [Phase1/Win/${ORG_PREFIX^^}] $IP scan complete (rc=$rc)${NC}"
+                        else
+                            echo -e "${RED}❌ [Phase1/Win/${ORG_PREFIX^^}] cinc-auditor failed on $IP (rc=$rc)${NC}"
+                        fi
                     fi
-                    unset INSPEC_PASSWORD
                 ) &
             done
             wait
@@ -577,61 +601,150 @@ run_phase_1() {
 # PHASE 2/3: REMEDIATION (NO SCP DOWNLOADS)
 # ======================================================
 run_remediation() {
-    echo -e "\n${BOLD}🛠️  PHASE 2 & 3: Executing Remediation (Asynchronous)...${NC}"
-    
+    echo -e "\n${BOLD}🛠️  PHASE 2 & 3: Executing Remediation (Hardened SSH)...${NC}"
+ 
+    # -------------------- UBUNTU --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "ubuntu" ]; then
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
             for IP in "${UBUNTU_MACHINES[@]}"; do
-                ( ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1); sudo /usr/bin/oscap xccdf eval --remediate --profile $UBUNTU_CIS_PROFILE --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\"" > /dev/null 2>&1 || true ) &
+                (
+                    echo -e "${CYAN}🛠️  [Remediation/Ubuntu] Starting on ${IP} (max ${REMEDIATION_TIMEOUT_SEC}s)...${NC}"
+                    timeout $REMEDIATION_TIMEOUT_SEC \
+                        ssh $REMEDIATION_SSH_OPTS ${UBUNTU_USER}@${IP} \
+                        "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1); \
+                         sudo /usr/bin/oscap xccdf eval --remediate --profile $UBUNTU_CIS_PROFILE \
+                         --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\""
+                    rc=$?
+                    if [ $rc -eq 124 ]; then
+                        echo -e "${RED}⏱️  [Remediation/Ubuntu] TIMEOUT after ${REMEDIATION_TIMEOUT_SEC}s on ${IP} — likely sshd restart mid-scan${NC}"
+                    elif [ $rc -eq 255 ]; then
+                        echo -e "${RED}🔌 [Remediation/Ubuntu] SSH dropped on ${IP} (rc=255) — sshd likely restarted${NC}"
+                    elif [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
+                        echo -e "${GREEN}✅ [Remediation/Ubuntu] ${IP} finished (oscap rc=${rc})${NC}"
+                    else
+                        echo -e "${YELLOW}⚠️  [Remediation/Ubuntu] ${IP} finished with rc=${rc}${NC}"
+                    fi
+                ) &
             done
             wait
         fi
-        if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [ "$RUN_ORG" == true ]; then ansible-playbook -i inventory.ini $UBUNTU_CUSTOM_PLAYBOOK --limit ubuntu_nodes > /dev/null 2>&1 || true; fi
+        if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [ "$RUN_ORG" == true ]; then
+            ansible-playbook -i inventory.ini $UBUNTU_CUSTOM_PLAYBOOK --limit ubuntu_nodes > /dev/null 2>&1 || true
+        fi
     fi
-
+ 
+    # -------------------- RHEL --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rhel" ]; then
         if [ ${#RHEL_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
             for IP in "${RHEL_MACHINES[@]}"; do
-                ( ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); sudo /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\"" > /dev/null 2>&1 || true ) &
+                (
+                    echo -e "${CYAN}🛠️  [Remediation/RHEL] Starting on ${IP} (max ${REMEDIATION_TIMEOUT_SEC}s)...${NC}"
+                    timeout $REMEDIATION_TIMEOUT_SEC \
+                        ssh $REMEDIATION_SSH_OPTS ${GHOST_USER}@${IP} \
+                        "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); \
+                         sudo /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE \
+                         --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\""
+                    rc=$?
+                    if [ $rc -eq 124 ]; then
+                        echo -e "${RED}⏱️  [Remediation/RHEL] TIMEOUT after ${REMEDIATION_TIMEOUT_SEC}s on ${IP}${NC}"
+                    elif [ $rc -eq 255 ]; then
+                        echo -e "${RED}🔌 [Remediation/RHEL] SSH dropped on ${IP} (rc=255)${NC}"
+                    elif [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
+                        echo -e "${GREEN}✅ [Remediation/RHEL] ${IP} finished (oscap rc=${rc})${NC}"
+                    else
+                        echo -e "${YELLOW}⚠️  [Remediation/RHEL] ${IP} finished with rc=${rc}${NC}"
+                    fi
+                ) &
             done
             wait
         fi
-        if [ ${#RHEL_MACHINES[@]} -gt 0 ] && [ "$RUN_ORG" == true ]; then ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rhel_nodes > /dev/null 2>&1 || true; fi
+        if [ ${#RHEL_MACHINES[@]} -gt 0 ] && [ "$RUN_ORG" == true ]; then
+            ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rhel_nodes > /dev/null 2>&1 || true
+        fi
     fi
-
+ 
+    # -------------------- ROCKY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
                 for IP in "${ROCKY_MACHINES[@]}"; do
-                    ( ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*}); TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"; if [ ! -f \"\$TARGET_XML\" ]; then exit 1; fi; sudo /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE --report /tmp/report_remediation_CIS_ROCKY_${IP}.html \"\$TARGET_XML\"" > /dev/null 2>&1 || true ) &
+                    (
+                        echo -e "${CYAN}🛠️  [Remediation/Rocky] Starting on ${IP} (max ${REMEDIATION_TIMEOUT_SEC}s)...${NC}"
+                        timeout $REMEDIATION_TIMEOUT_SEC \
+                            ssh $REMEDIATION_SSH_OPTS ${GHOST_USER}@${IP} "
+                                ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
+                                TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
+                                if [ ! -f \"\$TARGET_XML\" ]; then
+                                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                                fi
+                                if [ -z \"\$TARGET_XML\" ] || [ ! -f \"\$TARGET_XML\" ]; then exit 99; fi
+                                sudo /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE \
+                                    --report /tmp/report_remediation_CIS_ROCKY_${IP}.html \"\$TARGET_XML\"
+                            "
+                        rc=$?
+                        if [ $rc -eq 124 ]; then
+                            echo -e "${RED}⏱️  [Remediation/Rocky] TIMEOUT after ${REMEDIATION_TIMEOUT_SEC}s on ${IP}${NC}"
+                        elif [ $rc -eq 255 ]; then
+                            echo -e "${RED}🔌 [Remediation/Rocky] SSH dropped on ${IP} (rc=255)${NC}"
+                        elif [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
+                            echo -e "${GREEN}✅ [Remediation/Rocky] ${IP} finished (oscap rc=${rc})${NC}"
+                        else
+                            echo -e "${YELLOW}⚠️  [Remediation/Rocky] ${IP} finished with rc=${rc}${NC}"
+                        fi
+                    ) &
                 done
                 wait
             fi
-            if [ "$RUN_ORG" == true ]; then ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rocky_nodes > /dev/null 2>&1 || true; fi
+            if [ "$RUN_ORG" == true ]; then
+                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rocky_nodes > /dev/null 2>&1 || true
+            fi
         fi
     fi
-
+ 
+    # -------------------- ALMA --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "alma" ]; then
         if [ ${#ALMA_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
                 for IP in "${ALMA_MACHINES[@]}"; do
                     (
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
-                            ALMA_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
-                            TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-almalinux\${ALMA_VER}-ds.xml\"
-                            if [ ! -f \"\$TARGET_XML\" ]; then TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); fi
-                            if [ ! -f \"\$TARGET_XML\" ]; then exit 1; fi
-                            if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"; else ALMA_PROF=\"$RHEL_CIS_PROFILE\"; fi
-                            sudo /usr/bin/oscap xccdf eval --remediate --profile \$ALMA_PROF --report /tmp/report_remediation_CIS_ALMA_${IP}.html \"\$TARGET_XML\"
-                        " > /dev/null 2>&1 || true
+                        echo -e "${CYAN}🛠️  [Remediation/Alma] Starting on ${IP} (max ${REMEDIATION_TIMEOUT_SEC}s)...${NC}"
+                        timeout $REMEDIATION_TIMEOUT_SEC \
+                            ssh $REMEDIATION_SSH_OPTS ${GHOST_USER}@${IP} "
+                                ALMA_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
+                                TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-almalinux\${ALMA_VER}-ds.xml\"
+                                if [ ! -f \"\$TARGET_XML\" ]; then
+                                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                                fi
+                                if [ -z \"\$TARGET_XML\" ] || [ ! -f \"\$TARGET_XML\" ]; then exit 99; fi
+                                if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then
+                                    ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"
+                                else
+                                    ALMA_PROF=\"$RHEL_CIS_PROFILE\"
+                                fi
+                                sudo /usr/bin/oscap xccdf eval --remediate --profile \$ALMA_PROF \
+                                    --report /tmp/report_remediation_CIS_ALMA_${IP}.html \"\$TARGET_XML\"
+                            "
+                        rc=$?
+                        if [ $rc -eq 124 ]; then
+                            echo -e "${RED}⏱️  [Remediation/Alma] TIMEOUT after ${REMEDIATION_TIMEOUT_SEC}s on ${IP}${NC}"
+                        elif [ $rc -eq 255 ]; then
+                            echo -e "${RED}🔌 [Remediation/Alma] SSH dropped on ${IP} (rc=255)${NC}"
+                        elif [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
+                            echo -e "${GREEN}✅ [Remediation/Alma] ${IP} finished (oscap rc=${rc})${NC}"
+                        else
+                            echo -e "${YELLOW}⚠️  [Remediation/Alma] ${IP} finished with rc=${rc}${NC}"
+                        fi
                     ) &
                 done
                 wait
             fi
-            if [ "$RUN_ORG" == true ]; then ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit alma_nodes > /dev/null 2>&1 || true; fi
+            if [ "$RUN_ORG" == true ]; then
+                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit alma_nodes > /dev/null 2>&1 || true
+            fi
         fi
     fi
-
+ 
+    # -------------------- WINDOWS (unchanged) --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
@@ -639,7 +752,9 @@ run_remediation() {
                 EXTRA_VARS="-e win2022cis_level_1=true -e win2022cis_level_2=$([ "$CIS_LEVEL" == "Level 2" ] && echo true || echo false)"
                 ansible-playbook -i inventory.ini $WIN_CIS_PLAYBOOK --limit windows_nodes $EXTRA_VARS > /dev/null 2>&1 || true
             fi
-            if [ "$RUN_ORG" == true ]; then ansible-playbook -i inventory.ini $WIN_CUSTOM_PLAYBOOK --limit windows_nodes > /dev/null 2>&1 || true; fi
+            if [ "$RUN_ORG" == true ]; then
+                ansible-playbook -i inventory.ini $WIN_CUSTOM_PLAYBOOK --limit windows_nodes > /dev/null 2>&1 || true
+            fi
         fi
     fi
 }
