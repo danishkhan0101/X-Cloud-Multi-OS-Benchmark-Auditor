@@ -1,181 +1,5 @@
 #!/bin/bash
 set +H
-detect_windows_version() {
-    local ip="$1"
- 
-    # Run win_shell to get CIM OS info, parse the Caption field
-    local caption
-    caption=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
-        -a '(Get-CimInstance Win32_OperatingSystem).Caption' \
-        2>/dev/null | grep -oE 'Windows (Server (2019|2022|2025)|1[01])' | head -1)
- 
-    case "$caption" in
-        *"Server 2019"*) echo "2019" ;;
-        *"Server 2022"*) echo "2022" ;;
-        *"Server 2025"*) echo "2025" ;;
-        *"Windows 10"*)  echo "10"   ;;
-        *"Windows 11"*)  echo "11"   ;;
-        *)               echo "unknown" ;;
-    esac
-}
-detect_windows_version() {
-    local ip="$1"
- 
-    # Run win_shell to get CIM OS info, parse the Caption field
-    local caption
-    caption=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
-        -a '(Get-CimInstance Win32_OperatingSystem).Caption' \
-        2>/dev/null | grep -oE 'Windows (Server (2019|2022|2025)|1[01])' | head -1)
- 
-    case "$caption" in
-        *"Server 2019"*) echo "2019" ;;
-        *"Server 2022"*) echo "2022" ;;
-        *"Server 2025"*) echo "2025" ;;
-        *"Windows 10"*)  echo "10"   ;;
-        *"Windows 11"*)  echo "11"   ;;
-        *)               echo "unknown" ;;
-    esac
-}
- 
-# ======================================================
-# remediate_windows_host
-# ------------------------------------------------------
-# Detects version, installs the right role, runs the
-# right playbook with the right tags.
-# Args: $1 ip, $2 cis_level ("Level 1" or "Level 2")
-# ======================================================
-remediate_windows_host() {
-    local ip="$1"
-    local cis_level="$2"
- 
-    echo -e "${CYAN}🔍 [Win] Detecting OS version on ${ip}...${NC}"
-    local ver
-    ver=$(detect_windows_version "$ip")
- 
-    if [ "$ver" == "unknown" ]; then
-        echo -e "${RED}❌ [Win] Could not detect OS version on ${ip} — skipping${NC}"
-        return 1
-    fi
-    echo -e "${CYAN}   → Detected: Windows ${ver}${NC}"
- 
-    # Map version → role + playbook + tag scope
-    local role_name
-    local playbook_file
-    local tag_scope_l1
-    case "$ver" in
-        2019) role_name="ansible-lockdown.windows_2019_cis"
-              playbook_file="window-default-cis/cis_remediate_2019.yml"
-              tag_scope_l1="level1-memberserver" ;;
-        2022) role_name="ansible-lockdown.windows_2022_cis"
-              playbook_file="window-default-cis/cis_remediate_2022.yml"
-              tag_scope_l1="level1-memberserver" ;;
-        2025) role_name="ansible-lockdown.windows_2025_cis"
-              playbook_file="window-default-cis/cis_remediate_2025.yml"
-              tag_scope_l1="level1-memberserver" ;;
-        10)   role_name="ansible-lockdown.windows_10_cis"
-              playbook_file="window-default-cis/cis_remediate_win10.yml"
-              tag_scope_l1="level1-corporate-enterprise-environment" ;;
-        11)   role_name="ansible-lockdown.windows_11_cis"
-              playbook_file="window-default-cis/cis_remediate_win11.yml"
-              tag_scope_l1="level1-corporate-enterprise-environment" ;;
-    esac
- 
-    if [ ! -f "$playbook_file" ]; then
-        echo -e "${RED}❌ [Win/${ver}] Playbook missing: ${playbook_file}${NC}"
-        echo -e "${YELLOW}   You need to create ${playbook_file} for Windows ${ver}${NC}"
-        return 1
-    fi
- 
-    # Install matching role (force-refresh to catch upstream updates)
-    echo -e "${CYAN}📦 [Win/${ver}] Installing ${role_name}...${NC}"
-    ansible-galaxy role install -f "$role_name"
- 
-    # Build tag list — Level 2 includes Level 1
-    local tags
-    if [ "$cis_level" == "Level 2" ]; then
-        if [ "$ver" -ge 10 ] && [ "$ver" -le 11 ]; then
-            tags="level1-corporate-enterprise-environment,level2-corporate-enterprise-environment"
-        else
-            tags="level1-memberserver,level2-memberserver"
-        fi
-        echo -e "${CYAN}   → Applying Level 1 + Level 2 controls${NC}"
-    else
-        tags="$tag_scope_l1"
-        echo -e "${CYAN}   → Applying Level 1 controls only${NC}"
-    fi
- 
-    # Run it
-    echo -e "${CYAN}🛠️  [Win/${ver}] Running ${playbook_file} (tags: ${tags})...${NC}"
-    ANSIBLE_HOST_KEY_CHECKING=False \
-        ansible-playbook -i inventory.ini "$playbook_file" \
-        --limit "$ip" \
-        --tags "$tags"
-    local rc=$?
-    if [ $rc -eq 0 ]; then
-        echo -e "${GREEN}✅ [Win/${ver}] ${ip} completed successfully${NC}"
-    else
-        echo -e "${RED}❌ [Win/${ver}] ${ip} failed (rc=${rc})${NC}"
-    fi
-    return $rc
-}
-
-fetch_remote_report() {
-    local user="$1"
-    local ip="$2"
-    local remote="$3"
-    local local_path="$4"
-    local tag="$5"
- 
-    # Step 1: ensure the file is readable by the audit user
-    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o ControlMaster=no -o ControlPath=none \
-        -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
-        -o ConnectTimeout=10 \
-        "${user}@${ip}" "sudo chmod 644 ${remote} 2>/dev/null" >/dev/null 2>&1
- 
-    # Step 2: try regular SCP (fast path)
-    scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o ControlMaster=no -o ControlPath=none \
-        -o ConnectTimeout=10 \
-        "${user}@${ip}:${remote}" "${local_path}" >/dev/null 2>&1
-    if [ $? -eq 0 ] && [ -s "${local_path}" ]; then
-        return 0
-    fi
- 
-    # Step 3: fall back to `ssh ... sudo cat` — always works
-    # because cat runs as root on the remote and pipes the
-    # bytes through the SSH session as our user.
-    echo -e "${YELLOW}🔄 [Fetch/${tag}] SCP failed for ${remote} on ${ip} — falling back to sudo cat${NC}"
-    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o ControlMaster=no -o ControlPath=none \
-        -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
-        -o ConnectTimeout=10 \
-        "${user}@${ip}" "sudo cat ${remote}" > "${local_path}" 2>/dev/null
-    if [ $? -eq 0 ] && [ -s "${local_path}" ]; then
-        return 0
-    fi
- 
-    # All three strategies failed
-    rm -f "${local_path}"  # don't leave a zero-byte file lying around
-    echo -e "${RED}❌ [Fetch/${tag}] All fetch strategies failed for ${remote} on ${ip}${NC}"
-    return 1
-}
-
-
-# Per-host timeout for oscap --remediate. Tune per your slowest
-# CIS profile. Ubuntu Level 2 can take 30+ min on first run.
-REMEDIATION_TIMEOUT_SEC=1800   # 30 min
- 
-# SSH options used for every remediation call.
-#  -o ControlMaster=no    → ignore the multiplex pool entirely
-#  -o ControlPath=none    → don't even try to reuse a socket
-#  -o ServerAliveInterval → send a keepalive every 15s
-#  -o ServerAliveCountMax → give up after 4 missed = 60s dead
-#  -o ConnectTimeout      → initial TCP connect fails fast
-REMEDIATION_SSH_OPTS="-n -o BatchMode=yes -o StrictHostKeyChecking=no \
-    -o ControlMaster=no -o ControlPath=none \
-    -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
-    -o ConnectTimeout=10"
 
 # ======================================================
 # CONFIGURATION - DYNAMIC ENVIRONMENT VARIABLES
@@ -210,11 +34,183 @@ WIN_CUSTOM_PLAYBOOK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_remediate.yml"
 
 WIN_CIS_DIR="window-default-cis"
 WIN_CIS_BENCHMARK="${WIN_CIS_DIR}/window-baseline"
-WIN_CIS_PLAYBOOK="${WIN_CIS_DIR}/cis_remediate.yml"
+# NOTE: WIN_CIS_PLAYBOOK is no longer used directly — remediate_windows_host()
+# selects the per-version playbook (cis_remediate_2022.yml / _2025.yml / etc).
 
 export INSPEC_SSH_CONFIG_NO_SECURE=true
 BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; MAGENTA='\033[0;35m'; NC='\033[0m'
 clear
+
+# ======================================================
+# REMEDIATION CONSTANTS (Layer 1 + Layer 2 hardening)
+# ======================================================
+# Per-host timeout for oscap --remediate. Tune per your slowest
+# CIS profile. Ubuntu Level 2 can take 30+ min on first run.
+REMEDIATION_TIMEOUT_SEC=1800   # 30 min
+
+# SSH options used for every remediation call.
+#  -o ControlMaster=no    → ignore the multiplex pool entirely
+#  -o ControlPath=none    → don't even try to reuse a socket
+#  -o ServerAliveInterval → send a keepalive every 15s
+#  -o ServerAliveCountMax → give up after 4 missed = 60s dead
+#  -o ConnectTimeout      → initial TCP connect fails fast
+REMEDIATION_SSH_OPTS="-n -o BatchMode=yes -o StrictHostKeyChecking=no \
+    -o ControlMaster=no -o ControlPath=none \
+    -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+    -o ConnectTimeout=10"
+
+# ======================================================
+# HELPER: detect_windows_version
+# ------------------------------------------------------
+# Asks the target what version of Windows it is.
+# Returns: 2019 | 2022 | 2025 | 10 | 11 | unknown
+# ======================================================
+detect_windows_version() {
+    local ip="$1"
+
+    local caption
+    caption=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
+        -a '(Get-CimInstance Win32_OperatingSystem).Caption' \
+        2>/dev/null | grep -oE 'Windows (Server (2019|2022|2025)|1[01])' | head -1)
+
+    case "$caption" in
+        *"Server 2019"*) echo "2019" ;;
+        *"Server 2022"*) echo "2022" ;;
+        *"Server 2025"*) echo "2025" ;;
+        *"Windows 10"*)  echo "10"   ;;
+        *"Windows 11"*)  echo "11"   ;;
+        *)               echo "unknown" ;;
+    esac
+}
+
+# ======================================================
+# HELPER: remediate_windows_host
+# ------------------------------------------------------
+# Detects version, installs the right role, runs the
+# right playbook with the right tags.
+# Args: $1 ip, $2 cis_level ("Level 1" or "Level 2")
+# ======================================================
+remediate_windows_host() {
+    local ip="$1"
+    local cis_level="$2"
+
+    echo -e "${CYAN}🔍 [Win] Detecting OS version on ${ip}...${NC}"
+    local ver
+    ver=$(detect_windows_version "$ip")
+
+    if [ "$ver" == "unknown" ]; then
+        echo -e "${RED}❌ [Win] Could not detect OS version on ${ip} — skipping${NC}"
+        return 1
+    fi
+    echo -e "${CYAN}   → Detected: Windows ${ver}${NC}"
+
+    # Map version → role + playbook + tag scope
+    local role_name
+    local playbook_file
+    local tag_scope_l1
+    case "$ver" in
+        2019) role_name="ansible-lockdown.windows_2019_cis"
+              playbook_file="window-default-cis/cis_remediate_2019.yml"
+              tag_scope_l1="level1-memberserver" ;;
+        2022) role_name="ansible-lockdown.windows_2022_cis"
+              playbook_file="window-default-cis/cis_remediate_2022.yml"
+              tag_scope_l1="level1-memberserver" ;;
+        2025) role_name="ansible-lockdown.windows_2025_cis"
+              playbook_file="window-default-cis/cis_remediate_2025.yml"
+              tag_scope_l1="level1-memberserver" ;;
+        10)   role_name="ansible-lockdown.windows_10_cis"
+              playbook_file="window-default-cis/cis_remediate_win10.yml"
+              tag_scope_l1="level1-corporate-enterprise-environment" ;;
+        11)   role_name="ansible-lockdown.windows_11_cis"
+              playbook_file="window-default-cis/cis_remediate_win11.yml"
+              tag_scope_l1="level1-corporate-enterprise-environment" ;;
+    esac
+
+    if [ ! -f "$playbook_file" ]; then
+        echo -e "${RED}❌ [Win/${ver}] Playbook missing: ${playbook_file}${NC}"
+        echo -e "${YELLOW}   You need to create ${playbook_file} for Windows ${ver}${NC}"
+        return 1
+    fi
+
+    # Install matching role (force-refresh to catch upstream updates)
+    echo -e "${CYAN}📦 [Win/${ver}] Installing ${role_name}...${NC}"
+    ansible-galaxy role install -f "$role_name"
+
+    # Build tag list — Level 2 includes Level 1
+    local tags
+    if [ "$cis_level" == "Level 2" ]; then
+        if [ "$ver" -ge 10 ] 2>/dev/null && [ "$ver" -le 11 ] 2>/dev/null; then
+            tags="level1-corporate-enterprise-environment,level2-corporate-enterprise-environment"
+        else
+            tags="level1-memberserver,level2-memberserver"
+        fi
+        echo -e "${CYAN}   → Applying Level 1 + Level 2 controls${NC}"
+    else
+        tags="$tag_scope_l1"
+        echo -e "${CYAN}   → Applying Level 1 controls only${NC}"
+    fi
+
+    # Run it
+    echo -e "${CYAN}🛠️  [Win/${ver}] Running ${playbook_file} (tags: ${tags})...${NC}"
+    ANSIBLE_HOST_KEY_CHECKING=False \
+        ansible-playbook -i inventory.ini "$playbook_file" \
+        --limit "$ip" \
+        --tags "$tags"
+    local rc=$?
+    if [ $rc -eq 0 ]; then
+        echo -e "${GREEN}✅ [Win/${ver}] ${ip} completed successfully${NC}"
+    else
+        echo -e "${RED}❌ [Win/${ver}] ${ip} failed (rc=${rc})${NC}"
+    fi
+    return $rc
+}
+
+# ======================================================
+# HELPER: fetch_remote_report (bulletproof 3-step fetch)
+# ------------------------------------------------------
+# 1. sudo chmod 644 the report on the target
+# 2. scp (fast path)
+# 3. ssh "sudo cat" fallback (survives post-CIS perms)
+# ======================================================
+fetch_remote_report() {
+    local user="$1"
+    local ip="$2"
+    local remote="$3"
+    local local_path="$4"
+    local tag="$5"
+
+    # Step 1: ensure the file is readable by the audit user
+    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o ControlMaster=no -o ControlPath=none \
+        -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+        -o ConnectTimeout=10 \
+        "${user}@${ip}" "sudo chmod 644 ${remote} 2>/dev/null" >/dev/null 2>&1
+
+    # Step 2: try regular SCP (fast path)
+    scp -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o ControlMaster=no -o ControlPath=none \
+        -o ConnectTimeout=10 \
+        "${user}@${ip}:${remote}" "${local_path}" >/dev/null 2>&1
+    if [ $? -eq 0 ] && [ -s "${local_path}" ]; then
+        return 0
+    fi
+
+    # Step 3: fall back to `ssh ... sudo cat` — always works
+    echo -e "${YELLOW}🔄 [Fetch/${tag}] SCP failed for ${remote} on ${ip} — falling back to sudo cat${NC}"
+    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o ControlMaster=no -o ControlPath=none \
+        -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+        -o ConnectTimeout=10 \
+        "${user}@${ip}" "sudo cat ${remote}" > "${local_path}" 2>/dev/null
+    if [ $? -eq 0 ] && [ -s "${local_path}" ]; then
+        return 0
+    fi
+
+    # All three strategies failed
+    rm -f "${local_path}"  # don't leave a zero-byte file lying around
+    echo -e "${RED}❌ [Fetch/${tag}] All fetch strategies failed for ${remote} on ${ip}${NC}"
+    return 1
+}
 
 # ======================================================
 # TOOL GUARD: Ensure SCAP tooling exists on Linux node
@@ -759,11 +755,11 @@ run_phase_1() {
 }
 
 # ======================================================
-# PHASE 2/3: REMEDIATION (NO SCP DOWNLOADS)
+# PHASE 2/3: REMEDIATION (Hardened SSH + Win multi-version)
 # ======================================================
 run_remediation() {
     echo -e "\n${BOLD}🛠️  PHASE 2 & 3: Executing Remediation (Hardened SSH)...${NC}"
- 
+
     # -------------------- UBUNTU --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "ubuntu" ]; then
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
@@ -793,7 +789,7 @@ run_remediation() {
             ansible-playbook -i inventory.ini $UBUNTU_CUSTOM_PLAYBOOK --limit ubuntu_nodes > /dev/null 2>&1 || true
         fi
     fi
- 
+
     # -------------------- RHEL --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rhel" ]; then
         if [ ${#RHEL_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
@@ -823,7 +819,7 @@ run_remediation() {
             ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rhel_nodes > /dev/null 2>&1 || true
         fi
     fi
- 
+
     # -------------------- ROCKY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
@@ -861,7 +857,7 @@ run_remediation() {
             fi
         fi
     fi
- 
+
     # -------------------- ALMA --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "alma" ]; then
         if [ ${#ALMA_MACHINES[@]} -gt 0 ]; then
@@ -904,8 +900,8 @@ run_remediation() {
             fi
         fi
     fi
- 
-    # -------------------- WINDOWS --------------------
+
+    # -------------------- WINDOWS (multi-version dispatcher) --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
@@ -929,18 +925,16 @@ run_remediation() {
 }
 
 # ======================================================
-# PHASE 4: VERIFICATION
+# PHASE 4: VERIFICATION (bulletproof fetch)
 # ======================================================
 run_phase_4() {
     echo -e "\n${BOLD}🔄 PHASE 4: Running Verification Scans (Asynchronous)...${NC}"
- 
-    # SSH opts mirror remediation: keepalive + no ControlMaster
-    # so we don't get stuck on post-remediation hosts.
+
     local SCAN_SSH_OPTS="-n -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ControlMaster=no -o ControlPath=none \
         -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
         -o ConnectTimeout=10"
- 
+
     # -------------------- UBUNTU VERIFY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "ubuntu" ]; then
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
@@ -948,15 +942,15 @@ run_phase_4() {
                 (
                     wait_for_ssh "$IP" "$UBUNTU_USER" || { echo -e "${RED}❌ [Phase4/Ubuntu] SSH unreachable: $IP${NC}"; exit 1; }
                     ensure_linux_scap_tools "$UBUNTU_USER" "$IP" "apt" || { echo -e "${RED}❌ [Phase4/Ubuntu] Tools missing on $IP${NC}"; exit 1; }
- 
+
                     UBUNTU_VER=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
                         "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
                     UBUNTU_VER=${UBUNTU_VER:-2404}
                     UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
- 
+
                     if [ "$RUN_CIS" == true ]; then
-                        local REMOTE="/tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
-                        local LOCAL="./report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
+                        REMOTE="/tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
+                        LOCAL="./report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
                         echo -e "${GREEN}✅ [Phase4/Ubuntu/CIS L${OS_LVL}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
                             "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE \
@@ -968,10 +962,10 @@ run_phase_4() {
                             echo -e "${RED}❌ [Phase4/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
- 
+
                     if [ "$RUN_ORG" == true ]; then
-                        local REMOTE="/tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html"
-                        local LOCAL="./report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html"
+                        REMOTE="/tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html"
+                        LOCAL="./report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html"
                         echo -e "${GREEN}✅ [Phase4/Ubuntu/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
                             "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
@@ -988,7 +982,7 @@ run_phase_4() {
             wait
         fi
     fi
- 
+
     # -------------------- RHEL VERIFY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rhel" ]; then
         if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
@@ -996,10 +990,10 @@ run_phase_4() {
                 (
                     wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/RHEL] SSH unreachable: $IP${NC}"; exit 1; }
                     ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/RHEL] Tools missing on $IP${NC}"; exit 1; }
- 
+
                     if [ "$RUN_CIS" == true ]; then
-                        local REMOTE="/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html"
-                        local LOCAL="./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html"
+                        REMOTE="/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html"
+                        LOCAL="./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html"
                         echo -e "${GREEN}✅ [Phase4/RHEL/CIS L${OS_LVL}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
                             "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); \
@@ -1012,10 +1006,10 @@ run_phase_4() {
                             echo -e "${RED}❌ [Phase4/RHEL/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
- 
+
                     if [ "$RUN_ORG" == true ]; then
-                        local REMOTE="/tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html"
-                        local LOCAL="./report_after_${ORG_PREFIX^^}_RHEL_${IP}.html"
+                        REMOTE="/tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html"
+                        LOCAL="./report_after_${ORG_PREFIX^^}_RHEL_${IP}.html"
                         echo -e "${GREEN}✅ [Phase4/RHEL/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
                             "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
@@ -1032,7 +1026,7 @@ run_phase_4() {
             wait
         fi
     fi
- 
+
     # -------------------- ROCKY VERIFY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
@@ -1040,10 +1034,10 @@ run_phase_4() {
                 (
                     wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/Rocky] SSH unreachable: $IP${NC}"; exit 1; }
                     ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/Rocky] Tools missing on $IP${NC}"; exit 1; }
- 
+
                     if [ "$RUN_CIS" == true ]; then
-                        local REMOTE="/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html"
-                        local LOCAL="./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html"
+                        REMOTE="/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html"
+                        LOCAL="./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html"
                         echo -e "${GREEN}✅ [Phase4/Rocky/CIS L${OS_LVL}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} "
                             ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
@@ -1062,10 +1056,10 @@ run_phase_4() {
                             echo -e "${RED}❌ [Phase4/Rocky/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
- 
+
                     if [ "$RUN_ORG" == true ]; then
-                        local REMOTE="/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html"
-                        local LOCAL="./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html"
+                        REMOTE="/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html"
+                        LOCAL="./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html"
                         echo -e "${GREEN}✅ [Phase4/Rocky/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
                             "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
@@ -1082,7 +1076,7 @@ run_phase_4() {
             wait
         fi
     fi
- 
+
     # -------------------- ALMA VERIFY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "alma" ]; then
         if [ ${#ALMA_MACHINES[@]} -gt 0 ]; then
@@ -1090,10 +1084,10 @@ run_phase_4() {
                 (
                     wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/Alma] SSH unreachable: $IP${NC}"; exit 1; }
                     ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/Alma] Tools missing on $IP${NC}"; exit 1; }
- 
+
                     if [ "$RUN_CIS" == true ]; then
-                        local REMOTE="/tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html"
-                        local LOCAL="./report_after_CIS_L${OS_LVL}_ALMA_${IP}.html"
+                        REMOTE="/tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html"
+                        LOCAL="./report_after_CIS_L${OS_LVL}_ALMA_${IP}.html"
                         echo -e "${GREEN}✅ [Phase4/Alma/CIS L${OS_LVL}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} "
                             ALMA_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
@@ -1117,10 +1111,10 @@ run_phase_4() {
                             echo -e "${RED}❌ [Phase4/Alma/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
- 
+
                     if [ "$RUN_ORG" == true ]; then
-                        local REMOTE="/tmp/report_after_${ORG_PREFIX^^}_ALMA_${IP}.html"
-                        local LOCAL="./report_after_${ORG_PREFIX^^}_ALMA_${IP}.html"
+                        REMOTE="/tmp/report_after_${ORG_PREFIX^^}_ALMA_${IP}.html"
+                        LOCAL="./report_after_${ORG_PREFIX^^}_ALMA_${IP}.html"
                         echo -e "${GREEN}✅ [Phase4/Alma/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
                             "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
@@ -1137,8 +1131,8 @@ run_phase_4() {
             wait
         fi
     fi
- 
-    # -------------------- WINDOWS VERIFY (unchanged) --------------------
+
+    # -------------------- WINDOWS VERIFY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             for IP in "${WINDOWS_MACHINES[@]}"; do
