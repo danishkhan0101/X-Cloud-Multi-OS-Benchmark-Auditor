@@ -291,7 +291,7 @@ jobs:
           pattern: temp-reports-*
           path: consolidated-evidence
 
-      - name: 🗂️ Organize Folders by Machine IP and Profile
+      - name: 🗂️ Organize Folders by Machine IP
         run: |
           cd consolidated-evidence
           
@@ -303,23 +303,12 @@ jobs:
             FILENAME_NO_EXT="${BASENAME%.*}"
             IP_ADDR="${FILENAME_NO_EXT##*_}"
             
-            # 3. Determine the correct Profile folder based on the filename
-            if [[ "$BASENAME" == *"CIS_L1"* ]]; then
-              PROFILE_DIR="CIS (Level 1)"
-            elif [[ "$BASENAME" == *"CIS_L2"* ]]; then
-              PROFILE_DIR="CIS (Level 2)"
-            elif [[ "$BASENAME" == *"TM_"* ]]; then
-              PROFILE_DIR="TM Baseline"
-            else
-              PROFILE_DIR="Other"
-            fi
-            
-            # 4. Create the target Machine/Profile directory and move the file
-            mkdir -p "$IP_ADDR/$PROFILE_DIR"
-            mv "$file" "$IP_ADDR/$PROFILE_DIR/"
+            # 3. Create the target Machine directory and move the file
+            mkdir -p "$IP_ADDR"
+            mv "$file" "$IP_ADDR/"
           done
           
-          # 5. Delete all the old, empty temp-reports folders
+          # 4. Delete all the old, empty temp-reports folders
           rm -rf temp-reports-*
 
       - name: 📦 Zip the Evidence Package
@@ -340,7 +329,7 @@ jobs:
             **Execution Mode:** `${{ github.event.inputs.mode }}`
             **Compliance Profile:** `${{ env.DISPLAY_PROFILE }}`
             
-            All matrix execution reports have been successfully aggregated and categorized by Machine IP and Profile into the attached Evidence ZIP archive.
+            All matrix execution reports have been successfully aggregated and categorized by Machine IP.
             
             📥 **Download the ZIP below to access the HTML and JSON reports.**
           files: Fleet_Compliance_Evidence_*.zip
