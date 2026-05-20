@@ -105,23 +105,34 @@ remediate_windows_host() {
     echo -e "${CYAN}   → Detected: Windows ${ver}${NC}"
 
     # Map version → role + playbook + tag scope
+    #   role_name           = what the playbook's `roles:` block references
+    #   role_install_target = what we pass to `ansible-galaxy role install`
+    # For Galaxy-published roles these are the same. For roles only on
+    # GitHub (e.g. Windows-2025-CIS), we install via git URL and the role
+    # lands under the repo name, so the two values differ.
     local role_name
+    local role_install_target
     local playbook_file
     local tag_scope_l1
     case "$ver" in
         2019) role_name="ansible-lockdown.windows_2019_cis"
+              role_install_target="ansible-lockdown.windows_2019_cis"
               playbook_file="window-default-cis/cis_remediate_2019.yml"
               tag_scope_l1="level1-memberserver" ;;
         2022) role_name="ansible-lockdown.windows_2022_cis"
+              role_install_target="ansible-lockdown.windows_2022_cis"
               playbook_file="window-default-cis/cis_remediate_2022.yml"
               tag_scope_l1="level1-memberserver" ;;
-        2025) role_name="ansible-lockdown.windows_2025_cis"
+        2025) role_name="Windows-2025-CIS"
+              role_install_target="git+https://github.com/ansible-lockdown/Windows-2025-CIS.git"
               playbook_file="window-default-cis/cis_remediate_2025.yml"
               tag_scope_l1="level1-memberserver" ;;
         10)   role_name="ansible-lockdown.windows_10_cis"
+              role_install_target="ansible-lockdown.windows_10_cis"
               playbook_file="window-default-cis/cis_remediate_win10.yml"
               tag_scope_l1="level1-corporate-enterprise-environment" ;;
         11)   role_name="ansible-lockdown.windows_11_cis"
+              role_install_target="ansible-lockdown.windows_11_cis"
               playbook_file="window-default-cis/cis_remediate_win11.yml"
               tag_scope_l1="level1-corporate-enterprise-environment" ;;
     esac
@@ -133,8 +144,8 @@ remediate_windows_host() {
     fi
 
     # Install matching role (force-refresh to catch upstream updates)
-    echo -e "${CYAN}📦 [Win/${ver}] Installing ${role_name}...${NC}"
-    ansible-galaxy role install -f "$role_name"
+    echo -e "${CYAN}📦 [Win/${ver}] Installing ${role_name} (from ${role_install_target})...${NC}"
+    ansible-galaxy role install -f "$role_install_target"
 
     # Build tag list — Level 2 includes Level 1
     local tags
