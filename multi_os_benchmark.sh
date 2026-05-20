@@ -787,16 +787,44 @@ run_remediation() {
         fi
     fi
  
-    # -------------------- WINDOWS (unchanged) --------------------
+    # -------------------- WINDOWS --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
-                ansible-galaxy role install ansible-lockdown.windows_2022_cis > /dev/null 2>&1 || true
-                EXTRA_VARS="-e win2022cis_level_1=true -e win2022cis_level_2=$([ "$CIS_LEVEL" == "Level 2" ] && echo true || echo false)"
-                ansible-playbook -i inventory.ini $WIN_CIS_PLAYBOOK --limit windows_nodes $EXTRA_VARS > /dev/null 2>&1 || true
+                echo -e "${CYAN}🛠️  [Remediation/Win/CIS L${WIN_INSPEC_LVL}] Installing ansible-lockdown role...${NC}"
+                ansible-galaxy role install -f ansible-lockdown.windows_2022_cis
+
+                # CIS Level scoping is done via TAGS, not variables.
+                # Level 2 is a SUPERSET of Level 1 — must include both tags.
+                if [ "$CIS_LEVEL" == "Level 2" ]; then
+                    CIS_TAGS="level1-memberserver,level2-memberserver"
+                    echo -e "${CYAN}   → Applying Level 1 + Level 2 controls${NC}"
+                else
+                    CIS_TAGS="level1-memberserver"
+                    echo -e "${CYAN}   → Applying Level 1 controls only${NC}"
+                fi
+
+                echo -e "${CYAN}🛠️  [Remediation/Win/CIS] Running playbook (tags: ${CIS_TAGS})...${NC}"
+                ANSIBLE_HOST_KEY_CHECKING=False \
+                ansible-playbook -i inventory.ini "$WIN_CIS_PLAYBOOK" \
+                    --limit windows_nodes \
+                    --tags "$CIS_TAGS"
+                rc=$?
+                if [ $rc -eq 0 ]; then
+                    echo -e "${GREEN}✅ [Remediation/Win/CIS] Completed successfully${NC}"
+                else
+                    echo -e "${RED}❌ [Remediation/Win/CIS] ansible-playbook failed (rc=$rc)${NC}"
+                fi
             fi
             if [ "$RUN_ORG" == true ]; then
-                ansible-playbook -i inventory.ini $WIN_CUSTOM_PLAYBOOK --limit windows_nodes > /dev/null 2>&1 || true
+                echo -e "${CYAN}🛠️  [Remediation/Win/${ORG_PREFIX^^}] Running custom playbook...${NC}"
+                ansible-playbook -i inventory.ini "$WIN_CUSTOM_PLAYBOOK" --limit windows_nodes
+                rc=$?
+                if [ $rc -eq 0 ]; then
+                    echo -e "${GREEN}✅ [Remediation/Win/${ORG_PREFIX^^}] Completed successfully${NC}"
+                else
+                    echo -e "${RED}❌ [Remediation/Win/${ORG_PREFIX^^}] failed (rc=$rc)${NC}"
+                fi
             fi
         fi
     fi
