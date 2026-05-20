@@ -291,37 +291,34 @@ jobs:
           pattern: temp-reports-*
           path: consolidated-evidence
 
-      - name: 🗂️ Organize Folders by Machine IP and Profile
+      - name: 🗂️ Organize Folders by Machine IP
         run: |
           cd consolidated-evidence
           
-          # 1. Loop through every single file inside the messy artifact folders
-          find temp-reports-*/ -type f | while read file; do
+          # Loop through all reports
+          find . -type f \( -name "*.html" -o -name "*.json" \) | while read file; do
             BASENAME=$(basename "$file")
             
-            # 2. Extract the IP Address using bash string manipulation
-            FILENAME_NO_EXT="${BASENAME%.*}"
-            IP_ADDR="${FILENAME_NO_EXT##*_}"
+            # 1. Extract IP: Looks for a pattern like 1.2.3.4 (4 octets)
+            # This is much safer than relying on file extensions
+            IP_ADDR=$(echo "$BASENAME" | grep -oE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
             
-            # 3. Determine the Subfolder based on the filename
+            # Fallback if no IP found (in case of local testing)
+            if [ -z "$IP_ADDR" ]; then IP_ADDR="unknown-node"; fi
+            
+            # 2. Determine Subfolder
             if [[ "$BASENAME" == *"CIS_L1"* ]]; then
               PROFILE_DIR="CIS Level 1"
             elif [[ "$BASENAME" == *"CIS_L2"* ]]; then
               PROFILE_DIR="CIS Level 2"
-            elif [[ "$BASENAME" == *"CIS"* ]]; then
-              # Catch-all for OpenSCAP remediation files that don't specify L1/L2
-              PROFILE_DIR="CIS Remediation Logs" 
             else
               PROFILE_DIR="TM Baseline"
             fi
             
-            # 4. Create the target Machine/Profile directory and move the file
+            # 3. Create structure and move
             mkdir -p "$IP_ADDR/$PROFILE_DIR"
             mv "$file" "$IP_ADDR/$PROFILE_DIR/"
           done
-          
-          # 5. Delete all the old, empty temp-reports folders
-          rm -rf temp-reports-*
 
       - name: 📦 Zip the Evidence Package
         run: |
