@@ -3,6 +3,16 @@
   hosts: windows_nodes
   gather_facts: true
 
+  # ─────────────────────────────────────────────
+  # Belt-and-suspenders against future ansible-core
+  # strictness changes. The ansible-lockdown role
+  # uses some legacy conditional patterns that newer
+  # cores reject. This setting matches the role's
+  # historical behavior.
+  # ─────────────────────────────────────────────
+  environment:
+    ANSIBLE_ALLOW_BROKEN_CONDITIONALS: "True"
+
   vars:
     # ─────────────────────────────────────────────
     # WinRM resilience — CIS hardening reboots the
@@ -15,7 +25,6 @@
     # ─────────────────────────────────────────────
     # Section toggles — note the CORRECT prefix
     # is win22cis_ (NOT win2022cis_).
-    # All sections enabled is the standard CIS run.
     # ─────────────────────────────────────────────
     win22cis_section1: true   # Account Policies
     win22cis_section2: true   # Local Policies
@@ -27,26 +36,18 @@
 
     # ─────────────────────────────────────────────
     # Server role — member server (not DC).
-    # If you ever target a Domain Controller, set
-    # win22cis_section_domain_controller: true and
-    # win22cis_section_member_server: false instead.
     # ─────────────────────────────────────────────
     win22cis_section_member_server: true
     win22cis_section_domain_controller: false
 
     # ─────────────────────────────────────────────
-    # Critical safety overrides — these rules
-    # break automated remediation runners by
-    # locking down WinRM or removing the audit
-    # user. Disable them explicitly.
+    # Safety overrides — rules that break automation
     # ─────────────────────────────────────────────
-    # Don't disable anonymous SAM access — breaks WinRM in many setups
-    win22cis_rule_2_3_10_5: false
-    # Don't restrict named-pipe access — breaks remote service mgmt
-    win22cis_rule_2_3_10_8: false
+    win22cis_rule_2_3_10_5: false   # Don't disable anonymous SAM (breaks WinRM)
+    win22cis_rule_2_3_10_8: false   # Don't restrict named pipes (breaks remote mgmt)
 
     # ─────────────────────────────────────────────
-    # Audit log location (lockdown writes here)
+    # Audit log location
     # ─────────────────────────────────────────────
     win22cis_audit_log_dir: 'C:\Windows\Temp\AuditLogs'
     win22cis_audit_output_dir: 'C:\Windows\Temp\AuditLogs'
