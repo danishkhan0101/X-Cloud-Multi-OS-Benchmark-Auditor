@@ -291,7 +291,7 @@ jobs:
           pattern: temp-reports-*
           path: consolidated-evidence
 
-      - name: 🗂️ Organize Folders by Machine IP
+      - name: 🗂️ Organize Folders by Machine IP and Profile
         run: |
           cd consolidated-evidence
           
@@ -303,12 +303,24 @@ jobs:
             FILENAME_NO_EXT="${BASENAME%.*}"
             IP_ADDR="${FILENAME_NO_EXT##*_}"
             
-            # 3. Create the target Machine directory and move the file
-            mkdir -p "$IP_ADDR"
-            mv "$file" "$IP_ADDR/"
+            # 3. Determine the Subfolder based on the filename
+            if [[ "$BASENAME" == *"CIS_L1"* ]]; then
+              PROFILE_DIR="CIS Level 1"
+            elif [[ "$BASENAME" == *"CIS_L2"* ]]; then
+              PROFILE_DIR="CIS Level 2"
+            elif [[ "$BASENAME" == *"CIS"* ]]; then
+              # Catch-all for OpenSCAP remediation files that don't specify L1/L2
+              PROFILE_DIR="CIS Remediation Logs" 
+            else
+              PROFILE_DIR="TM Baseline"
+            fi
+            
+            # 4. Create the target Machine/Profile directory and move the file
+            mkdir -p "$IP_ADDR/$PROFILE_DIR"
+            mv "$file" "$IP_ADDR/$PROFILE_DIR/"
           done
           
-          # 4. Delete all the old, empty temp-reports folders
+          # 5. Delete all the old, empty temp-reports folders
           rm -rf temp-reports-*
 
       - name: 📦 Zip the Evidence Package
