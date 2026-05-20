@@ -1,0 +1,40 @@
+---
+- name: Remediate Windows Server 2025 - CIS Benchmark
+  hosts: windows_nodes
+  gather_facts: true
+
+  environment:
+    ANSIBLE_ALLOW_BROKEN_CONDITIONALS: "True"
+
+  vars:
+    # WinRM resilience — CIS hardening reboots mid-play
+    ansible_winrm_read_timeout_sec: 180
+    ansible_winrm_operation_timeout_sec: 120
+
+    # Section toggles — note the prefix is win25cis_ for Server 2025
+    win25cis_section1: true   # Account Policies
+    win25cis_section2: true   # Local Policies
+    win25cis_section5: true   # System Services
+    win25cis_section9: true   # Windows Firewall
+    win25cis_section17: true  # Advanced Audit Policy
+    win25cis_section18: true  # Administrative Templates (Computer)
+    win25cis_section19: true  # Administrative Templates (User)
+
+    # Server role
+    win25cis_section_member_server: true
+    win25cis_section_domain_controller: false
+
+    # Safety overrides — rules that break automation runners
+    win25cis_rule_2_3_10_5: false   # Don't disable anonymous SAM (breaks WinRM)
+    win25cis_rule_2_3_10_8: false   # Don't restrict named pipes
+
+    # Audit log location
+    win25cis_audit_log_dir: 'C:\Windows\Temp\AuditLogs'
+    win25cis_audit_output_dir: 'C:\Windows\Temp\AuditLogs'
+
+    # GPO backup — useful for rollback if remediation breaks things
+    win25cis_backup_custom_gpos: true
+    win25cis_backup_location_style: 'Windows'
+
+  roles:
+    - role: ansible-lockdown.windows_2025_cis
