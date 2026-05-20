@@ -480,13 +480,14 @@ run_phase_1() {
 
 run_remediation() {
     echo -e "\n${BOLD}🛠️  PHASE 2 & 3: Executing Remediation (Asynchronous)...${NC}"
+    
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "ubuntu" ]; then
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
             echo -e "${GREEN}▶️ [CIS] Auto-Remediating Ubuntu via Native OpenSCAP...${NC}"
             for IP in "${UBUNTU_MACHINES[@]}"; do
                 (
+                    # 🚨 Removed 'scp' command for remediation report
                     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1); sudo /usr/bin/oscap xccdf eval --remediate --profile $UBUNTU_CIS_PROFILE --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\"" > /dev/null 2>&1 || true
-                    scp -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP}:/tmp/report_remediation_CIS_${IP}.html ./report_remediation_CIS_${IP}.html > /dev/null 2>&1 || true
                 ) &
             done
             wait
@@ -499,8 +500,8 @@ run_remediation() {
             echo -e "${GREEN}▶️ [CIS] Auto-Remediating RHEL via Native OpenSCAP...${NC}"
             for IP in "${RHEL_MACHINES[@]}"; do
                 (
+                    # 🚨 Removed 'scp' command for remediation report
                     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); sudo /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\"" > /dev/null 2>&1 || true
-                    scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_remediation_CIS_${IP}.html ./report_remediation_CIS_${IP}.html > /dev/null 2>&1 || true
                 ) &
             done
             wait
@@ -514,13 +515,13 @@ run_remediation() {
                 echo -e "${GREEN}▶️ [CIS] Auto-Remediating Rocky natively...${NC}"
                 for IP in "${ROCKY_MACHINES[@]}"; do
                     (
+                        # 🚨 Removed 'scp' command for remediation report
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                             ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                             TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
                             if [ ! -f \"\$TARGET_XML\" ]; then exit 1; fi
                             sudo /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE --report /tmp/report_remediation_CIS_ROCKY_${IP}.html \"\$TARGET_XML\"
                         " > /dev/null 2>&1 || true
-                        scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_remediation_CIS_ROCKY_${IP}.html ./report_remediation_CIS_ROCKY_${IP}.html > /dev/null 2>&1 || true
                     ) &
                 done
                 wait
@@ -538,6 +539,7 @@ run_remediation() {
                 echo -e "${GREEN}▶️ [CIS] Auto-Remediating AlmaLinux natively...${NC}"
                 for IP in "${ALMA_MACHINES[@]}"; do
                     (
+                        # 🚨 Removed 'scp' command for remediation report
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
                             ALMA_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                             TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-almalinux\${ALMA_VER}-ds.xml\"
@@ -554,7 +556,6 @@ run_remediation() {
                             
                             sudo /usr/bin/oscap xccdf eval --remediate --profile \$ALMA_PROF --report /tmp/report_remediation_CIS_ALMA_${IP}.html \"\$TARGET_XML\"
                         " > /dev/null 2>&1 || true
-                        scp -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP}:/tmp/report_remediation_CIS_ALMA_${IP}.html ./report_remediation_CIS_ALMA_${IP}.html > /dev/null 2>&1 || true
                     ) &
                 done
                 wait
@@ -567,6 +568,7 @@ run_remediation() {
     fi
 
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
+        # Windows remediation logic remains unchanged
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
                 ansible-galaxy role install ansible-lockdown.windows_2022_cis > /dev/null 2>&1 || true
