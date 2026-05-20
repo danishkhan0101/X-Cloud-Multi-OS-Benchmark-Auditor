@@ -210,11 +210,17 @@ jobs:
           mkdir -p ~/.ssh
           ssh-add -L > ~/.ssh/id_rsa.pub
 
-      - name: 🛠️ Install Linux Tools (OpenSCAP)
+      # ────────────────────────────────────────────────────────────────
+      # NOTE: OpenSCAP scanner & SCAP content are NOT installed here.
+      # The runner only orchestrates — it never executes `oscap` itself.
+      # All target-side scanning tools are provisioned on-demand by the
+      # script's `ensure_linux_scap_tools()` helper (idempotent, per-VM).
+      # ────────────────────────────────────────────────────────────────
+      - name: 🛠️ Install Runner Orchestration Tools (Linux)
         if: matrix.os_target.os != 'Windows'
         run: |
           sudo apt-get update
-          sudo apt-get install -y openscap-scanner openscap-utils sshpass
+          sudo apt-get install -y sshpass
           python3 -m pip install --user --upgrade pip
           python3 -m pip install --user ansible
           echo "$HOME/.local/bin" >> $GITHUB_PATH
