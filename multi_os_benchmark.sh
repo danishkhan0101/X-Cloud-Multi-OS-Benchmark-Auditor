@@ -1,5 +1,123 @@
 #!/bin/bash
 set +H
+detect_windows_version() {
+    local ip="$1"
+ 
+    # Run win_shell to get CIM OS info, parse the Caption field
+    local caption
+    caption=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
+        -a '(Get-CimInstance Win32_OperatingSystem).Caption' \
+        2>/dev/null | grep -oE 'Windows (Server (2019|2022|2025)|1[01])' | head -1)
+ 
+    case "$caption" in
+        *"Server 2019"*) echo "2019" ;;
+        *"Server 2022"*) echo "2022" ;;
+        *"Server 2025"*) echo "2025" ;;
+        *"Windows 10"*)  echo "10"   ;;
+        *"Windows 11"*)  echo "11"   ;;
+        *)               echo "unknown" ;;
+    esac
+}
+detect_windows_version() {
+    local ip="$1"
+ 
+    # Run win_shell to get CIM OS info, parse the Caption field
+    local caption
+    caption=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
+        -a '(Get-CimInstance Win32_OperatingSystem).Caption' \
+        2>/dev/null | grep -oE 'Windows (Server (2019|2022|2025)|1[01])' | head -1)
+ 
+    case "$caption" in
+        *"Server 2019"*) echo "2019" ;;
+        *"Server 2022"*) echo "2022" ;;
+        *"Server 2025"*) echo "2025" ;;
+        *"Windows 10"*)  echo "10"   ;;
+        *"Windows 11"*)  echo "11"   ;;
+        *)               echo "unknown" ;;
+    esac
+}
+ 
+# ======================================================
+# remediate_windows_host
+# ------------------------------------------------------
+# Detects version, installs the right role, runs the
+# right playbook with the right tags.
+# Args: $1 ip, $2 cis_level ("Level 1" or "Level 2")
+# ======================================================
+remediate_windows_host() {
+    local ip="$1"
+    local cis_level="$2"
+ 
+    echo -e "${CYAN}🔍 [Win] Detecting OS version on ${ip}...${NC}"
+    local ver
+    ver=$(detect_windows_version "$ip")
+ 
+    if [ "$ver" == "unknown" ]; then
+        echo -e "${RED}❌ [Win] Could not detect OS version on ${ip} — skipping${NC}"
+        return 1
+    fi
+    echo -e "${CYAN}   → Detected: Windows ${ver}${NC}"
+ 
+    # Map version → role + playbook + tag scope
+    local role_name
+    local playbook_file
+    local tag_scope_l1
+    case "$ver" in
+        2019) role_name="ansible-lockdown.windows_2019_cis"
+              playbook_file="window-default-cis/cis_remediate_2019.yml"
+              tag_scope_l1="level1-memberserver" ;;
+        2022) role_name="ansible-lockdown.windows_2022_cis"
+              playbook_file="window-default-cis/cis_remediate_2022.yml"
+              tag_scope_l1="level1-memberserver" ;;
+        2025) role_name="ansible-lockdown.windows_2025_cis"
+              playbook_file="window-default-cis/cis_remediate_2025.yml"
+              tag_scope_l1="level1-memberserver" ;;
+        10)   role_name="ansible-lockdown.windows_10_cis"
+              playbook_file="window-default-cis/cis_remediate_win10.yml"
+              tag_scope_l1="level1-corporate-enterprise-environment" ;;
+        11)   role_name="ansible-lockdown.windows_11_cis"
+              playbook_file="window-default-cis/cis_remediate_win11.yml"
+              tag_scope_l1="level1-corporate-enterprise-environment" ;;
+    esac
+ 
+    if [ ! -f "$playbook_file" ]; then
+        echo -e "${RED}❌ [Win/${ver}] Playbook missing: ${playbook_file}${NC}"
+        echo -e "${YELLOW}   You need to create ${playbook_file} for Windows ${ver}${NC}"
+        return 1
+    fi
+ 
+    # Install matching role (force-refresh to catch upstream updates)
+    echo -e "${CYAN}📦 [Win/${ver}] Installing ${role_name}...${NC}"
+    ansible-galaxy role install -f "$role_name"
+ 
+    # Build tag list — Level 2 includes Level 1
+    local tags
+    if [ "$cis_level" == "Level 2" ]; then
+        if [ "$ver" -ge 10 ] && [ "$ver" -le 11 ]; then
+            tags="level1-corporate-enterprise-environment,level2-corporate-enterprise-environment"
+        else
+            tags="level1-memberserver,level2-memberserver"
+        fi
+        echo -e "${CYAN}   → Applying Level 1 + Level 2 controls${NC}"
+    else
+        tags="$tag_scope_l1"
+        echo -e "${CYAN}   → Applying Level 1 controls only${NC}"
+    fi
+ 
+    # Run it
+    echo -e "${CYAN}🛠️  [Win/${ver}] Running ${playbook_file} (tags: ${tags})...${NC}"
+    ANSIBLE_HOST_KEY_CHECKING=False \
+        ansible-playbook -i inventory.ini "$playbook_file" \
+        --limit "$ip" \
+        --tags "$tags"
+    local rc=$?
+    if [ $rc -eq 0 ]; then
+        echo -e "${GREEN}✅ [Win/${ver}] ${ip} completed successfully${NC}"
+    else
+        echo -e "${RED}❌ [Win/${ver}] ${ip} failed (rc=${rc})${NC}"
+    fi
+    return $rc
+}
 
 fetch_remote_report() {
     local user="$1"
@@ -791,37 +909,17 @@ run_remediation() {
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
-                echo -e "${CYAN}🛠️  [Remediation/Win/CIS L${WIN_INSPEC_LVL}] Installing ansible-lockdown role...${NC}"
-                ansible-galaxy role install -f ansible-lockdown.windows_2022_cis
-
-                # CIS Level scoping is done via TAGS, not variables.
-                # Level 2 is a SUPERSET of Level 1 — must include both tags.
-                if [ "$CIS_LEVEL" == "Level 2" ]; then
-                    CIS_TAGS="level1-memberserver,level2-memberserver"
-                    echo -e "${CYAN}   → Applying Level 1 + Level 2 controls${NC}"
-                else
-                    CIS_TAGS="level1-memberserver"
-                    echo -e "${CYAN}   → Applying Level 1 controls only${NC}"
-                fi
-
-                echo -e "${CYAN}🛠️  [Remediation/Win/CIS] Running playbook (tags: ${CIS_TAGS})...${NC}"
-                ANSIBLE_HOST_KEY_CHECKING=False \
-                ansible-playbook -i inventory.ini "$WIN_CIS_PLAYBOOK" \
-                    --limit windows_nodes \
-                    --tags "$CIS_TAGS"
-                rc=$?
-                if [ $rc -eq 0 ]; then
-                    echo -e "${GREEN}✅ [Remediation/Win/CIS] Completed successfully${NC}"
-                else
-                    echo -e "${RED}❌ [Remediation/Win/CIS] ansible-playbook failed (rc=$rc)${NC}"
-                fi
+                for IP in "${WINDOWS_MACHINES[@]}"; do
+                    ( remediate_windows_host "$IP" "$CIS_LEVEL" ) &
+                done
+                wait
             fi
             if [ "$RUN_ORG" == true ]; then
                 echo -e "${CYAN}🛠️  [Remediation/Win/${ORG_PREFIX^^}] Running custom playbook...${NC}"
                 ansible-playbook -i inventory.ini "$WIN_CUSTOM_PLAYBOOK" --limit windows_nodes
                 rc=$?
                 if [ $rc -eq 0 ]; then
-                    echo -e "${GREEN}✅ [Remediation/Win/${ORG_PREFIX^^}] Completed successfully${NC}"
+                    echo -e "${GREEN}✅ [Remediation/Win/${ORG_PREFIX^^}] Completed${NC}"
                 else
                     echo -e "${RED}❌ [Remediation/Win/${ORG_PREFIX^^}] failed (rc=$rc)${NC}"
                 fi
