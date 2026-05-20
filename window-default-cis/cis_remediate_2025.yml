@@ -11,7 +11,29 @@
     ansible_winrm_read_timeout_sec: 180
     ansible_winrm_operation_timeout_sec: 120
 
-    # Section toggles — prefix is win25cis_ for Server 2025
+    # ─────────────────────────────────────────────
+    # 🔑 MODE SELECTION (the 2025 role's big difference)
+    # The role does NOTHING unless one of these is on.
+    # We want direct Ansible remediation, NOT GPO generation.
+    # These two are mutually exclusive — the role asserts this.
+    # ─────────────────────────────────────────────
+    win25cis_ansible_remediation: true
+    win25cis_create_gpos: false
+
+    # ─────────────────────────────────────────────
+    # ADMX / policy definition staging — required for
+    # Administrative Template settings to actually apply.
+    # Defaults are true, set explicitly for clarity.
+    # ─────────────────────────────────────────────
+    win25cis_copy_policy_definitions: true
+    win25cis_copy_cis_custom_admx_adml: true
+
+    # Don't auto-create a test domain
+    win25cis_create_domain: false
+
+    # ─────────────────────────────────────────────
+    # Section toggles
+    # ─────────────────────────────────────────────
     win25cis_section1: true   # Account Policies
     win25cis_section2: true   # Local Policies
     win25cis_section5: true   # System Services
@@ -32,13 +54,6 @@
     win25cis_audit_log_dir: 'C:\Windows\Temp\AuditLogs'
     win25cis_audit_output_dir: 'C:\Windows\Temp\AuditLogs'
 
-    # GPO backup — useful for rollback
-    win25cis_backup_custom_gpos: true
-    win25cis_backup_location_style: 'Windows'
-
   roles:
-    # NOTE: role name is the GitHub repo name (Windows-2025-CIS)
-    # because this role is installed via git, not Galaxy:
-    #   ansible-galaxy install git+https://github.com/ansible-lockdown/Windows-2025-CIS.git
-    # Git installs land under the repo name, not a namespaced name.
+    # role name = GitHub repo name (installed via git, not Galaxy)
     - role: Windows-2025-CIS
