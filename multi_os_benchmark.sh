@@ -1,41 +1,6 @@
 #!/bin/bash
 set +H
 
-ensure_linux_scap_tools() {
-    local user="$1"
-    local ip="$2"
-    local pkg_mgr="$3"
- 
-    local install_cmd
-    if [ "$pkg_mgr" == "apt" ]; then
-        install_cmd="sudo apt-get update -qq && sudo apt-get install -y openscap-scanner ssg-base"
-    else
-        # dnf path (RHEL / Rocky / Alma)
-        install_cmd="sudo dnf install -y openscap-scanner scap-security-guide"
-    fi
- 
-    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "${user}@${ip}" "
-        set -e
-        if ! command -v oscap >/dev/null 2>&1 \
-           || [ ! -d /usr/share/xml/scap/ssg/content ] \
-           || [ -z \"\$(ls -A /usr/share/xml/scap/ssg/content 2>/dev/null)\" ]; then
-            echo '[INSTALL] SCAP tools missing — installing...' | sudo tee /tmp/install_${ip}.log
-            ${install_cmd} 2>&1 | sudo tee -a /tmp/install_${ip}.log
-        fi
-        # Final verification — fail loudly if still broken
-        command -v oscap >/dev/null 2>&1 || { echo '[FATAL] oscap still missing after install'; exit 10; }
-        [ -d /usr/share/xml/scap/ssg/content ]   || { echo '[FATAL] SCAP content dir missing'; exit 11; }
-        ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1 || { echo '[FATAL] No SCAP datastreams found'; exit 12; }
-    "
-    local rc=$?
-    if [ $rc -ne 0 ]; then
-        echo -e "${RED}❌ [Tool Guard] SCAP tooling unavailable on ${ip} (rc=$rc). See /tmp/install_${ip}.log on the host.${NC}"
-        return $rc
-    fi
-    return 0
-}
-
-
 # ======================================================
 # CONFIGURATION - DYNAMIC ENVIRONMENT VARIABLES
 # ======================================================
@@ -72,8 +37,43 @@ WIN_CIS_BENCHMARK="${WIN_CIS_DIR}/window-baseline"
 WIN_CIS_PLAYBOOK="${WIN_CIS_DIR}/cis_remediate.yml"
 
 export INSPEC_SSH_CONFIG_NO_SECURE=true
-BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
+BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; MAGENTA='\033[0;35m'; NC='\033[0m'
 clear
+
+# ======================================================
+# TOOL GUARD: Ensure SCAP tooling exists on Linux node
+# ======================================================
+ensure_linux_scap_tools() {
+    local user="$1"
+    local ip="$2"
+    local pkg_mgr="$3"
+
+    local install_cmd
+    if [ "$pkg_mgr" == "apt" ]; then
+        install_cmd="sudo apt-get update -qq && sudo apt-get install -y openscap-scanner ssg-base"
+    else
+        install_cmd="sudo dnf install -y openscap-scanner scap-security-guide"
+    fi
+
+    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "${user}@${ip}" "
+        set -e
+        if ! command -v oscap >/dev/null 2>&1 \
+           || [ ! -d /usr/share/xml/scap/ssg/content ] \
+           || [ -z \"\$(ls -A /usr/share/xml/scap/ssg/content 2>/dev/null)\" ]; then
+            echo '[INSTALL] SCAP tools missing — installing...' | sudo tee /tmp/install_${ip}.log
+            ${install_cmd} 2>&1 | sudo tee -a /tmp/install_${ip}.log
+        fi
+        command -v oscap >/dev/null 2>&1 || { echo '[FATAL] oscap still missing after install'; exit 10; }
+        [ -d /usr/share/xml/scap/ssg/content ]   || { echo '[FATAL] SCAP content dir missing'; exit 11; }
+        ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1 || { echo '[FATAL] No SCAP datastreams found'; exit 12; }
+    "
+    local rc=$?
+    if [ $rc -ne 0 ]; then
+        echo -e "${RED}❌ [Tool Guard] SCAP tooling unavailable on ${ip} (rc=$rc). See /tmp/install_${ip}.log on the host.${NC}"
+        return $rc
+    fi
+    return 0
+}
 
 # ======================================================
 # AUTO-HEAL HELPER (Prevents SSH Lockout)
@@ -313,7 +313,7 @@ update_profile_vars() {
 # ======================================================
 run_phase_1() {
     echo -e "\n${BOLD}🔍 PHASE 1: Running Initial Baselines (Asynchronous)...${NC}"
- 
+
     # -------------------- UBUNTU --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "ubuntu" ]; then
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
@@ -323,19 +323,19 @@ run_phase_1() {
                         echo -e "${RED}❌ [Phase1/Ubuntu] Skipping $IP — tools unavailable.${NC}"
                         exit 1
                     fi
- 
+
                     RAW_VER=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} \
                         "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
                     UBUNTU_VER=${RAW_VER:-2404}
                     UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
- 
+
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Ubuntu/CIS L${OS_LVL}] Scanning $IP...${NC}"
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} \
                             "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE \
                              --report /tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html \
                              $UBUNTU_CIS_XCCDF"
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes -o StrictHostKeyChecking=no \
                                 ${UBUNTU_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html \
@@ -345,7 +345,7 @@ run_phase_1() {
                             echo -e "${RED}❌ [Phase1/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
- 
+
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Ubuntu/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -355,7 +355,7 @@ run_phase_1() {
                             "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
                              --report /tmp/report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html \
                              /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes -o StrictHostKeyChecking=no \
                                 ${UBUNTU_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html \
@@ -370,7 +370,7 @@ run_phase_1() {
             wait
         fi
     fi
- 
+
     # -------------------- RHEL --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rhel" ]; then
         if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
@@ -380,14 +380,14 @@ run_phase_1() {
                         echo -e "${RED}❌ [Phase1/RHEL] Skipping $IP — tools unavailable.${NC}"
                         exit 1
                     fi
- 
+
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/RHEL/CIS L${OS_LVL}] Scanning $IP...${NC}"
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} \
                             "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); \
                              sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE \
                              --report /tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$TARGET_XML\""
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes -o StrictHostKeyChecking=no \
                                 ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \
@@ -397,7 +397,7 @@ run_phase_1() {
                             echo -e "${RED}❌ [Phase1/RHEL/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
- 
+
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/RHEL/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -408,7 +408,7 @@ run_phase_1() {
                              /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
                              --report /tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html \
                              /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes -o StrictHostKeyChecking=no \
                                 ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html \
@@ -423,7 +423,7 @@ run_phase_1() {
             wait
         fi
     fi
- 
+
     # -------------------- ROCKY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
@@ -433,7 +433,7 @@ run_phase_1() {
                         echo -e "${RED}❌ [Phase1/Rocky] Skipping $IP — tools unavailable.${NC}"
                         exit 1
                     fi
- 
+
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Rocky/CIS L${OS_LVL}] Scanning $IP...${NC}"
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
@@ -446,7 +446,7 @@ run_phase_1() {
                             sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE \
                                 --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
                         "
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes -o StrictHostKeyChecking=no \
                                 ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \
@@ -456,7 +456,7 @@ run_phase_1() {
                             echo -e "${RED}❌ [Phase1/Rocky/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
- 
+
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Rocky/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -466,7 +466,7 @@ run_phase_1() {
                             "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
                              --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html \
                              /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes -o StrictHostKeyChecking=no \
                                 ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html \
@@ -481,7 +481,7 @@ run_phase_1() {
             wait
         fi
     fi
- 
+
     # -------------------- ALMA --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "alma" ]; then
         if [ ${#ALMA_MACHINES[@]} -gt 0 ]; then
@@ -491,7 +491,7 @@ run_phase_1() {
                         echo -e "${RED}❌ [Phase1/Alma] Skipping $IP — tools unavailable.${NC}"
                         exit 1
                     fi
- 
+
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Alma/CIS L${OS_LVL}] Scanning $IP...${NC}"
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
@@ -509,7 +509,7 @@ run_phase_1() {
                             sudo /usr/bin/oscap xccdf eval --profile \$ALMA_PROF \
                                 --report /tmp/report_before_CIS_L${OS_LVL}_ALMA_${IP}.html \"\$TARGET_XML\"
                         "
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes -o StrictHostKeyChecking=no \
                                 ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ALMA_${IP}.html \
@@ -519,7 +519,7 @@ run_phase_1() {
                             echo -e "${RED}❌ [Phase1/Alma/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
- 
+
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Alma/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -529,7 +529,7 @@ run_phase_1() {
                             "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
                              --report /tmp/report_before_${ORG_PREFIX^^}_ALMA_${IP}.html \
                              /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes -o StrictHostKeyChecking=no \
                                 ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_ALMA_${IP}.html \
@@ -544,8 +544,8 @@ run_phase_1() {
             wait
         fi
     fi
- 
-    # -------------------- WINDOWS (unchanged) --------------------
+
+    # -------------------- WINDOWS --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             for IP in "${WINDOWS_MACHINES[@]}"; do
@@ -649,7 +649,7 @@ run_remediation() {
 # ======================================================
 run_phase_4() {
     echo -e "\n${BOLD}🔄 PHASE 4: Running Verification Scans (Asynchronous)...${NC}"
- 
+
     # -------------------- UBUNTU VERIFY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "ubuntu" ]; then
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
@@ -657,19 +657,19 @@ run_phase_4() {
                 (
                     wait_for_ssh "$IP" "$UBUNTU_USER" || { echo -e "${RED}❌ [Phase4/Ubuntu] SSH unreachable: $IP${NC}"; exit 1; }
                     ensure_linux_scap_tools "$UBUNTU_USER" "$IP" "apt" || { echo -e "${RED}❌ [Phase4/Ubuntu] Tools missing on $IP${NC}"; exit 1; }
- 
+
                     UBUNTU_VER=$(ssh -n -o BatchMode=yes ${UBUNTU_USER}@${IP} \
                         "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
                     UBUNTU_VER=${UBUNTU_VER:-2404}
                     UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
- 
+
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Ubuntu/CIS L${OS_LVL}] Verifying $IP...${NC}"
                         ssh -n -o BatchMode=yes ${UBUNTU_USER}@${IP} \
                             "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE \
                              --report /tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html \
                              $UBUNTU_CIS_XCCDF"
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes ${UBUNTU_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html \
                                 ./report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html \
@@ -678,14 +678,14 @@ run_phase_4() {
                             echo -e "${RED}❌ [Phase4/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
- 
+
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Ubuntu/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh -n -o BatchMode=yes ${UBUNTU_USER}@${IP} \
                             "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
                              --report /tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html \
                              /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes ${UBUNTU_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html \
                                 ./report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html \
@@ -699,7 +699,7 @@ run_phase_4() {
             wait
         fi
     fi
- 
+
     # -------------------- RHEL VERIFY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rhel" ]; then
         if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
@@ -707,14 +707,14 @@ run_phase_4() {
                 (
                     wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/RHEL] SSH unreachable: $IP${NC}"; exit 1; }
                     ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/RHEL] Tools missing on $IP${NC}"; exit 1; }
- 
+
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/RHEL/CIS L${OS_LVL}] Verifying $IP...${NC}"
                         ssh -n -o BatchMode=yes ${GHOST_USER}@${IP} \
                             "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); \
                              sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE \
                              --report /tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$TARGET_XML\""
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html \
                                 ./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html \
@@ -723,14 +723,14 @@ run_phase_4() {
                             echo -e "${RED}❌ [Phase4/RHEL/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
- 
+
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/RHEL/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh -n -o BatchMode=yes ${GHOST_USER}@${IP} \
                             "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
                              --report /tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html \
                              /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html \
                                 ./report_after_${ORG_PREFIX^^}_RHEL_${IP}.html \
@@ -744,7 +744,7 @@ run_phase_4() {
             wait
         fi
     fi
- 
+
     # -------------------- ROCKY VERIFY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
         if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
@@ -752,7 +752,7 @@ run_phase_4() {
                 (
                     wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/Rocky] SSH unreachable: $IP${NC}"; exit 1; }
                     ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/Rocky] Tools missing on $IP${NC}"; exit 1; }
- 
+
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Rocky/CIS L${OS_LVL}] Verifying $IP...${NC}"
                         ssh -n -o BatchMode=yes ${GHOST_USER}@${IP} "
@@ -765,7 +765,7 @@ run_phase_4() {
                             sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE \
                                 --report /tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
                         "
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \
                                 ./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html \
@@ -774,14 +774,14 @@ run_phase_4() {
                             echo -e "${RED}❌ [Phase4/Rocky/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
- 
+
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Rocky/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh -n -o BatchMode=yes ${GHOST_USER}@${IP} \
                             "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
                              --report /tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html \
                              /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html \
                                 ./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html \
@@ -795,7 +795,7 @@ run_phase_4() {
             wait
         fi
     fi
- 
+
     # -------------------- ALMA VERIFY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "alma" ]; then
         if [ ${#ALMA_MACHINES[@]} -gt 0 ]; then
@@ -803,7 +803,7 @@ run_phase_4() {
                 (
                     wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/Alma] SSH unreachable: $IP${NC}"; exit 1; }
                     ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/Alma] Tools missing on $IP${NC}"; exit 1; }
- 
+
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Alma/CIS L${OS_LVL}] Verifying $IP...${NC}"
                         ssh -n -o BatchMode=yes ${GHOST_USER}@${IP} "
@@ -821,7 +821,7 @@ run_phase_4() {
                             sudo /usr/bin/oscap xccdf eval --profile \$ALMA_PROF \
                                 --report /tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html \"\$TARGET_XML\"
                         "
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes ${GHOST_USER}@${IP}:/tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html \
                                 ./report_after_CIS_L${OS_LVL}_ALMA_${IP}.html \
@@ -830,14 +830,14 @@ run_phase_4() {
                             echo -e "${RED}❌ [Phase4/Alma/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
- 
+
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Alma/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh -n -o BatchMode=yes ${GHOST_USER}@${IP} \
                             "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
                              --report /tmp/report_after_${ORG_PREFIX^^}_ALMA_${IP}.html \
                              /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
-                        local rc=$?
+                        rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             scp -o BatchMode=yes ${GHOST_USER}@${IP}:/tmp/report_after_${ORG_PREFIX^^}_ALMA_${IP}.html \
                                 ./report_after_${ORG_PREFIX^^}_ALMA_${IP}.html \
@@ -851,7 +851,7 @@ run_phase_4() {
             wait
         fi
     fi
- 
+
     # -------------------- WINDOWS VERIFY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
@@ -863,7 +863,7 @@ run_phase_4() {
                             --user="${AUDIT_USER}" --password="${AUDIT_PASS}" \
                             --input level_1_or_2=$WIN_INSPEC_LVL \
                             --reporter json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
-                        local rc=$?
+                        rc=$?
                         if [ $rc -ne 0 ] && [ $rc -ne 100 ] && [ $rc -ne 101 ]; then
                             echo -e "${RED}❌ [Phase4/Win/CIS] cinc-auditor failed on $IP (rc=$rc)${NC}"
                         fi
@@ -873,7 +873,7 @@ run_phase_4() {
                         cinc-auditor exec "$WIN_CUSTOM_BENCHMARK" -t winrm://${IP} \
                             --user="${AUDIT_USER}" --password="${AUDIT_PASS}" \
                             --reporter json:heimdall_after_${ORG_PREFIX^^}_WIN_${IP}.json
-                        local rc=$?
+                        rc=$?
                         if [ $rc -ne 0 ] && [ $rc -ne 100 ] && [ $rc -ne 101 ]; then
                             echo -e "${RED}❌ [Phase4/Win/${ORG_PREFIX^^}] cinc-auditor failed on $IP (rc=$rc)${NC}"
                         fi
@@ -885,7 +885,9 @@ run_phase_4() {
     fi
 }
 
-
+# ======================================================
+# PHASE 5: CLEANUP
+# ======================================================
 run_cleanup() {
     echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP (THE GHOST METHOD)${NC}"
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "ubuntu" ]; then
