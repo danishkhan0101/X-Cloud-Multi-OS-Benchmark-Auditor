@@ -318,6 +318,10 @@ jobs:
             # 3. Create structure and move
             mkdir -p "$IP_ADDR/$PROFILE_DIR"
             mv "$file" "$IP_ADDR/$PROFILE_DIR/"
+
+            # 5. Delete all the old, empty temp-reports folders
+            rm -rf temp-reports-*
+            
           done
 
       - name: 📦 Zip the Evidence Package
