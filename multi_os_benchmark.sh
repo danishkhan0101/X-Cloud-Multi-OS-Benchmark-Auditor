@@ -269,24 +269,22 @@ run_goss_windows_audit() {
     local step3
     step3=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_copy \
         -a "src=${audit_repo}/ dest=${GOSS_REMOTE_DIR}\\content" 2>&1)
-    echo -e "${YELLOW}=== Step 3 win_copy output ===${NC}"
-    echo "$step3"
-    echo -e "${YELLOW}=== End Step 3 ===${NC}"
     if echo "$step3" | grep -q "FAILED"; then
         echo -e "${RED}❌ [GOSS/${phase_label}] Failed to copy audit content to ${ip}${NC}"
+        echo -e "${RED}   $step3${NC}"
         return 1
     fi
     echo -e "${GREEN}   ✅ Audit content copied${NC}"
 
-    # ── Debug: Check what actually landed on target ───────
-    echo -e "${CYAN}   [DEBUG] Checking remote file structure...${NC}"
-    local debug_result
-    debug_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
-        -a "Get-ChildItem -Path ${GOSS_REMOTE_DIR} -Recurse | Select-Object FullName | Format-List" \
+    # ── Debug: Read CIS.yml to see required vars ──────────
+    echo -e "${CYAN}   [DEBUG] Reading CIS.yml vars file...${NC}"
+    local cis_yml_content
+    cis_yml_content=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
+        -a "Get-Content '${GOSS_REMOTE_DIR}\\content\\CIS.yml' -Raw" \
         2>&1)
-    echo -e "${YELLOW}=== Remote file listing ===${NC}"
-    echo "$debug_result"
-    echo -e "${YELLOW}=== End listing ===${NC}"
+    echo -e "${YELLOW}=== CIS.yml contents ===${NC}"
+    echo "$cis_yml_content"
+    echo -e "${YELLOW}=== End CIS.yml ===${NC}"
 
     # ── Step 4: Run prereqs + goss directly ──────────────
     echo -e "${CYAN}   [4/5] Running prereqs + GOSS directly...${NC}"
@@ -296,7 +294,6 @@ run_goss_windows_audit() {
             \$auditdir = '${GOSS_REMOTE_DIR}\\content'; \
             \$gossbin = '${GOSS_REMOTE_DIR}\\goss.exe'; \
             \$outfile = '${GOSS_REMOTE_DIR}\\result.json'; \
-            \$epoch = [int](Get-Date -UFormat '%s'); \
             \$auditpol_file = '${GOSS_REMOTE_DIR}\\auditpol_results.txt'; \
             \$secedit_file = '${GOSS_REMOTE_DIR}\\secpol.cfg'; \
             Write-Host 'Running auditpol...'; \
