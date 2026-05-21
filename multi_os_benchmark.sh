@@ -124,17 +124,17 @@ remediate_windows_host() {
     local tag_scope_l1
     case "$ver" in
         2019) role_name="ansible-lockdown.windows_2019_cis"
-              role_install_target="ansible-lockdown.windows_2019_cis"
-              playbook_file="window-default-cis/cis_remediate_2019.yml"
-              tag_scope_l1="level1-memberserver" ;;
+          role_install_target="ansible-lockdown.windows_2019_cis,3.0.0"
+          playbook_file="window-default-cis/cis_remediate_2019.yml"
+          tag_scope_l1="level1-memberserver" ;;
         2022) role_name="ansible-lockdown.windows_2022_cis"
-              role_install_target="ansible-lockdown.windows_2022_cis"
-              playbook_file="window-default-cis/cis_remediate_2022.yml"
-              tag_scope_l1="level1-memberserver" ;;
+          role_install_target="ansible-lockdown.windows_2022_cis,3.0.0"
+          playbook_file="window-default-cis/cis_remediate_2022.yml"
+          tag_scope_l1="level1-memberserver" ;;
         2025) role_name="Windows-2025-CIS"
-              role_install_target="git+https://github.com/ansible-lockdown/Windows-2025-CIS.git"
-              playbook_file="window-default-cis/cis_remediate_2025.yml"
-              tag_scope_l1="level1-memberserver" ;;
+          role_install_target="git+https://github.com/ansible-lockdown/Windows-2025-CIS.git"
+          playbook_file="window-default-cis/cis_remediate_2025.yml"
+          tag_scope_l1="level1-memberserver" ;;
         10)   role_name="ansible-lockdown.windows_10_cis"
               role_install_target="ansible-lockdown.windows_10_cis"
               playbook_file="window-default-cis/cis_remediate_win10.yml"
