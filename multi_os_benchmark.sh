@@ -299,14 +299,29 @@ run_goss_windows_audit() {
 
     # ── Step 5: Fetch result JSON from target ─────────────
     echo -e "${CYAN}   [5/5] Fetching result file...${NC}"
-    ansible -i inventory.ini "${ip}" -m ansible.windows.win_fetch \
-        -a "src=${GOSS_REMOTE_DIR}\\result.json dest=${out_file} flat=yes" \
-        2>&1 | grep -v "^$" || true
 
-    if [ -s "${out_file}" ]; then
+    # Read file content directly via win_shell then save locally
+    local file_content
+    file_content=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
+        -a "Get-Content -Path ${GOSS_REMOTE_DIR}\\result.json -Raw" \
+        2>&1 | grep -v "^172\." | grep -v "^$" | grep -v "SUCCESS\|CHANGED\|FAILED\|rc=")
+
+    if [ -n "$file_content" ]; then
+        echo "$file_content" > "${out_file}"
         echo -e "${GREEN}✅ [GOSS/${phase_label}/Win${ver}] ${ip} scan complete → ${out_file}${NC}"
     else
-        echo -e "${RED}❌ [GOSS/${phase_label}/Win${ver}] Result file empty or missing: ${out_file}${NC}"
+        # Fallback: use ansible slurp module
+        local slurp_result
+        slurp_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
+            -a "[Convert]::ToBase64String([IO.File]::ReadAllBytes('${GOSS_REMOTE_DIR}\\result.json'))" \
+            2>&1 | grep -v "^172\." | grep -v "SUCCESS\|CHANGED\|rc=")
+
+        if [ -n "$slurp_result" ]; then
+            echo "$slurp_result" | base64 -d > "${out_file}" 2>/dev/null
+            echo -e "${GREEN}✅ [GOSS/${phase_label}/Win${ver}] ${ip} scan complete (base64) → ${out_file}${NC}"
+        else
+            echo -e "${RED}❌ [GOSS/${phase_label}/Win${ver}] Result file empty or missing: ${out_file}${NC}"
+        fi
     fi
 
     # ── Cleanup remote artifacts ──────────────────────────
