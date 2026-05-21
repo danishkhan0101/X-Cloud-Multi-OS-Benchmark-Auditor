@@ -153,7 +153,6 @@ remediate_windows_host() {
 
     # Install matching role (force-refresh to catch upstream updates)
     echo -e "${CYAN}📦 [Win/${ver}] Installing ${role_name} (from ${role_install_target})...${NC}"
-    ansible-galaxy role install -f "$role_install_target,3.0.0" --ignore-errors
 
     # Build tag list — Level 2 includes Level 1
     local tags
@@ -245,8 +244,11 @@ run_goss_windows_audit() {
     # Run GOSS on the target — capture output
     local raw_result
     raw_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
-        -a "cd ${GOSS_REMOTE_DIR}\\content; ..\\goss.exe --gossfile goss.yml validate --format ${GOSS_OUTPUT_FORMAT}" \
-        2>/dev/null)
+    -a "cd ${GOSS_REMOTE_DIR}\\content; ..\\goss.exe --gossfile goss.yml validate --format ${GOSS_OUTPUT_FORMAT}" \
+    -v \
+    2>&1)
+    echo "=== GOSS DEBUG ===" 
+    echo "$raw_result"
     local rc=$?
 
     # Extract the JSON from ansible output and save locally
