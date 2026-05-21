@@ -240,9 +240,15 @@ jobs:
           # Install ansible.windows collection
           ansible-galaxy collection install ansible.windows
 
-          # Clone GOSS CIS audit repo
+          # Clone GOSS audit repos at runtime
           git clone --depth=1 https://github.com/ansible-lockdown/Windows-2019-CIS-Audit.git \
-              window-default-cis/Windows-2019-CIS-Audit || true
+              window-default-cis/Windows-2019-CIS-Audit
+          
+          # Verify it cloned correctly
+          echo "=== Audit repo contents ==="
+          ls -la window-default-cis/Windows-2019-CIS-Audit/
+          echo "=== Checking goss.yml ==="
+          ls window-default-cis/Windows-2019-CIS-Audit/goss.yml && echo "✅ goss.yml found" || echo "❌ goss.yml missing"
 
           # Install CIS roles via requirements file
           cat > /tmp/requirements.yml << 'EOF'
