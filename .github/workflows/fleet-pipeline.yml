@@ -236,12 +236,25 @@ jobs:
           python3 -m pip install --user --upgrade pip
           python3 -m pip install --user 'ansible>=10.0.0,<11.0.0' pywinrm requests
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-          
-          # Install ansible.windows collection for win_copy / win_shell / win_file
+
+          # Install ansible.windows collection
           ansible-galaxy collection install ansible.windows
 
-          # Clone CIS audit repos (check which versions you need)
-          git clone --depth=1 https://github.com/ansible-lockdown/Windows-2019-CIS-Audit.git || true
+          # Clone GOSS CIS audit repo
+          git clone --depth=1 https://github.com/ansible-lockdown/Windows-2019-CIS-Audit.git \
+              window-default-cis/Windows-2019-CIS-Audit || true
+
+          # Install CIS roles via requirements file
+          cat > /tmp/requirements.yml << 'EOF'
+          roles:
+            - name: ansible-lockdown.windows_2019_cis
+              src: ansible-lockdown.windows_2019_cis
+              version: "3.0.0"
+            - name: ansible-lockdown.windows_2022_cis
+              src: ansible-lockdown.windows_2022_cis
+              version: "3.0.0"
+          EOF
+          ansible-galaxy role install -r /tmp/requirements.yml --ignore-errors
 
       - name: 🚀 Execute Fleet Commander
         env:
