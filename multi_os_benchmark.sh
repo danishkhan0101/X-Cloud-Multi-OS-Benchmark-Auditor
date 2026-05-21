@@ -227,46 +227,85 @@ run_goss_windows_audit() {
         return 1
     fi
 
+    # Verify goss.yml exists in audit repo before pushing
+    if [ ! -f "${audit_repo}/goss/goss.yml" ]; then
+        echo -e "${RED}❌ [GOSS/${phase_label}] goss.yml missing in ${audit_repo}/goss/${NC}"
+        echo -e "${YELLOW}   Repo structure may be different — checking...${NC}"
+        echo -e "${YELLOW}   Contents: $(ls ${audit_repo}/ 2>/dev/null)${NC}"
+        return 1
+    fi
+
     local out_file="goss_${phase_label}_CIS_L${lvl}_WIN_${ip}.json"
 
     echo -e "${GREEN}🔎 [GOSS/${phase_label}/Win${ver}/CIS L${lvl}] Scanning ${ip}...${NC}"
 
-    # Push goss binary + audit content via Ansible (inventory already has WinRM creds)
-    ansible -i inventory.ini "${ip}" -m ansible.windows.win_file \
-        -a "path=${GOSS_REMOTE_DIR} state=directory" > /dev/null 2>&1
+    # ── Step 1: Create remote directory ──────────────────
+    echo -e "${CYAN}   [1/4] Creating remote directory...${NC}"
+    local step1
+    step1=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_file \
+        -a "path=${GOSS_REMOTE_DIR} state=directory" 2>&1)
+    if echo "$step1" | grep -q "FAILED"; then
+        echo -e "${RED}❌ [GOSS/${phase_label}] Failed to create remote dir on ${ip}${NC}"
+        echo -e "${RED}   $step1${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}   ✅ Remote dir ready${NC}"
 
-    ansible -i inventory.ini "${ip}" -m ansible.windows.win_copy \
-        -a "src=${GOSS_BINARY_LOCAL} dest=${GOSS_REMOTE_DIR}\\goss.exe" > /dev/null 2>&1
+    # ── Step 2: Copy goss binary ──────────────────────────
+    echo -e "${CYAN}   [2/4] Copying goss binary...${NC}"
+    local step2
+    step2=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_copy \
+        -a "src=${GOSS_BINARY_LOCAL} dest=${GOSS_REMOTE_DIR}\\goss.exe" 2>&1)
+    if echo "$step2" | grep -q "FAILED"; then
+        echo -e "${RED}❌ [GOSS/${phase_label}] Failed to copy goss.exe to ${ip}${NC}"
+        echo -e "${RED}   $step2${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}   ✅ goss.exe copied${NC}"
 
-    ansible -i inventory.ini "${ip}" -m ansible.windows.win_copy \
-        -a "src=${audit_repo}/goss/ dest=${GOSS_REMOTE_DIR}\\content\\" > /dev/null 2>&1
+    # ── Step 3: Copy audit content ────────────────────────
+    echo -e "${CYAN}   [3/4] Copying audit content...${NC}"
+    local step3
+    step3=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_copy \
+        -a "src=${audit_repo}/goss/ dest=${GOSS_REMOTE_DIR}\\content" 2>&1)
+    if echo "$step3" | grep -q "FAILED"; then
+        echo -e "${RED}❌ [GOSS/${phase_label}] Failed to copy audit content to ${ip}${NC}"
+        echo -e "${RED}   $step3${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}   ✅ Audit content copied${NC}"
 
-    # Run GOSS on the target — capture output
+    # ── Step 4: Run GOSS on target ────────────────────────
+    echo -e "${CYAN}   [4/4] Running GOSS scan on target...${NC}"
     local raw_result
     raw_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
-    -a "cd ${GOSS_REMOTE_DIR}\\content; ..\\goss.exe --gossfile goss.yml validate --format ${GOSS_OUTPUT_FORMAT}" \
-    -v \
-    2>&1)
-    echo "=== GOSS DEBUG ===" 
-    echo "$raw_result"
+        -a "${GOSS_REMOTE_DIR}\\goss.exe --gossfile ${GOSS_REMOTE_DIR}\\content\\goss.yml validate --format ${GOSS_OUTPUT_FORMAT}" \
+        2>&1)
     local rc=$?
 
-    # Extract the JSON from ansible output and save locally
-    echo "$raw_result" | grep -oP '(?<=stdout: ).*' | head -1 > "${out_file}" 2>/dev/null
-    # Fallback: grab stdout_lines block
-    if [ ! -s "${out_file}" ]; then
+    # ── Extract JSON output ───────────────────────────────
+    # Try to get clean JSON from stdout field
+    local json_output
+    json_output=$(echo "$raw_result" | grep -oP '"stdout": "\K[^"]*' | head -1)
+
+    if [ -n "$json_output" ]; then
+        # Unescape the JSON string
+        echo -e "$json_output" > "${out_file}"
+    else
+        # Fallback: dump raw ansible output
         echo "$raw_result" > "${out_file}"
     fi
 
     if [ $rc -eq 0 ] || [ $rc -eq 1 ]; then
-        # rc=0 all pass, rc=1 some failures — both are valid scan completions
+        # rc=0 → all pass, rc=1 → some failures — both are valid scan completions
         echo -e "${GREEN}✅ [GOSS/${phase_label}/Win${ver}] ${ip} scan complete → ${out_file}${NC}"
     else
         echo -e "${RED}❌ [GOSS/${phase_label}/Win${ver}] ${ip} failed (rc=${rc})${NC}"
-        return 1
+        echo -e "${YELLOW}   Raw output: ${raw_result}${NC}"
+        # Don't return 1 — save whatever output we got
     fi
 
-    # Cleanup remote artifacts
+    # ── Cleanup remote artifacts ──────────────────────────
     ansible -i inventory.ini "${ip}" -m ansible.windows.win_file \
         -a "path=${GOSS_REMOTE_DIR} state=absent" > /dev/null 2>&1 || true
 
