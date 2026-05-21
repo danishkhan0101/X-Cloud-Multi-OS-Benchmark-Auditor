@@ -41,7 +41,7 @@ WIN_CIS_BENCHMARK="${WIN_CIS_DIR}/window-baseline"
 # GOSS AUDIT CONFIG (replaces cinc-auditor for Win CIS)
 # ======================================================
 GOSS_BINARY_LOCAL="./window-default-cis/goss-windows-amd64.exe"  
-GOSS_AUDIT_REPO_2019="./Windows-2019-CIS-Audit"
+GOSS_AUDIT_REPO_2019="./window-default-cis/Windows-2019-CIS-Audit"
 GOSS_REMOTE_DIR="C:\\goss_audit"
 GOSS_OUTPUT_FORMAT="json"   # json | junit | documentation
 
