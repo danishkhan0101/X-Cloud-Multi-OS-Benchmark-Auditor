@@ -276,17 +276,9 @@ run_goss_windows_audit() {
     fi
     echo -e "${GREEN}   ✅ Audit content copied${NC}"
 
-    # ── Debug: Read CIS.yml to see required vars ──────────
-    echo -e "${CYAN}   [DEBUG] Reading CIS.yml vars file...${NC}"
-    local cis_yml_content
-    cis_yml_content=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
-        -a "Get-Content '${GOSS_REMOTE_DIR}\\content\\CIS.yml' -Raw" \
-        2>&1)
-    echo -e "${YELLOW}=== CIS.yml contents ===${NC}"
-    echo "$cis_yml_content"
-    echo -e "${YELLOW}=== End CIS.yml ===${NC}"
-
     # ── Step 4: Run prereqs + goss directly ──────────────
+    # CIS.yml is missing benchmark_type and other required keys
+    # We prepend them to create a merged vars file before running goss
     echo -e "${CYAN}   [4/5] Running prereqs + GOSS directly...${NC}"
     local raw_result
     raw_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
@@ -300,10 +292,19 @@ run_goss_windows_audit() {
             auditpol.exe /get /category:'*' | Out-File -FilePath \$auditpol_file -Encoding utf8; \
             Write-Host 'Running secedit...'; \
             secedit /export /cfg \$secedit_file | Out-Null; \
+            Write-Host 'Building merged vars...'; \
+            \$extraVars = 'benchmark_type: CIS' + \"\`n\" + \
+                'benchmark_version: 1.2.1' + \"\`n\" + \
+                'machine_uuid: audit-runner' + \"\`n\" + \
+                \"auditresult_file: '\$auditpol_file'\`n\" + \
+                \"secedit_file: '\$secedit_file'\`n\" + \
+                \"gpresult_file: '\$auditpol_file'\`n\"; \
+            \$mergedVars = \$extraVars + (Get-Content \$auditdir\\CIS.yml -Raw); \
+            \$mergedVars | Out-File -FilePath \$auditdir\\merged_vars.yml -Encoding utf8; \
             Write-Host 'Running goss...'; \
             \$env:AUDITPOL_FILE = \$auditpol_file; \
             \$env:SECEDIT_FILE = \$secedit_file; \
-            & \$gossbin --vars \$auditdir\\CIS.yml -g \$auditdir\\goss.yml validate --format json 2>&1 | Out-File -FilePath \$outfile -Encoding utf8; \
+            & \$gossbin --vars \$auditdir\\merged_vars.yml -g \$auditdir\\goss.yml validate --format json 2>&1 | Out-File -FilePath \$outfile -Encoding utf8; \
             Write-Host 'Done - Exit code:' \$LASTEXITCODE" \
         2>&1)
     local rc=$?
