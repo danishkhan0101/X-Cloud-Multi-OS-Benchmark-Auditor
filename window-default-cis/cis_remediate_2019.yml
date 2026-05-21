@@ -1,0 +1,32 @@
+---
+- name: Remediate Windows Server 2019 - CIS Benchmark
+  hosts: windows_nodes
+  gather_facts: true
+  environment:
+    ANSIBLE_ALLOW_BROKEN_CONDITIONALS: "True"
+  vars:
+    ansible_winrm_read_timeout_sec: 180
+    ansible_winrm_operation_timeout_sec: 120
+    # ─────────────────────────────────────────────
+    # NOTE: 2019 role prefix is win19cis_ 
+    # (NOT win2019cis_ or win22cis_)
+    # ─────────────────────────────────────────────
+    win19cis_section1: true   # Account Policies
+    win19cis_section2: true   # Local Policies
+    win19cis_section5: true   # System Services
+    win19cis_section9: true   # Windows Firewall
+    win19cis_section17: true  # Advanced Audit Policy
+    win19cis_section18: true  # Administrative Templates (Computer)
+    win19cis_section19: true  # Administrative Templates (User)
+
+    win19cis_section_member_server: true
+    win19cis_section_domain_controller: false
+
+    win19cis_rule_2_3_10_5: false
+    win19cis_rule_2_3_10_8: false
+
+    win19cis_audit_log_dir: 'C:\Windows\Temp\AuditLogs'
+    win19cis_audit_output_dir: 'C:\Windows\Temp\AuditLogs'
+
+  roles:
+    - role: ansible-lockdown.windows_2019_cis
