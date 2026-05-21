@@ -289,27 +289,25 @@ run_goss_windows_audit() {
     echo -e "${YELLOW}=== End listing ===${NC}"
 
     # ── Step 4: Run prereqs + goss directly ──────────────
-    # run_audit.ps1 hardcodes Windows-2016-CIS-Audit path internally
-    # so we replicate what it does manually instead
     echo -e "${CYAN}   [4/5] Running prereqs + GOSS directly...${NC}"
     local raw_result
     raw_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
-        -a "powershell.exe -ExecutionPolicy Bypass -Command \
+        -a "\$env:GOSS_USE_ALPHA='1'; \
             \$auditdir = '${GOSS_REMOTE_DIR}\\content'; \
             \$gossbin = '${GOSS_REMOTE_DIR}\\goss.exe'; \
             \$outfile = '${GOSS_REMOTE_DIR}\\result.json'; \
-            \$epoch = [int][double]::Parse((Get-Date -UFormat %s)); \
-            \$auditpol_file = \"${GOSS_REMOTE_DIR}\\auditpol_\$epoch.txt\"; \
-            \$secedit_file = \"${GOSS_REMOTE_DIR}\\secpol_\$epoch.cfg\"; \
+            \$epoch = [int](Get-Date -UFormat '%s'); \
+            \$auditpol_file = '${GOSS_REMOTE_DIR}\\auditpol_results.txt'; \
+            \$secedit_file = '${GOSS_REMOTE_DIR}\\secpol.cfg'; \
             Write-Host 'Running auditpol...'; \
-            auditpol.exe /get /category:* | Out-File -FilePath \$auditpol_file -Encoding utf8; \
+            auditpol.exe /get /category:'*' | Out-File -FilePath \$auditpol_file -Encoding utf8; \
             Write-Host 'Running secedit...'; \
             secedit /export /cfg \$secedit_file | Out-Null; \
             Write-Host 'Running goss...'; \
             \$env:AUDITPOL_FILE = \$auditpol_file; \
             \$env:SECEDIT_FILE = \$secedit_file; \
-            & \$gossbin --vars \$auditdir\\CIS.yml -g \$auditdir\\goss.yml validate --format json | Out-File -FilePath \$outfile -Encoding utf8; \
-            Write-Host 'Done'" \
+            & \$gossbin --vars \$auditdir\\CIS.yml -g \$auditdir\\goss.yml validate --format json 2>&1 | Out-File -FilePath \$outfile -Encoding utf8; \
+            Write-Host 'Done - Exit code:' \$LASTEXITCODE" \
         2>&1)
     local rc=$?
     echo -e "${YELLOW}=== Step 4 raw output ===${NC}"
