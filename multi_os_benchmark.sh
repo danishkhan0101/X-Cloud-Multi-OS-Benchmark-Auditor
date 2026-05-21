@@ -237,8 +237,6 @@ run_goss_windows_audit() {
     fi
 
     local out_file="goss_${phase_label}_CIS_L${lvl}_WIN_${ip}.json"
-    local audit_folder
-    audit_folder=$(basename "${audit_repo}")
 
     echo -e "${GREEN}🔎 [GOSS/${phase_label}/Win${ver}/CIS L${lvl}] Scanning ${ip}...${NC}"
 
