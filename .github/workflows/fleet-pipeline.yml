@@ -249,15 +249,7 @@ jobs:
           ls window-default-cis/Windows-2019-CIS-Audit/goss.yml && echo "✅ goss.yml found" || echo "❌ goss.yml missing"
 
           # Install CIS remediation roles
-          cat > /tmp/requirements.yml << 'EOF'
-roles:
-  - name: ansible-lockdown.windows_2019_cis
-    src: ansible-lockdown.windows_2019_cis
-    version: "3.0.0"
-  - name: ansible-lockdown.windows_2022_cis
-    src: ansible-lockdown.windows_2022_cis
-    version: "3.0.0"
-EOF
+          python3 -c "import yaml; data={'roles':[{'name':'ansible-lockdown.windows_2019_cis','src':'ansible-lockdown.windows_2019_cis','version':'3.0.0'},{'name':'ansible-lockdown.windows_2022_cis','src':'ansible-lockdown.windows_2022_cis','version':'3.0.0'}]}; open('/tmp/requirements.yml','w').write(yaml.dump(data))"
           ansible-galaxy role install -r /tmp/requirements.yml --ignore-errors
 
           # Fix ansible.cfg roles_path so playbook finds installed roles
