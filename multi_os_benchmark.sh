@@ -153,7 +153,7 @@ remediate_windows_host() {
 
     # Install matching role (force-refresh to catch upstream updates)
     echo -e "${CYAN}📦 [Win/${ver}] Installing ${role_name} (from ${role_install_target})...${NC}"
-    ansible-galaxy role install -f "$role_install_target"
+    ansible-galaxy role install -f "$role_install_target,3.0.0" --ignore-errors
 
     # Build tag list — Level 2 includes Level 1
     local tags
