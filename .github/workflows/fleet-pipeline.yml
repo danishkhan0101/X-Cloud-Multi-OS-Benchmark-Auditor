@@ -243,6 +243,8 @@ jobs:
           # Clone CIS audit repos (check which versions you need)
           git clone --depth=1 https://github.com/ansible-lockdown/Windows-2019-CIS-Audit.git || true
 
+          cp window-default-cis/cis_remediate.yml window-default-cis/cis_remediate_2019.yml
+
       - name: 🚀 Execute Fleet Commander
         env:
           AZURE_RG_NAME: ${{ vars.AZURE_RG_NAME }}
