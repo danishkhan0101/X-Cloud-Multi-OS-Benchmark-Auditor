@@ -277,8 +277,6 @@ run_goss_windows_audit() {
     echo -e "${GREEN}   ✅ Audit content copied${NC}"
 
     # ── Step 4: Run via run_audit.ps1 ────────────────────
-    # run_audit.ps1 pre-generates auditpol + secedit reports
-    # that goss.yml depends on — must use this, not goss directly
     echo -e "${CYAN}   [4/5] Running GOSS audit via run_audit.ps1...${NC}"
     local raw_result
     raw_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
@@ -289,6 +287,9 @@ run_goss_windows_audit() {
             -outfile ${GOSS_REMOTE_DIR}\\result.json" \
         2>&1)
     local rc=$?
+    echo -e "${YELLOW}=== Step 4 raw output ===${NC}"
+    echo "$raw_result"
+    echo -e "${YELLOW}=== End Step 4 (rc=${rc}) ===${NC}"
 
     if [ $rc -eq 0 ] || [ $rc -eq 1 ]; then
         echo -e "${GREEN}   ✅ Audit script completed (rc=${rc})${NC}"
