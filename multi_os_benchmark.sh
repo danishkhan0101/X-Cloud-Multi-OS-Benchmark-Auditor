@@ -288,16 +288,28 @@ run_goss_windows_audit() {
     echo "$debug_result"
     echo -e "${YELLOW}=== End listing ===${NC}"
 
-    # ── Step 4: Run via run_audit.ps1 ────────────────────
-    echo -e "${CYAN}   [4/5] Running GOSS audit via run_audit.ps1...${NC}"
+    # ── Step 4: Run prereqs + goss directly ──────────────
+    # run_audit.ps1 hardcodes Windows-2016-CIS-Audit path internally
+    # so we replicate what it does manually instead
+    echo -e "${CYAN}   [4/5] Running prereqs + GOSS directly...${NC}"
     local raw_result
     raw_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
-        -a "powershell.exe -ExecutionPolicy Bypass \
-            -File ${GOSS_REMOTE_DIR}\\content\\run_audit.ps1 \
-            -auditbin ${GOSS_REMOTE_DIR}\\goss.exe \
-            -auditdir ${GOSS_REMOTE_DIR}\\content \
-            -varsfile ${GOSS_REMOTE_DIR}\\content\\CIS.yml \
-            -outfile ${GOSS_REMOTE_DIR}\\result.json" \
+        -a "powershell.exe -ExecutionPolicy Bypass -Command \
+            \$auditdir = '${GOSS_REMOTE_DIR}\\content'; \
+            \$gossbin = '${GOSS_REMOTE_DIR}\\goss.exe'; \
+            \$outfile = '${GOSS_REMOTE_DIR}\\result.json'; \
+            \$epoch = [int][double]::Parse((Get-Date -UFormat %s)); \
+            \$auditpol_file = \"${GOSS_REMOTE_DIR}\\auditpol_\$epoch.txt\"; \
+            \$secedit_file = \"${GOSS_REMOTE_DIR}\\secpol_\$epoch.cfg\"; \
+            Write-Host 'Running auditpol...'; \
+            auditpol.exe /get /category:* | Out-File -FilePath \$auditpol_file -Encoding utf8; \
+            Write-Host 'Running secedit...'; \
+            secedit /export /cfg \$secedit_file | Out-Null; \
+            Write-Host 'Running goss...'; \
+            \$env:AUDITPOL_FILE = \$auditpol_file; \
+            \$env:SECEDIT_FILE = \$secedit_file; \
+            & \$gossbin --vars \$auditdir\\CIS.yml -g \$auditdir\\goss.yml validate --format json | Out-File -FilePath \$outfile -Encoding utf8; \
+            Write-Host 'Done'" \
         2>&1)
     local rc=$?
     echo -e "${YELLOW}=== Step 4 raw output ===${NC}"
@@ -305,9 +317,9 @@ run_goss_windows_audit() {
     echo -e "${YELLOW}=== End Step 4 (rc=${rc}) ===${NC}"
 
     if [ $rc -eq 0 ] || [ $rc -eq 1 ]; then
-        echo -e "${GREEN}   ✅ Audit script completed (rc=${rc})${NC}"
+        echo -e "${GREEN}   ✅ Audit completed (rc=${rc})${NC}"
     else
-        echo -e "${RED}❌ [GOSS/${phase_label}/Win${ver}] run_audit.ps1 failed (rc=${rc})${NC}"
+        echo -e "${RED}❌ [GOSS/${phase_label}/Win${ver}] Audit failed (rc=${rc})${NC}"
     fi
 
     # ── Step 5: Fetch result JSON from target ─────────────
