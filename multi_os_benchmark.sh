@@ -37,6 +37,14 @@ WIN_CIS_BENCHMARK="${WIN_CIS_DIR}/window-baseline"
 # NOTE: WIN_CIS_PLAYBOOK is no longer used directly — remediate_windows_host()
 # selects the per-version playbook (cis_remediate_2022.yml / _2025.yml / etc).
 
+# ======================================================
+# GOSS AUDIT CONFIG (replaces cinc-auditor for Win CIS)
+# ======================================================
+GOSS_BINARY_LOCAL="./window-default-cis/goss-windows-amd64.exe"  
+GOSS_AUDIT_REPO_2019="./Windows-2019-CIS-Audit"
+GOSS_REMOTE_DIR="C:\\goss_audit"
+GOSS_OUTPUT_FORMAT="json"   # json | junit | documentation
+
 export INSPEC_SSH_CONFIG_NO_SECURE=true
 BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; MAGENTA='\033[0;35m'; NC='\033[0m'
 clear
@@ -174,6 +182,93 @@ remediate_windows_host() {
         echo -e "${RED}❌ [Win/${ver}] ${ip} failed (rc=${rc})${NC}"
     fi
     return $rc
+}
+
+# ======================================================
+# HELPER: run_goss_windows_audit
+# ------------------------------------------------------
+# Detects version → selects correct audit repo
+# Pushes goss.exe + YAML → runs on target → fetches result
+# Args: $1=ip, $2=cis_level_num (1 or 2), $3=phase_label
+# ======================================================
+run_goss_windows_audit() {
+    local ip="$1"
+    local lvl="$2"
+    local phase_label="$3"
+
+    # Detect version to pick the right audit repo
+    local ver
+    ver=$(detect_windows_version "$ip")
+    if [ "$ver" == "unknown" ]; then
+        echo -e "${RED}❌ [GOSS/${phase_label}] Cannot detect OS version on ${ip} — skipping${NC}"
+        return 1
+    fi
+
+    # Select audit repo based on version
+    local audit_repo
+    case "$ver" in
+        2019) audit_repo="$GOSS_AUDIT_REPO_2019" ;;
+        2022) audit_repo="$GOSS_AUDIT_REPO_2022" ;;
+        2025) audit_repo="$GOSS_AUDIT_REPO_2025" ;;
+        *)
+            echo -e "${RED}❌ [GOSS/${phase_label}] No GOSS audit repo mapped for Windows ${ver} on ${ip}${NC}"
+            return 1
+            ;;
+    esac
+
+    if [ ! -d "$audit_repo" ]; then
+        echo -e "${RED}❌ [GOSS/${phase_label}] Audit repo missing: ${audit_repo}${NC}"
+        echo -e "${YELLOW}   Clone it: git clone https://github.com/ansible-lockdown/Windows-${ver}-CIS-Audit.git${NC}"
+        return 1
+    fi
+
+    if [ ! -f "$GOSS_BINARY_LOCAL" ]; then
+        echo -e "${RED}❌ [GOSS/${phase_label}] goss binary missing: ${GOSS_BINARY_LOCAL}${NC}"
+        echo -e "${YELLOW}   Download from: https://github.com/goss-org/goss/releases${NC}"
+        return 1
+    fi
+
+    local out_file="goss_${phase_label}_CIS_L${lvl}_WIN_${ip}.json"
+
+    echo -e "${GREEN}🔎 [GOSS/${phase_label}/Win${ver}/CIS L${lvl}] Scanning ${ip}...${NC}"
+
+    # Push goss binary + audit content via Ansible (inventory already has WinRM creds)
+    ansible -i inventory.ini "${ip}" -m ansible.windows.win_file \
+        -a "path=${GOSS_REMOTE_DIR} state=directory" > /dev/null 2>&1
+
+    ansible -i inventory.ini "${ip}" -m ansible.windows.win_copy \
+        -a "src=${GOSS_BINARY_LOCAL} dest=${GOSS_REMOTE_DIR}\\goss.exe" > /dev/null 2>&1
+
+    ansible -i inventory.ini "${ip}" -m ansible.windows.win_copy \
+        -a "src=${audit_repo}/goss/ dest=${GOSS_REMOTE_DIR}\\content\\" > /dev/null 2>&1
+
+    # Run GOSS on the target — capture output
+    local raw_result
+    raw_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
+        -a "cd ${GOSS_REMOTE_DIR}\\content; ..\\goss.exe --gossfile goss.yml validate --format ${GOSS_OUTPUT_FORMAT}" \
+        2>/dev/null)
+    local rc=$?
+
+    # Extract the JSON from ansible output and save locally
+    echo "$raw_result" | grep -oP '(?<=stdout: ).*' | head -1 > "${out_file}" 2>/dev/null
+    # Fallback: grab stdout_lines block
+    if [ ! -s "${out_file}" ]; then
+        echo "$raw_result" > "${out_file}"
+    fi
+
+    if [ $rc -eq 0 ] || [ $rc -eq 1 ]; then
+        # rc=0 all pass, rc=1 some failures — both are valid scan completions
+        echo -e "${GREEN}✅ [GOSS/${phase_label}/Win${ver}] ${ip} scan complete → ${out_file}${NC}"
+    else
+        echo -e "${RED}❌ [GOSS/${phase_label}/Win${ver}] ${ip} failed (rc=${rc})${NC}"
+        return 1
+    fi
+
+    # Cleanup remote artifacts
+    ansible -i inventory.ini "${ip}" -m ansible.windows.win_file \
+        -a "path=${GOSS_REMOTE_DIR} state=absent" > /dev/null 2>&1 || true
+
+    return 0
 }
 
 # ======================================================
@@ -734,29 +829,13 @@ run_phase_1() {
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
                     if [ "$RUN_CIS" == true ]; then
-                        echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP...${NC}"
-                        cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} \
-                            --user="${AUDIT_USER}" --password="${AUDIT_PASS}" \
-                            --input level_1_or_2=$WIN_INSPEC_LVL \
-                            --reporter json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
-                        rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 100 ] || [ $rc -eq 101 ]; then
-                            echo -e "${GREEN}✅ [Phase1/Win/CIS] $IP scan complete (rc=$rc)${NC}"
-                        else
-                            echo -e "${RED}❌ [Phase1/Win/CIS] cinc-auditor failed on $IP (rc=$rc)${NC}"
-                        fi
+                        run_goss_windows_audit "$IP" "$WIN_INSPEC_LVL" "before"
                     fi
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         cinc-auditor exec "$WIN_CUSTOM_BENCHMARK" -t winrm://${IP} \
                             --user="${AUDIT_USER}" --password="${AUDIT_PASS}" \
                             --reporter json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json
-                        rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 100 ] || [ $rc -eq 101 ]; then
-                            echo -e "${GREEN}✅ [Phase1/Win/${ORG_PREFIX^^}] $IP scan complete (rc=$rc)${NC}"
-                        else
-                            echo -e "${RED}❌ [Phase1/Win/${ORG_PREFIX^^}] cinc-auditor failed on $IP (rc=$rc)${NC}"
-                        fi
                     fi
                 ) &
             done
@@ -1143,35 +1222,19 @@ run_phase_4() {
         fi
     fi
 
-    # -------------------- WINDOWS VERIFY --------------------
+   # -------------------- WINDOWS VERIFY --------------------
     if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
                     if [ "$RUN_CIS" == true ]; then
-                        echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
-                        cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} \
-                            --user="${AUDIT_USER}" --password="${AUDIT_PASS}" \
-                            --input level_1_or_2=$WIN_INSPEC_LVL \
-                            --reporter json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
-                        rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 100 ] || [ $rc -eq 101 ]; then
-                            echo -e "${GREEN}✅ [Phase4/Win/CIS] $IP verify complete (rc=$rc)${NC}"
-                        else
-                            echo -e "${RED}❌ [Phase4/Win/CIS] cinc-auditor failed on $IP (rc=$rc)${NC}"
-                        fi
+                        run_goss_windows_audit "$IP" "$WIN_INSPEC_LVL" "after"
                     fi
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         cinc-auditor exec "$WIN_CUSTOM_BENCHMARK" -t winrm://${IP} \
                             --user="${AUDIT_USER}" --password="${AUDIT_PASS}" \
                             --reporter json:heimdall_after_${ORG_PREFIX^^}_WIN_${IP}.json
-                        rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 100 ] || [ $rc -eq 101 ]; then
-                            echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] $IP verify complete (rc=$rc)${NC}"
-                        else
-                            echo -e "${RED}❌ [Phase4/Win/${ORG_PREFIX^^}] cinc-auditor failed on $IP (rc=$rc)${NC}"
-                        fi
                     fi
                 ) &
             done
