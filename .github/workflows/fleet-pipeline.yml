@@ -75,7 +75,7 @@ jobs:
     outputs:
       matrix: ${{ steps.build-matrix.outputs.matrix }}
       safe_mode: ${{ steps.safety-gate.outputs.safe_mode }}
-      os_matrix: ${{ steps.discover-vms.outputs.os_matrix }} 
+      os_matrix: ${{ steps.discover-vms.outputs.os_matrix }}
     steps:
       - name: '🛡️ Safety Gate: Blast Radius Control'
         id: safety-gate
@@ -136,13 +136,13 @@ jobs:
               name_lower="${name,,}"
               
               if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
-                  if [[ "$offer_lower" == *"rocky"* ]] || [[ "$name_lower" == *"rocky"* ]]; then 
+                  if [[ "$offer_lower" == *"rocky"* ]] || [[ "$name_lower" == *"rocky"* ]]; then
                       HAS_ROCKY=true; NODE_OS="Rocky"
-                  elif [[ "$offer_lower" == *"alma"* ]] || [[ "$name_lower" == *"alma"* ]]; then 
+                  elif [[ "$offer_lower" == *"alma"* ]] || [[ "$name_lower" == *"alma"* ]]; then
                       HAS_ALMA=true; NODE_OS="Alma"
-                  elif [[ "$offer_lower" == *"rhel"* ]] || [[ "$name_lower" == *"rhel"* ]]; then 
+                  elif [[ "$offer_lower" == *"rhel"* ]] || [[ "$name_lower" == *"rhel"* ]]; then
                       HAS_RHEL=true; NODE_OS="RHEL"
-                  else 
+                  else
                       HAS_UBUNTU=true; NODE_OS="Ubuntu"
                   fi
               elif [[ "$os" == *"Windows"* ]]; then
@@ -171,14 +171,14 @@ jobs:
   # 🚀 JOB 2: THE 2D EXECUTION ENGINE (Profiles x Operating Systems)
   run-audit:
     needs: prepare-queue
-    if: ${{ needs.prepare-queue.outputs.os_matrix != '[]' }} 
+    if: ${{ needs.prepare-queue.outputs.os_matrix != '[]' }}
     runs-on: ubuntu-latest
     
     strategy:
-      fail-fast: false      
+      fail-fast: false
       matrix:
         target: ${{ fromJSON(needs.prepare-queue.outputs.matrix) }}
-        os_target: ${{ fromJSON(needs.prepare-queue.outputs.os_matrix) }} 
+        os_target: ${{ fromJSON(needs.prepare-queue.outputs.os_matrix) }}
 
     env:
       TARGET_ENV: ${{ github.event.inputs.environment_tag || 'Prod' }}
@@ -222,14 +222,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y sshpass
           python3 -m pip install --user --upgrade pip
-          # Pin ansible to a version compatible with ansible-lockdown roles.
-          # ansible 10.x ships ansible-core 2.17.x, which the role supports.
-          # See: https://github.com/ansible-lockdown/Windows-2022-CIS
           python3 -m pip install --user 'ansible>=10.0.0,<11.0.0'
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           sudo sh -c 'printf "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null\n" >> /etc/ssh/ssh_config'
           export ANSIBLE_HOST_KEY_CHECKING=False
- 
+
       - name: 🛠️ Install Windows Tools (GOSS + Ansible WinRM)
         if: matrix.os_target.os == 'Windows'
         run: |
@@ -240,27 +237,39 @@ jobs:
           # Install ansible.windows collection
           ansible-galaxy collection install ansible.windows
 
-          # Clone GOSS audit repos at runtime
+          # Clone GOSS CIS audit repos at runtime
           git clone --depth=1 https://github.com/ansible-lockdown/Windows-2019-CIS-Audit.git \
-              window-default-cis/Windows-2019-CIS-Audit
-          
-          # Verify it cloned correctly
+              window-default-cis/Windows-2019-CIS-Audit || true
+          git clone --depth=1 https://github.com/ansible-lockdown/Windows-2022-CIS-Audit.git \
+              window-default-cis/Windows-2022-CIS-Audit || true
+
+          # Verify clone
           echo "=== Audit repo contents ==="
-          ls -la window-default-cis/Windows-2019-CIS-Audit/
-          echo "=== Checking goss.yml ==="
+          ls -la window-default-cis/Windows-2019-CIS-Audit/ || echo "❌ 2019 clone failed"
           ls window-default-cis/Windows-2019-CIS-Audit/goss.yml && echo "✅ goss.yml found" || echo "❌ goss.yml missing"
 
-          # Install CIS roles via requirements file
+          # Install CIS remediation roles
           cat > /tmp/requirements.yml << 'EOF'
-          roles:
-            - name: ansible-lockdown.windows_2019_cis
-              src: ansible-lockdown.windows_2019_cis
-              version: "3.0.0"
-            - name: ansible-lockdown.windows_2022_cis
-              src: ansible-lockdown.windows_2022_cis
-              version: "3.0.0"
-          EOF
+roles:
+  - name: ansible-lockdown.windows_2019_cis
+    src: ansible-lockdown.windows_2019_cis
+    version: "3.0.0"
+  - name: ansible-lockdown.windows_2022_cis
+    src: ansible-lockdown.windows_2022_cis
+    version: "3.0.0"
+EOF
           ansible-galaxy role install -r /tmp/requirements.yml --ignore-errors
+
+          # Fix ansible.cfg roles_path so playbook finds installed roles
+          sed -i 's|^roles_path.*|roles_path = /home/runner/.ansible/roles:~/.ansible/roles:./roles|' \
+              window-default-cis/ansible.cfg || true
+
+      - name: 🔍 Debug CIS.yml
+        if: matrix.os_target.os == 'Windows'
+        run: |
+          echo "=== CIS.yml for 2019 ==="
+          cat window-default-cis/Windows-2019-CIS-Audit/CIS.yml
+          echo "=== End CIS.yml ==="
 
       - name: 🚀 Execute Fleet Commander
         env:
@@ -283,12 +292,16 @@ jobs:
           
           if [ "$PROFILE" == "all" ]; then
             echo "🚀 FULL AUDIT MODE: Executing comprehensive internal scan loop..."
-            ./multi_os_benchmark.sh --headless --profile "all" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP" --target-os "$TARGET_OS" --target-ip "$TARGET_IP"
+            ./multi_os_benchmark.sh --headless --profile "all" --mode "$MODE" \
+              --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" \
+              --cleanup "$CLEANUP" --target-os "$TARGET_OS" --target-ip "$TARGET_IP"
           else
             echo "📋 Running Single Profile: $PROFILE"
-            ./multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP" --target-os "$TARGET_OS" --target-ip "$TARGET_IP"
+            ./multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" \
+              --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" \
+              --cleanup "$CLEANUP" --target-os "$TARGET_OS" --target-ip "$TARGET_IP"
           fi
-      
+
       - name: 🔎 Verify Report Generation
         id: check_reports
         run: |
@@ -312,7 +325,7 @@ jobs:
 
   # 🏆 JOB 3: THE FAN-IN (Gathers all matrix data into one Zip & Release)
   publish-release:
-    needs: run-audit 
+    needs: run-audit
     if: always() && needs.run-audit.result == 'success'
     runs-on: ubuntu-latest
     
@@ -342,7 +355,6 @@ jobs:
         run: |
           cd consolidated-evidence
           
-          # Move files
           find . -maxdepth 2 -type f \( -name "*.html" -o -name "*.json" \) | while read file; do
             BASENAME=$(basename "$file")
             IP_ADDR=$(echo "$BASENAME" | grep -oE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
@@ -360,7 +372,6 @@ jobs:
             mv "$file" "$IP_ADDR/$PROFILE_DIR/"
           done
           
-          # Delete temp folders AFTER loop
           find . -maxdepth 1 -type d -name "temp-reports-*" -exec rm -rf {} +
 
       - name: 📦 Zip the Evidence Package
