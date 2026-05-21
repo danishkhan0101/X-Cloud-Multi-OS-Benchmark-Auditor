@@ -230,15 +230,18 @@ jobs:
           sudo sh -c 'printf "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null\n" >> /etc/ssh/ssh_config'
           export ANSIBLE_HOST_KEY_CHECKING=False
  
-      - name: 🛠️ Install Windows Tools (Cinc Auditor & WinRM)
+      - name: 🛠️ Install Windows Tools (GOSS + Ansible WinRM)
         if: matrix.os_target.os == 'Windows'
         run: |
           python3 -m pip install --user --upgrade pip
-          # Same Ansible pin for Windows runs — ansible-lockdown role needs it
           python3 -m pip install --user 'ansible>=10.0.0,<11.0.0' pywinrm requests
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-          curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-auditor
-          sudo ln -sf /usr/bin/cinc-auditor /usr/bin/inspec
+          
+          # Install ansible.windows collection for win_copy / win_shell / win_file
+          ansible-galaxy collection install ansible.windows
+
+          # Clone CIS audit repos (check which versions you need)
+          git clone --depth=1 https://github.com/ansible-lockdown/Windows-2019-CIS-Audit.git || true
 
       - name: 🚀 Execute Fleet Commander
         env:
