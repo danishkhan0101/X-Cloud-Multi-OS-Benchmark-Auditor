@@ -267,8 +267,9 @@ run_goss_windows_audit() {
     # ── Step 3: Copy audit content (repo root → remote content dir) ──
     echo -e "${CYAN}   [3/5] Copying audit content...${NC}"
     local step3
+    # Copy audit content — src trailing slash copies CONTENTS not the folder itself
     step3=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_copy \
-        -a "src=${audit_repo}/ dest=${GOSS_REMOTE_DIR}\\content" 2>&1)
+        -a "src=${audit_repo}/ dest=${GOSS_REMOTE_DIR}\\content\\" 2>&1)
     if echo "$step3" | grep -q "FAILED"; then
         echo -e "${RED}❌ [GOSS/${phase_label}] Failed to copy audit content to ${ip}${NC}"
         echo -e "${RED}   $step3${NC}"
@@ -278,12 +279,17 @@ run_goss_windows_audit() {
 
     # ── Step 4: Run via run_audit.ps1 ────────────────────
     echo -e "${CYAN}   [4/5] Running GOSS audit via run_audit.ps1...${NC}"
+
+    # Get just the folder name from audit_repo path
+    local audit_folder
+    audit_folder=$(basename "${audit_repo}")
+
     local raw_result
     raw_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
         -a "powershell.exe -ExecutionPolicy Bypass \
-            -File ${GOSS_REMOTE_DIR}\\content\\run_audit.ps1 \
+            -File ${GOSS_REMOTE_DIR}\\content\\${audit_folder}\\run_audit.ps1 \
             -auditbin ${GOSS_REMOTE_DIR}\\goss.exe \
-            -auditdir ${GOSS_REMOTE_DIR}\\content \
+            -auditdir ${GOSS_REMOTE_DIR}\\content\\${audit_folder} \
             -outfile ${GOSS_REMOTE_DIR}\\result.json" \
         2>&1)
     local rc=$?
