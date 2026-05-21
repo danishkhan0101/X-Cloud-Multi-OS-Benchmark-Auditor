@@ -293,9 +293,10 @@ run_goss_windows_audit() {
     local raw_result
     raw_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
         -a "powershell.exe -ExecutionPolicy Bypass \
-            -File ${GOSS_REMOTE_DIR}\\content\\${audit_folder}\\run_audit.ps1 \
+            -File ${GOSS_REMOTE_DIR}\\content\\run_audit.ps1 \
             -auditbin ${GOSS_REMOTE_DIR}\\goss.exe \
-            -auditdir ${GOSS_REMOTE_DIR}\\content\\${audit_folder} \
+            -auditdir ${GOSS_REMOTE_DIR}\\content \
+            -varsfile ${GOSS_REMOTE_DIR}\\content\\CIS.yml \
             -outfile ${GOSS_REMOTE_DIR}\\result.json" \
         2>&1)
     local rc=$?
