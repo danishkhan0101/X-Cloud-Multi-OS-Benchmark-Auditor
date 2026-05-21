@@ -222,7 +222,7 @@ run_goss_windows_audit() {
         return 1
     fi
 
-    # Check goss.yml exists at ROOT of repo (not in goss/ subfolder)
+    # Check goss.yml exists at ROOT of repo
     if [ ! -f "${audit_repo}/goss.yml" ]; then
         echo -e "${RED}❌ [GOSS/${phase_label}] goss.yml missing in ${audit_repo}/${NC}"
         echo -e "${YELLOW}   Contents: $(ls ${audit_repo}/ 2>/dev/null)${NC}"
@@ -237,6 +237,8 @@ run_goss_windows_audit() {
     fi
 
     local out_file="goss_${phase_label}_CIS_L${lvl}_WIN_${ip}.json"
+    local audit_folder
+    audit_folder=$(basename "${audit_repo}")
 
     echo -e "${GREEN}🔎 [GOSS/${phase_label}/Win${ver}/CIS L${lvl}] Scanning ${ip}...${NC}"
 
@@ -264,26 +266,32 @@ run_goss_windows_audit() {
     fi
     echo -e "${GREEN}   ✅ goss.exe copied${NC}"
 
-    # ── Step 3: Copy audit content (repo root → remote content dir) ──
+    # ── Step 3: Copy audit content ────────────────────────
     echo -e "${CYAN}   [3/5] Copying audit content...${NC}"
     local step3
-    # Copy audit content — src trailing slash copies CONTENTS not the folder itself
     step3=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_copy \
-        -a "src=${audit_repo}/ dest=${GOSS_REMOTE_DIR}\\content\\" 2>&1)
+        -a "src=${audit_repo}/ dest=${GOSS_REMOTE_DIR}\\content" 2>&1)
+    echo -e "${YELLOW}=== Step 3 win_copy output ===${NC}"
+    echo "$step3"
+    echo -e "${YELLOW}=== End Step 3 ===${NC}"
     if echo "$step3" | grep -q "FAILED"; then
         echo -e "${RED}❌ [GOSS/${phase_label}] Failed to copy audit content to ${ip}${NC}"
-        echo -e "${RED}   $step3${NC}"
         return 1
     fi
     echo -e "${GREEN}   ✅ Audit content copied${NC}"
 
+    # ── Debug: Check what actually landed on target ───────
+    echo -e "${CYAN}   [DEBUG] Checking remote file structure...${NC}"
+    local debug_result
+    debug_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
+        -a "Get-ChildItem -Path ${GOSS_REMOTE_DIR} -Recurse | Select-Object FullName | Format-List" \
+        2>&1)
+    echo -e "${YELLOW}=== Remote file listing ===${NC}"
+    echo "$debug_result"
+    echo -e "${YELLOW}=== End listing ===${NC}"
+
     # ── Step 4: Run via run_audit.ps1 ────────────────────
     echo -e "${CYAN}   [4/5] Running GOSS audit via run_audit.ps1...${NC}"
-
-    # Get just the folder name from audit_repo path
-    local audit_folder
-    audit_folder=$(basename "${audit_repo}")
-
     local raw_result
     raw_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
         -a "powershell.exe -ExecutionPolicy Bypass \
@@ -301,13 +309,10 @@ run_goss_windows_audit() {
         echo -e "${GREEN}   ✅ Audit script completed (rc=${rc})${NC}"
     else
         echo -e "${RED}❌ [GOSS/${phase_label}/Win${ver}] run_audit.ps1 failed (rc=${rc})${NC}"
-        echo -e "${YELLOW}   Raw output: ${raw_result}${NC}"
     fi
 
     # ── Step 5: Fetch result JSON from target ─────────────
     echo -e "${CYAN}   [5/5] Fetching result file...${NC}"
-
-    # Read file content directly via win_shell then save locally
     local file_content
     file_content=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
         -a "Get-Content -Path ${GOSS_REMOTE_DIR}\\result.json -Raw" \
@@ -317,7 +322,7 @@ run_goss_windows_audit() {
         echo "$file_content" > "${out_file}"
         echo -e "${GREEN}✅ [GOSS/${phase_label}/Win${ver}] ${ip} scan complete → ${out_file}${NC}"
     else
-        # Fallback: use ansible slurp module
+        # Fallback: base64 encode on target, decode locally
         local slurp_result
         slurp_result=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
             -a "[Convert]::ToBase64String([IO.File]::ReadAllBytes('${GOSS_REMOTE_DIR}\\result.json'))" \
@@ -337,7 +342,6 @@ run_goss_windows_audit() {
 
     return 0
 }
-
 # ======================================================
 # HELPER: fetch_remote_report (bulletproof 3-step fetch)
 # ------------------------------------------------------
