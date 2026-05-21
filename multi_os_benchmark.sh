@@ -293,14 +293,17 @@ run_goss_windows_audit() {
             Write-Host 'Running secedit...'; \
             secedit /export /cfg \$secedit_file | Out-Null; \
             Write-Host 'Building merged vars...'; \
-            \$extraVars = 'benchmark_type: CIS' + \"\`n\" + \
-                'benchmark_version: 1.2.1' + \"\`n\" + \
-                'machine_uuid: audit-runner' + \"\`n\" + \
-                \"auditresult_file: '\$auditpol_file'\`n\" + \
-                \"secedit_file: '\$secedit_file'\`n\" + \
-                \"gpresult_file: '\$auditpol_file'\`n\"; \
-            \$mergedVars = \$extraVars + (Get-Content \$auditdir\\CIS.yml -Raw); \
-            \$mergedVars | Out-File -FilePath \$auditdir\\merged_vars.yml -Encoding utf8; \
+            \$lines = @(); \
+            \$lines += 'benchmark_type: CIS'; \
+            \$lines += 'benchmark_version: 1.2.1'; \
+            \$lines += 'machine_uuid: audit-runner'; \
+            \$lines += \"auditresult_file: C:\\\\goss_audit\\\\auditpol_results.txt\"; \
+            \$lines += \"secedit_file: C:\\\\goss_audit\\\\secpol.cfg\"; \
+            \$lines += \"gpresult_file: C:\\\\goss_audit\\\\auditpol_results.txt\"; \
+            \$lines += ''; \
+            \$existing = Get-Content \$auditdir\\CIS.yml; \
+            \$lines += \$existing; \
+            [System.IO.File]::WriteAllLines(\$auditdir + '\\merged_vars.yml', \$lines, [System.Text.UTF8Encoding]::new(\$false)); \
             Write-Host 'Running goss...'; \
             \$env:AUDITPOL_FILE = \$auditpol_file; \
             \$env:SECEDIT_FILE = \$secedit_file; \
