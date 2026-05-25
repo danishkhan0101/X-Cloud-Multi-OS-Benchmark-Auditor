@@ -54,11 +54,6 @@ REMEDIATION_SSH_OPTS="-n -o BatchMode=yes -o StrictHostKeyChecking=no \
 # ======================================================
 # SCAP OFFLINE CACHE (runner-side, internet-facing)
 # ======================================================
-# All packages are fetched HERE on the runner (internet OK),
-# then SCP'd to VMs over port 22 (SSH — never blocked by CIS).
-# The VM never touches the internet. This survives month-over-month
-# re-audits of permanently hardened VMs.
-# ======================================================
 SCAP_CACHE_DIR="/tmp/scap_runner_cache"
 
 # ======================================================
@@ -66,21 +61,32 @@ SCAP_CACHE_DIR="/tmp/scap_runner_cache"
 # ------------------------------------------------------
 # Called ONCE at startup. Runner has internet; VMs do not.
 # Cache persists across runs — re-download only when empty.
-# Maps:
-#   rhel9   → Rocky 9  (same RPMs)
-#   alma10  → Rocky 10 (same RPMs)
+#
+# Windows-only runs skip this entirely — cinc-auditor runs
+# from the runner, so no SCAP packages are needed on the VM.
+#
+# RPM packages are fetched via Docker containers (runner is
+# Ubuntu-based; dnf is not available natively).
 # ======================================================
 prefetch_scap_packages() {
     echo -e "\n${BOLD}${CYAN}📦 PHASE 0.2b: SCAP PACKAGE PRE-FETCH (runner has internet)${NC}"
+
+    # ---- Windows-only run: no SCAP packages needed ----
+    if [[ "${H_TARGET_OS,,}" == "windows" ]]; then
+        echo -e "${GREEN}   ✅ Windows-only run — cinc-auditor runs from runner. No SCAP packages needed. Skipping.${NC}"
+        return 0
+    fi
+
     mkdir -p "${SCAP_CACHE_DIR}"/{rhel9,rhel10,alma9,alma10,rocky9,rocky10,ubuntu2204,ubuntu2404}
 
-    # ---- RHEL 9 / Rocky 9 (same RPMs) ----
+    # ---- RHEL 9 / Rocky 9 (same RPMs, use Rocky9 container) ----
     if [ ! "$(ls -A "${SCAP_CACHE_DIR}/rhel9/"*.rpm 2>/dev/null)" ]; then
         echo -e "${CYAN}   Fetching RHEL9 packages...${NC}"
-        sudo dnf download --resolve \
-            --releasever=9 \
-            --destdir="${SCAP_CACHE_DIR}/rhel9" \
-            openscap-scanner scap-security-guide 2>/dev/null \
+        docker run --rm \
+            -v "${SCAP_CACHE_DIR}/rhel9:/output" \
+            rockylinux:9 \
+            bash -c "dnf install -y --downloadonly --downloaddir=/output \
+                     openscap-scanner scap-security-guide 2>/dev/null" \
             && echo -e "${GREEN}   ✅ RHEL9 cached${NC}" \
             || echo -e "${RED}   ❌ RHEL9 fetch failed${NC}"
         cp -f "${SCAP_CACHE_DIR}"/rhel9/*.rpm \
@@ -89,54 +95,58 @@ prefetch_scap_packages() {
         echo -e "${GREEN}   ✅ RHEL9/Rocky9 cache valid — skipping download${NC}"
     fi
 
-    # ---- RHEL 10 ----
+    # ---- RHEL 10 / Rocky 10 (use Rocky10 container) ----
     if [ ! "$(ls -A "${SCAP_CACHE_DIR}/rhel10/"*.rpm 2>/dev/null)" ]; then
         echo -e "${CYAN}   Fetching RHEL10 packages...${NC}"
-        sudo dnf download --resolve \
-            --releasever=10 \
-            --destdir="${SCAP_CACHE_DIR}/rhel10" \
-            openscap-scanner scap-security-guide 2>/dev/null \
+        docker run --rm \
+            -v "${SCAP_CACHE_DIR}/rhel10:/output" \
+            rockylinux:10 \
+            bash -c "dnf install -y --downloadonly --downloaddir=/output \
+                     openscap-scanner scap-security-guide 2>/dev/null" \
             && echo -e "${GREEN}   ✅ RHEL10 cached${NC}" \
             || echo -e "${RED}   ❌ RHEL10 fetch failed${NC}"
+        cp -f "${SCAP_CACHE_DIR}"/rhel10/*.rpm \
+              "${SCAP_CACHE_DIR}/rocky10/" 2>/dev/null || true
     else
-        echo -e "${GREEN}   ✅ RHEL10 cache valid — skipping download${NC}"
+        echo -e "${GREEN}   ✅ RHEL10/Rocky10 cache valid — skipping download${NC}"
     fi
 
     # ---- AlmaLinux 9 ----
     if [ ! "$(ls -A "${SCAP_CACHE_DIR}/alma9/"*.rpm 2>/dev/null)" ]; then
         echo -e "${CYAN}   Fetching Alma9 packages...${NC}"
-        sudo dnf download --resolve \
-            --releasever=9 \
-            --destdir="${SCAP_CACHE_DIR}/alma9" \
-            openscap-scanner scap-security-guide 2>/dev/null \
+        docker run --rm \
+            -v "${SCAP_CACHE_DIR}/alma9:/output" \
+            almalinux:9 \
+            bash -c "dnf install -y --downloadonly --downloaddir=/output \
+                     openscap-scanner scap-security-guide 2>/dev/null" \
             && echo -e "${GREEN}   ✅ Alma9 cached${NC}" \
             || echo -e "${RED}   ❌ Alma9 fetch failed${NC}"
     else
         echo -e "${GREEN}   ✅ Alma9 cache valid — skipping download${NC}"
     fi
 
-    # ---- AlmaLinux 10 / Rocky 10 (same RPMs) ----
+    # ---- AlmaLinux 10 ----
     if [ ! "$(ls -A "${SCAP_CACHE_DIR}/alma10/"*.rpm 2>/dev/null)" ]; then
         echo -e "${CYAN}   Fetching Alma10 packages...${NC}"
-        sudo dnf download --resolve \
-            --repofrompath "alma10,https://repo.almalinux.org/almalinux/10/AppStream/x86_64/os/" \
-            --destdir="${SCAP_CACHE_DIR}/alma10" \
-            openscap-scanner scap-security-guide 2>/dev/null \
+        docker run --rm \
+            -v "${SCAP_CACHE_DIR}/alma10:/output" \
+            almalinux:10 \
+            bash -c "dnf install -y --downloadonly --downloaddir=/output \
+                     openscap-scanner scap-security-guide 2>/dev/null" \
             && echo -e "${GREEN}   ✅ Alma10 cached${NC}" \
             || echo -e "${RED}   ❌ Alma10 fetch failed${NC}"
-        cp -f "${SCAP_CACHE_DIR}"/alma10/*.rpm \
-              "${SCAP_CACHE_DIR}/rocky10/" 2>/dev/null || true
     else
-        echo -e "${GREEN}   ✅ Alma10/Rocky10 cache valid — skipping download${NC}"
+        echo -e "${GREEN}   ✅ Alma10 cache valid — skipping download${NC}"
     fi
 
     # ---- Ubuntu 22.04 ----
     if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2204/"*.deb 2>/dev/null)" ]; then
         echo -e "${CYAN}   Fetching Ubuntu2204 packages...${NC}"
-        apt-get install --download-only -y \
+        sudo apt-get install --download-only -y \
             openscap-scanner ssg-base 2>/dev/null
-        find /var/cache/apt/archives/ \
+        sudo find /var/cache/apt/archives/ \
             \( -name "openscap*.deb" -o -name "ssg*.deb" \) \
+            -not -path "*/partial/*" \
             | xargs -I{} cp {} "${SCAP_CACHE_DIR}/ubuntu2204/" 2>/dev/null
         echo -e "${GREEN}   ✅ Ubuntu2204 cached${NC}"
     else
@@ -146,30 +156,36 @@ prefetch_scap_packages() {
     # ---- Ubuntu 24.04 ----
     if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2404/"*.deb 2>/dev/null)" ]; then
         echo -e "${CYAN}   Fetching Ubuntu2404 packages...${NC}"
-        apt-get install --download-only -y \
+        sudo apt-get install --download-only -y \
             openscap-scanner ssg-base 2>/dev/null
-        find /var/cache/apt/archives/ \
+        sudo find /var/cache/apt/archives/ \
             \( -name "openscap*.deb" -o -name "ssg*.deb" \) \
+            -not -path "*/partial/*" \
             | xargs -I{} cp {} "${SCAP_CACHE_DIR}/ubuntu2404/" 2>/dev/null
         echo -e "${GREEN}   ✅ Ubuntu2404 cached${NC}"
     else
         echo -e "${GREEN}   ✅ Ubuntu2404 cache valid — skipping download${NC}"
     fi
 
-    echo -e "${GREEN}✅ [Phase 0.2b] All SCAP packages ready on runner. No VM internet needed.${NC}"
+    # ---- Validate all required caches are populated ----
+    local failed=0
+    for d in rhel9 rhel10 alma9 alma10 rocky9 rocky10 ubuntu2204 ubuntu2404; do
+        if [ ! "$(ls -A "${SCAP_CACHE_DIR}/${d}/" 2>/dev/null)" ]; then
+            echo -e "${RED}⚠️  [Phase 0.2b] Cache still empty: ${d}${NC}"
+            failed=1
+        fi
+    done
+
+    if [ $failed -eq 0 ]; then
+        echo -e "${GREEN}✅ [Phase 0.2b] All SCAP packages ready on runner. No VM internet needed.${NC}"
+    else
+        echo -e "${RED}❌ [Phase 0.2b] Some caches failed — check errors above.${NC}"
+    fi
+    return $failed
 }
 
 # ======================================================
 # TOOL GUARD: ensure_linux_scap_tools (OFFLINE via SCP)
-# ------------------------------------------------------
-# 1. Fast path  — if oscap + content already installed, return 0
-# 2. Detect distro+ver on VM → map to cache key
-# 3. SCP packages from runner cache (port 22, never blocked)
-# 4. Install offline (--disablerepo='*' / dpkg -i)
-# 5. Verify install; leave no temp files
-#
-# CIS blocks port 80/443 — it never blocks port 22.
-# SCP always works. VM never needs internet. ✅
 # ======================================================
 ensure_linux_scap_tools() {
     local user="$1"
@@ -247,8 +263,6 @@ ensure_linux_scap_tools() {
         install_cmd="sudo dpkg -i /tmp/scap_offline/*.deb 2>/dev/null; \
                      sudo apt-get install -f -y --no-download 2>/dev/null || true"
     else
-        # rpm -Uvh --nodeps: no repo contact at all
-        # dnf fallback with --disablerepo='*': also no internet
         install_cmd="sudo rpm -Uvh --nodeps /tmp/scap_offline/*.rpm 2>/dev/null || \
                      sudo dnf install -y --disablerepo='*' \
                          /tmp/scap_offline/*.rpm 2>/dev/null"
@@ -261,7 +275,6 @@ ensure_linux_scap_tools() {
         ${install_cmd}
         rm -rf /tmp/scap_offline
 
-        # Verify the install succeeded
         command -v oscap >/dev/null 2>&1 \
             || { echo '[FATAL] oscap missing after offline install'; exit 10; }
         ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1 \
@@ -765,8 +778,7 @@ done
 
 RUN_ORG=false; RUN_CIS=false
 if [ "$HEADLESS" == true ]; then
-    if [[ "${H_PROFILE,,}" == "tm"  ]] || \
-       [[ "${H_PROFILE,,}" == "${ORG_PREFIX,,}" ]] || \
+    if [[ "${H_PROFILE,,}" == "${ORG_PREFIX,,}" ]] || \
        [[ "${H_PROFILE,,}" == "both" ]]; then RUN_ORG=true; fi
     if [[ "${H_PROFILE,,}" == "cis" ]] || \
        [[ "${H_PROFILE,,}" == "both" ]]; then RUN_CIS=true; fi
@@ -1295,8 +1307,6 @@ run_phase_4() {
                     wait_for_ssh "$IP" "$UBUNTU_USER" || {
                         echo -e "${RED}❌ [Phase4/Ubuntu] SSH unreachable: $IP${NC}"; exit 1
                     }
-                    # ensure_linux_scap_tools fast-paths if already installed;
-                    # if cleanup removed them, SCP re-installs offline ✅
                     ensure_linux_scap_tools "$UBUNTU_USER" "$IP" "apt" || {
                         echo -e "${RED}❌ [Phase4/Ubuntu] Tools missing on $IP${NC}"; exit 1
                     }
@@ -1541,17 +1551,11 @@ run_phase_4() {
 # ======================================================
 # PHASE 5: CLEANUP — tools removed, VM stays HARDENED
 # ======================================================
-# Uses rpm -e --nodeps and dpkg -r intentionally:
-#   • No internet on VM (CIS blocks port 80/443)
-#   • dnf/apt remove would try repo metadata — this avoids it
-#   • Next month: Phase 0.2b SCP flow re-installs cleanly ✅
-# ======================================================
 run_cleanup() {
     echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP${NC}"
     echo -e "${CYAN}   VM stays HARDENED — only SCAP tools + audit user are removed.${NC}"
     echo -e "${CYAN}   Next audit: Phase 0.2b SCP re-installs offline. ✅${NC}\n"
 
-    # Offline-safe removal commands (no repo access needed)
     local remove_rpm="sudo rpm -e --nodeps \
         openscap openscap-scanner scap-security-guide 2>/dev/null || true; \
         sudo rm -rf /tmp/scap_offline /tmp/report_*.html"
@@ -1669,15 +1673,12 @@ run_cleanup() {
 execute_phases() {
     case $H_MODE in
         scan)
-            # Phase 0.2b already called before this; just scan
             run_phase_1
             ;;
         remediate)
             run_remediation
             ;;
         full)
-            # Full monthly pipeline:
-            #   0.2b → 1 (scan before) → 2/3 (remediate) → 4 (verify after) → [5 cleanup]
             run_phase_1
             run_remediation
             run_phase_4
@@ -1698,8 +1699,7 @@ if [ "$HEADLESS" == true ]; then
         echo -e "${MAGENTA} 🔄 FULL FLEET AUDIT (L1 + L2 + ${ORG_PREFIX^^})...${NC}"
         echo -e "${MAGENTA}======================================================${NC}"
 
-        # Phase 0.2b — fetch once, reuse for all three passes
-        prefetch_scap_packages
+        prefetch_scap_packages || { echo -e "${RED}❌ Aborting — package prefetch failed.${NC}"; exit 1; }
 
         export CIS_LEVEL="Level 1"; export RUN_CIS=true; export RUN_ORG=false
         update_profile_vars
@@ -1717,8 +1717,7 @@ if [ "$HEADLESS" == true ]; then
         execute_phases
 
     else
-        # Single-profile run — still prefetch first
-        prefetch_scap_packages
+        prefetch_scap_packages || { echo -e "${RED}❌ Aborting — package prefetch failed.${NC}"; exit 1; }
         update_profile_vars
         execute_phases
     fi
@@ -1733,9 +1732,7 @@ fi
 # ======================================================
 # INTERACTIVE MODE
 # ======================================================
-
-# Prefetch packages once at startup before any menu choice
-prefetch_scap_packages
+prefetch_scap_packages || { echo -e "${RED}❌ Aborting — package prefetch failed.${NC}"; exit 1; }
 
 while true; do
     update_profile_vars
