@@ -167,12 +167,19 @@
         enabled: no
       ignore_errors: true
 
-    # BUG 3 FIX: Use package module — idempotent, distro-agnostic,
-    # not fooled by a pre-existing service file from another package.
-    - name: LSB27 - Install iptables-services
+    - name: LSB27 - Install iptables-services (try primary name)
       ansible.builtin.package:
         name: iptables-services
         state: present
+      ignore_errors: yes
+      register: iptables_svc_install
+
+    - name: LSB27 - Fallback install iptables-nft-services if primary failed
+      ansible.builtin.package:
+        name: iptables-nft-services
+        state: present
+      when: iptables_svc_install is failed
+      ignore_errors: yes
 
     # ── Loopback (must be first or localhost breaks everything) ──────────────
     - name: Safety - Allow loopback INPUT
