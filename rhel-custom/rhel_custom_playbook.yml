@@ -278,11 +278,7 @@
         - FORWARD
         - OUTPUT
 
-    # BUG 1 FIX: Start the service BEFORE saving rules.
-    # iptables-save captures the LIVE kernel ruleset. If we save before
-    # the service start, we save the pre-ACCEPT state, and the node boots
-    # with pure DROP on all chains — locking everyone out permanently.
-    - name: LSB27 - Enable and start iptables service (async to survive OUTPUT DROP)
+    - name: LSB27 - Enable and start iptables service
       systemd:
         name: iptables
         state: restarted
@@ -295,10 +291,22 @@
         delay: 5
         timeout: 60
 
-    # BUG 1 FIX: Save AFTER the service is running and SSH is confirmed stable.
-    # This captures the complete live ruleset (all ACCEPT rules + DROP policies).
-    - name: LSB29 - Save iptables rules to /etc/sysconfig/iptables (persists across reboots)
+    - name: Safety - Wait for iptables service to fully start
+      shell: systemctl is-active iptables
+      register: iptables_status
+      until: iptables_status.stdout == "active"
+      retries: 10
+      delay: 3
+      changed_when: false
+
+    - name: LSB29 - Save iptables rules to /etc/sysconfig/iptables
       shell: iptables-save > /etc/sysconfig/iptables
+
+    - name: LSB29 - Verify the file contains DROP policies
+      shell: grep -c "DROP" /etc/sysconfig/iptables
+      register: drop_count
+      changed_when: false
+      failed_when: drop_count.stdout | int < 3
 
   handlers:
     - name: Restart SSH
