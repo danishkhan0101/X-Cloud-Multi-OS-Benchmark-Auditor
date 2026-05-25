@@ -284,7 +284,7 @@ ensure_linux_scap_tools() {
         "${user}@${ip}" "
         set -e
         ${install_cmd}
-        rm -rf /tmp/scap_offline
+        sudo rm -rf /tmp/scap_offline 2>/dev/null || true
 
         command -v oscap >/dev/null 2>&1 \
             || { echo '[FATAL] oscap missing after offline install'; exit 10; }
