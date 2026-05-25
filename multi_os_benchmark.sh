@@ -44,30 +44,246 @@ clear
 # ======================================================
 # REMEDIATION CONSTANTS (Layer 1 + Layer 2 hardening)
 # ======================================================
-# Per-host timeout for oscap --remediate. Tune per your slowest
-# CIS profile. Ubuntu Level 2 can take 30+ min on first run.
 REMEDIATION_TIMEOUT_SEC=1800   # 30 min
 
-# SSH options used for every remediation call.
-#  -o ControlMaster=no    → ignore the multiplex pool entirely
-#  -o ControlPath=none    → don't even try to reuse a socket
-#  -o ServerAliveInterval → send a keepalive every 15s
-#  -o ServerAliveCountMax → give up after 4 missed = 60s dead
-#  -o ConnectTimeout      → initial TCP connect fails fast
 REMEDIATION_SSH_OPTS="-n -o BatchMode=yes -o StrictHostKeyChecking=no \
     -o ControlMaster=no -o ControlPath=none \
     -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
     -o ConnectTimeout=10"
 
 # ======================================================
-# HELPER: detect_windows_version
+# SCAP OFFLINE CACHE (runner-side, internet-facing)
+# ======================================================
+# All packages are fetched HERE on the runner (internet OK),
+# then SCP'd to VMs over port 22 (SSH — never blocked by CIS).
+# The VM never touches the internet. This survives month-over-month
+# re-audits of permanently hardened VMs.
+# ======================================================
+SCAP_CACHE_DIR="/tmp/scap_runner_cache"
+
+# ======================================================
+# PHASE 0.2b: PRE-FETCH SCAP PACKAGES ON RUNNER
 # ------------------------------------------------------
-# Asks the target what version of Windows it is.
-# Returns: 2019 | 2022 | 2025 | 10 | 11 | unknown
+# Called ONCE at startup. Runner has internet; VMs do not.
+# Cache persists across runs — re-download only when empty.
+# Maps:
+#   rhel9   → Rocky 9  (same RPMs)
+#   alma10  → Rocky 10 (same RPMs)
+# ======================================================
+prefetch_scap_packages() {
+    echo -e "\n${BOLD}${CYAN}📦 PHASE 0.2b: SCAP PACKAGE PRE-FETCH (runner has internet)${NC}"
+    mkdir -p "${SCAP_CACHE_DIR}"/{rhel9,rhel10,alma9,alma10,rocky9,rocky10,ubuntu2204,ubuntu2404}
+
+    # ---- RHEL 9 / Rocky 9 (same RPMs) ----
+    if [ ! "$(ls -A "${SCAP_CACHE_DIR}/rhel9/"*.rpm 2>/dev/null)" ]; then
+        echo -e "${CYAN}   Fetching RHEL9 packages...${NC}"
+        sudo dnf download --resolve \
+            --releasever=9 \
+            --destdir="${SCAP_CACHE_DIR}/rhel9" \
+            openscap-scanner scap-security-guide 2>/dev/null \
+            && echo -e "${GREEN}   ✅ RHEL9 cached${NC}" \
+            || echo -e "${RED}   ❌ RHEL9 fetch failed${NC}"
+        cp -f "${SCAP_CACHE_DIR}"/rhel9/*.rpm \
+              "${SCAP_CACHE_DIR}/rocky9/" 2>/dev/null || true
+    else
+        echo -e "${GREEN}   ✅ RHEL9/Rocky9 cache valid — skipping download${NC}"
+    fi
+
+    # ---- RHEL 10 ----
+    if [ ! "$(ls -A "${SCAP_CACHE_DIR}/rhel10/"*.rpm 2>/dev/null)" ]; then
+        echo -e "${CYAN}   Fetching RHEL10 packages...${NC}"
+        sudo dnf download --resolve \
+            --releasever=10 \
+            --destdir="${SCAP_CACHE_DIR}/rhel10" \
+            openscap-scanner scap-security-guide 2>/dev/null \
+            && echo -e "${GREEN}   ✅ RHEL10 cached${NC}" \
+            || echo -e "${RED}   ❌ RHEL10 fetch failed${NC}"
+    else
+        echo -e "${GREEN}   ✅ RHEL10 cache valid — skipping download${NC}"
+    fi
+
+    # ---- AlmaLinux 9 ----
+    if [ ! "$(ls -A "${SCAP_CACHE_DIR}/alma9/"*.rpm 2>/dev/null)" ]; then
+        echo -e "${CYAN}   Fetching Alma9 packages...${NC}"
+        sudo dnf download --resolve \
+            --releasever=9 \
+            --destdir="${SCAP_CACHE_DIR}/alma9" \
+            openscap-scanner scap-security-guide 2>/dev/null \
+            && echo -e "${GREEN}   ✅ Alma9 cached${NC}" \
+            || echo -e "${RED}   ❌ Alma9 fetch failed${NC}"
+    else
+        echo -e "${GREEN}   ✅ Alma9 cache valid — skipping download${NC}"
+    fi
+
+    # ---- AlmaLinux 10 / Rocky 10 (same RPMs) ----
+    if [ ! "$(ls -A "${SCAP_CACHE_DIR}/alma10/"*.rpm 2>/dev/null)" ]; then
+        echo -e "${CYAN}   Fetching Alma10 packages...${NC}"
+        sudo dnf download --resolve \
+            --repofrompath "alma10,https://repo.almalinux.org/almalinux/10/AppStream/x86_64/os/" \
+            --destdir="${SCAP_CACHE_DIR}/alma10" \
+            openscap-scanner scap-security-guide 2>/dev/null \
+            && echo -e "${GREEN}   ✅ Alma10 cached${NC}" \
+            || echo -e "${RED}   ❌ Alma10 fetch failed${NC}"
+        cp -f "${SCAP_CACHE_DIR}"/alma10/*.rpm \
+              "${SCAP_CACHE_DIR}/rocky10/" 2>/dev/null || true
+    else
+        echo -e "${GREEN}   ✅ Alma10/Rocky10 cache valid — skipping download${NC}"
+    fi
+
+    # ---- Ubuntu 22.04 ----
+    if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2204/"*.deb 2>/dev/null)" ]; then
+        echo -e "${CYAN}   Fetching Ubuntu2204 packages...${NC}"
+        apt-get install --download-only -y \
+            openscap-scanner ssg-base 2>/dev/null
+        find /var/cache/apt/archives/ \
+            \( -name "openscap*.deb" -o -name "ssg*.deb" \) \
+            | xargs -I{} cp {} "${SCAP_CACHE_DIR}/ubuntu2204/" 2>/dev/null
+        echo -e "${GREEN}   ✅ Ubuntu2204 cached${NC}"
+    else
+        echo -e "${GREEN}   ✅ Ubuntu2204 cache valid — skipping download${NC}"
+    fi
+
+    # ---- Ubuntu 24.04 ----
+    if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2404/"*.deb 2>/dev/null)" ]; then
+        echo -e "${CYAN}   Fetching Ubuntu2404 packages...${NC}"
+        apt-get install --download-only -y \
+            openscap-scanner ssg-base 2>/dev/null
+        find /var/cache/apt/archives/ \
+            \( -name "openscap*.deb" -o -name "ssg*.deb" \) \
+            | xargs -I{} cp {} "${SCAP_CACHE_DIR}/ubuntu2404/" 2>/dev/null
+        echo -e "${GREEN}   ✅ Ubuntu2404 cached${NC}"
+    else
+        echo -e "${GREEN}   ✅ Ubuntu2404 cache valid — skipping download${NC}"
+    fi
+
+    echo -e "${GREEN}✅ [Phase 0.2b] All SCAP packages ready on runner. No VM internet needed.${NC}"
+}
+
+# ======================================================
+# TOOL GUARD: ensure_linux_scap_tools (OFFLINE via SCP)
+# ------------------------------------------------------
+# 1. Fast path  — if oscap + content already installed, return 0
+# 2. Detect distro+ver on VM → map to cache key
+# 3. SCP packages from runner cache (port 22, never blocked)
+# 4. Install offline (--disablerepo='*' / dpkg -i)
+# 5. Verify install; leave no temp files
+#
+# CIS blocks port 80/443 — it never blocks port 22.
+# SCP always works. VM never needs internet. ✅
+# ======================================================
+ensure_linux_scap_tools() {
+    local user="$1"
+    local ip="$2"
+    local pkg_mgr="$3"
+
+    # ---- Fast path: already installed ----
+    if ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+           -o ControlMaster=no -o ControlPath=none \
+           -o ConnectTimeout=10 \
+           "${user}@${ip}" \
+           "command -v oscap >/dev/null 2>&1 && \
+            ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml \
+            >/dev/null 2>&1" 2>/dev/null; then
+        echo -e "${GREEN}✅ [Tool Guard] SCAP already present on ${ip} — skipping push${NC}"
+        return 0
+    fi
+
+    # ---- Detect distro + major version on VM ----
+    local distro_id distro_ver cache_key
+    read -r distro_id distro_ver <<< "$(ssh -n \
+        -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o ControlMaster=no -o ControlPath=none \
+        -o ConnectTimeout=10 \
+        "${user}@${ip}" \
+        "source /etc/os-release && echo \"\$ID \${VERSION_ID%%.*}\"" 2>/dev/null)"
+
+    # Map distro+ver → runner cache key
+    case "${distro_id}${distro_ver}" in
+        rhel9)       cache_key="rhel9"      ;;
+        rhel10)      cache_key="rhel10"     ;;
+        almalinux9)  cache_key="alma9"      ;;
+        almalinux10) cache_key="alma10"     ;;
+        rocky9)      cache_key="rocky9"     ;;
+        rocky10)     cache_key="rocky10"    ;;
+        ubuntu22)    cache_key="ubuntu2204" ;;
+        ubuntu24)    cache_key="ubuntu2404" ;;
+        *)
+            echo -e "${RED}❌ [Tool Guard] Unknown distro: '${distro_id}${distro_ver}' on ${ip}${NC}"
+            return 1
+            ;;
+    esac
+
+    local cache_dir="${SCAP_CACHE_DIR}/${cache_key}"
+
+    # ---- Validate cache exists ----
+    if [ ! "$(ls -A "${cache_dir}" 2>/dev/null)" ]; then
+        echo -e "${RED}❌ [Tool Guard] Cache empty: ${cache_dir}${NC}"
+        echo -e "${YELLOW}   Re-run Phase 0.2b (prefetch_scap_packages) on the runner first.${NC}"
+        return 1
+    fi
+
+    echo -e "${CYAN}📦 [Tool Guard] Pushing ${cache_key} packages → ${ip} (SCP/port 22)${NC}"
+
+    # ---- Create temp staging dir on VM ----
+    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o ControlMaster=no -o ControlPath=none \
+        "${user}@${ip}" \
+        "sudo mkdir -p /tmp/scap_offline && sudo chmod 777 /tmp/scap_offline" 2>/dev/null
+
+    # ---- Push packages via SCP (port 22 — survives CIS hardening) ----
+    scp -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o ControlMaster=no -o ControlPath=none \
+        -o ConnectTimeout=10 \
+        "${cache_dir}"/* "${user}@${ip}:/tmp/scap_offline/"
+
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}❌ [Tool Guard] SCP push failed to ${ip}${NC}"
+        return 1
+    fi
+
+    # ---- Install offline (zero outbound connections) ----
+    local install_cmd
+    if [ "$pkg_mgr" == "apt" ]; then
+        install_cmd="sudo dpkg -i /tmp/scap_offline/*.deb 2>/dev/null; \
+                     sudo apt-get install -f -y --no-download 2>/dev/null || true"
+    else
+        # rpm -Uvh --nodeps: no repo contact at all
+        # dnf fallback with --disablerepo='*': also no internet
+        install_cmd="sudo rpm -Uvh --nodeps /tmp/scap_offline/*.rpm 2>/dev/null || \
+                     sudo dnf install -y --disablerepo='*' \
+                         /tmp/scap_offline/*.rpm 2>/dev/null"
+    fi
+
+    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o ControlMaster=no -o ControlPath=none \
+        "${user}@${ip}" "
+        set -e
+        ${install_cmd}
+        rm -rf /tmp/scap_offline
+
+        # Verify the install succeeded
+        command -v oscap >/dev/null 2>&1 \
+            || { echo '[FATAL] oscap missing after offline install'; exit 10; }
+        ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1 \
+            || { echo '[FATAL] SCAP content datastreams missing'; exit 11; }
+        echo '[OK] SCAP tools installed offline successfully'
+    "
+
+    local rc=$?
+    if [ $rc -ne 0 ]; then
+        echo -e "${RED}❌ [Tool Guard] Offline install failed on ${ip} (rc=${rc})${NC}"
+        return $rc
+    fi
+
+    echo -e "${GREEN}✅ [Tool Guard] SCAP ready on ${ip} (offline SCP install — no VM internet used)${NC}"
+    return 0
+}
+
+# ======================================================
+# HELPER: detect_windows_version
 # ======================================================
 detect_windows_version() {
     local ip="$1"
-
     local caption
     caption=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
         -a '(Get-CimInstance Win32_OperatingSystem).Caption' \
@@ -85,10 +301,6 @@ detect_windows_version() {
 
 # ======================================================
 # HELPER: remediate_windows_host
-# ------------------------------------------------------
-# Detects version, installs the right role, runs the
-# right playbook with the right tags.
-# Args: $1 ip, $2 cis_level ("Level 1" or "Level 2")
 # ======================================================
 remediate_windows_host() {
     local ip="$1"
@@ -104,16 +316,7 @@ remediate_windows_host() {
     fi
     echo -e "${CYAN}   → Detected: Windows ${ver}${NC}"
 
-    # Map version → role + playbook + tag scope
-    #   role_name           = what the playbook's `roles:` block references
-    #   role_install_target = what we pass to `ansible-galaxy role install`
-    # For Galaxy-published roles these are the same. For roles only on
-    # GitHub (e.g. Windows-2025-CIS), we install via git URL and the role
-    # lands under the repo name, so the two values differ.
-    local role_name
-    local role_install_target
-    local playbook_file
-    local tag_scope_l1
+    local role_name role_install_target playbook_file tag_scope_l1
     case "$ver" in
         2019) role_name="ansible-lockdown.windows_2019_cis"
               role_install_target="ansible-lockdown.windows_2019_cis"
@@ -139,15 +342,13 @@ remediate_windows_host() {
 
     if [ ! -f "$playbook_file" ]; then
         echo -e "${RED}❌ [Win/${ver}] Playbook missing: ${playbook_file}${NC}"
-        echo -e "${YELLOW}   You need to create ${playbook_file} for Windows ${ver}${NC}"
+        echo -e "${YELLOW}   Create ${playbook_file} for Windows ${ver} and retry.${NC}"
         return 1
     fi
 
-    # Install matching role (force-refresh to catch upstream updates)
-    echo -e "${CYAN}📦 [Win/${ver}] Installing ${role_name} (from ${role_install_target})...${NC}"
+    echo -e "${CYAN}📦 [Win/${ver}] Installing role: ${role_name}...${NC}"
     ansible-galaxy role install -f "$role_install_target"
 
-    # Build tag list — Level 2 includes Level 1
     local tags
     if [ "$cis_level" == "Level 2" ]; then
         if [ "$ver" -ge 10 ] 2>/dev/null && [ "$ver" -le 11 ] 2>/dev/null; then
@@ -161,7 +362,6 @@ remediate_windows_host() {
         echo -e "${CYAN}   → Applying Level 1 controls only${NC}"
     fi
 
-    # Run it
     echo -e "${CYAN}🛠️  [Win/${ver}] Running ${playbook_file} (tags: ${tags})...${NC}"
     ANSIBLE_HOST_KEY_CHECKING=False \
         ansible-playbook -i inventory.ini "$playbook_file" \
@@ -178,10 +378,6 @@ remediate_windows_host() {
 
 # ======================================================
 # HELPER: fetch_remote_report (bulletproof 3-step fetch)
-# ------------------------------------------------------
-# 1. sudo chmod 644 the report on the target
-# 2. scp (fast path)
-# 3. ssh "sudo cat" fallback (survives post-CIS perms)
 # ======================================================
 fetch_remote_report() {
     local user="$1"
@@ -190,14 +386,14 @@ fetch_remote_report() {
     local local_path="$4"
     local tag="$5"
 
-    # Step 1: ensure the file is readable by the audit user
+    # Step 1: chmod so audit user can read root-owned file
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ControlMaster=no -o ControlPath=none \
         -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
         -o ConnectTimeout=10 \
         "${user}@${ip}" "sudo chmod 644 ${remote} 2>/dev/null" >/dev/null 2>&1
 
-    # Step 2: try regular SCP (fast path)
+    # Step 2: try SCP (fast path)
     scp -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ControlMaster=no -o ControlPath=none \
         -o ConnectTimeout=10 \
@@ -206,8 +402,8 @@ fetch_remote_report() {
         return 0
     fi
 
-    # Step 3: fall back to `ssh ... sudo cat` — always works
-    echo -e "${YELLOW}🔄 [Fetch/${tag}] SCP failed for ${remote} on ${ip} — falling back to sudo cat${NC}"
+    # Step 3: fall back to ssh + sudo cat (always works post-CIS)
+    echo -e "${YELLOW}🔄 [Fetch/${tag}] SCP failed — falling back to sudo cat on ${ip}${NC}"
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ControlMaster=no -o ControlPath=none \
         -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
@@ -217,56 +413,21 @@ fetch_remote_report() {
         return 0
     fi
 
-    # All three strategies failed
-    rm -f "${local_path}"  # don't leave a zero-byte file lying around
+    rm -f "${local_path}"
     echo -e "${RED}❌ [Fetch/${tag}] All fetch strategies failed for ${remote} on ${ip}${NC}"
     return 1
 }
 
 # ======================================================
-# TOOL GUARD: Ensure SCAP tooling exists on Linux node
-# ======================================================
-ensure_linux_scap_tools() {
-    local user="$1"
-    local ip="$2"
-    local pkg_mgr="$3"
-
-    local install_cmd
-    if [ "$pkg_mgr" == "apt" ]; then
-        install_cmd="sudo apt-get update -qq && sudo apt-get install -y openscap-scanner ssg-base"
-    else
-        install_cmd="sudo dnf install -y openscap-scanner scap-security-guide"
-    fi
-
-    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "${user}@${ip}" "
-        set -e
-        if ! command -v oscap >/dev/null 2>&1 \
-           || [ ! -d /usr/share/xml/scap/ssg/content ] \
-           || [ -z \"\$(ls -A /usr/share/xml/scap/ssg/content 2>/dev/null)\" ]; then
-            echo '[INSTALL] SCAP tools missing — installing...' | sudo tee /tmp/install_${ip}.log
-            ${install_cmd} 2>&1 | sudo tee -a /tmp/install_${ip}.log
-        fi
-        command -v oscap >/dev/null 2>&1 || { echo '[FATAL] oscap still missing after install'; exit 10; }
-        [ -d /usr/share/xml/scap/ssg/content ]   || { echo '[FATAL] SCAP content dir missing'; exit 11; }
-        ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1 || { echo '[FATAL] No SCAP datastreams found'; exit 12; }
-    "
-    local rc=$?
-    if [ $rc -ne 0 ]; then
-        echo -e "${RED}❌ [Tool Guard] SCAP tooling unavailable on ${ip} (rc=$rc). See /tmp/install_${ip}.log on the host.${NC}"
-        return $rc
-    fi
-    return 0
-}
-
-# ======================================================
-# AUTO-HEAL HELPER (Prevents SSH Lockout)
+# AUTO-HEAL HELPER: wait_for_ssh
 # ======================================================
 wait_for_ssh() {
     local ip=$1
     local user=$2
-    echo "🔍 Waiting for $user@$ip to be responsive..."
+    echo "🔍 Waiting for ${user}@${ip} to be responsive..."
     local count=0
-    until ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${user}@${ip} "exit" >/dev/null 2>&1; do
+    until ssh -n -o BatchMode=yes -o ConnectTimeout=5 \
+              -o StrictHostKeyChecking=no "${user}@${ip}" "exit" >/dev/null 2>&1; do
         count=$((count+1))
         if [ $count -ge 12 ]; then echo "❌ Timeout waiting for $ip"; return 1; fi
         sleep 10
@@ -274,17 +435,7 @@ wait_for_ssh() {
 }
 
 # ======================================================
-# FIX 2: WinRM READINESS HELPER
-# ------------------------------------------------------
-# Polls TCP port 5985 until WinRM is accepting connections.
-# Called at the top of every Windows sub-shell in Phase 1,
-# Remediation, and Phase 4 to prevent "execution expired"
-# and ConnectTimeoutError failures caused by the WinRM
-# service still restarting after Phase 0.3 bootstrap.
-#
-# Args : $1 ip
-# Env  : WINRM_TIMEOUT_SEC (default 180 = 3 min)
-#        WINRM_RETRY_INTERVAL (default 10 s)
+# HELPER: wait_for_winrm
 # ======================================================
 WINRM_TIMEOUT_SEC="${WINRM_TIMEOUT_SEC:-180}"
 WINRM_RETRY_INTERVAL="${WINRM_RETRY_INTERVAL:-10}"
@@ -292,16 +443,14 @@ WINRM_RETRY_INTERVAL="${WINRM_RETRY_INTERVAL:-10}"
 wait_for_winrm() {
     local ip="$1"
     local elapsed=0
-
     echo -e "${CYAN}⏳ [WinRM] Waiting for port 5985 on ${ip} (max ${WINRM_TIMEOUT_SEC}s)...${NC}"
     while true; do
-        # nc/bash TCP probe — works without winrm credentials
         if bash -c ">/dev/tcp/${ip}/5985" 2>/dev/null; then
-            echo -e "${GREEN}✅ [WinRM] ${ip} is accepting connections (${elapsed}s elapsed)${NC}"
+            echo -e "${GREEN}✅ [WinRM] ${ip} accepting connections (${elapsed}s elapsed)${NC}"
             return 0
         fi
         if [ "$elapsed" -ge "$WINRM_TIMEOUT_SEC" ]; then
-            echo -e "${RED}❌ [WinRM] Timeout after ${WINRM_TIMEOUT_SEC}s waiting for ${ip}:5985${NC}"
+            echo -e "${RED}❌ [WinRM] Timeout after ${WINRM_TIMEOUT_SEC}s on ${ip}:5985${NC}"
             return 1
         fi
         sleep "$WINRM_RETRY_INTERVAL"
@@ -318,21 +467,21 @@ H_MODE="scan"
 H_TARGETS="all"
 H_TICKET="None"
 DEBUG_MODE=false
-H_CLEANUP=false 
+H_CLEANUP=false
 H_TARGET_OS="all"
 H_TARGET_IP="all"
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        --headless) HEADLESS=true ;;
-        --profile) H_PROFILE="$2"; shift ;;
-        --mode) H_MODE="$2"; shift ;;
-        --targets) H_TARGETS="$2"; shift ;;
-        --ticket) H_TICKET="$2"; shift ;;
-        --debug) DEBUG_MODE="$2"; shift ;;
-        --cleanup) H_CLEANUP="$2"; shift ;;
-        --target-os) H_TARGET_OS="$2"; shift ;;
-        --target-ip) H_TARGET_IP="$2"; shift ;;
+        --headless)   HEADLESS=true ;;
+        --profile)    H_PROFILE="$2";    shift ;;
+        --mode)       H_MODE="$2";       shift ;;
+        --targets)    H_TARGETS="$2";    shift ;;
+        --ticket)     H_TICKET="$2";     shift ;;
+        --debug)      DEBUG_MODE="$2";   shift ;;
+        --cleanup)    H_CLEANUP="$2";    shift ;;
+        --target-os)  H_TARGET_OS="$2";  shift ;;
+        --target-ip)  H_TARGET_IP="$2";  shift ;;
         *) echo -e "${RED}Unknown parameter: $1${NC}"; exit 1 ;;
     esac
     shift
@@ -346,7 +495,7 @@ CIS_LEVEL="${CIS_LEVEL:-Level 1}"
 if [ "$HEADLESS" == true ]; then
     echo -e "${CYAN}${BOLD}🤖 HEADLESS CI/CD MODE ACTIVATED${NC}"
     if [ -n "$H_TICKET" ] && [ "$H_TICKET" != "None" ]; then
-        echo -e "${GREEN}🎫 AUDIT AUTHORIZATION: Execution tracked under Ticket ID: ${BOLD}$H_TICKET${NC}"
+        echo -e "${GREEN}🎫 AUDIT AUTHORIZATION: Ticket ID: ${BOLD}$H_TICKET${NC}"
     fi
     if [ "$DEBUG_MODE" == "true" ]; then set -x; fi
 fi
@@ -354,16 +503,19 @@ fi
 if [ -z "$AUDIT_PASS" ]; then
     echo -e "${YELLOW}🔐 Fetching Credentials from Azure KeyVault...${NC}"
     az login --identity --allow-no-subscriptions > /dev/null 2>&1 || true
-    AUDIT_PASS=$(az keyvault secret show --name "$SECRET_NAME" --vault-name "$KV_NAME" --query value -o tsv 2>/dev/null | tr -d '\r\n')
+    AUDIT_PASS=$(az keyvault secret show \
+        --name "$SECRET_NAME" \
+        --vault-name "$KV_NAME" \
+        --query value -o tsv 2>/dev/null | tr -d '\r\n')
 fi
 
 if [ -z "$AUDIT_PASS" ]; then
-    echo -e "${RED}❌ ERROR: Failed to retrieve password from KeyVault! Aborting.${NC}"
+    echo -e "${RED}❌ ERROR: Failed to retrieve password from KeyVault. Aborting.${NC}"
     exit 1
 fi
 
 # ======================================================
-# ⚡ ACCELERATION: SSH MULTIPLEXING
+# ⚡ SSH MULTIPLEXING
 # ======================================================
 echo -e "${CYAN}⚡ Configuring SSH Multiplexing...${NC}"
 mkdir -p ~/.ssh/cm
@@ -380,14 +532,18 @@ EOF
 chmod 600 ~/.ssh/config
 
 # ======================================================
-# PHASE 0.1: ZERO-TRUST DISCOVERY (MAP ONLY)
+# PHASE 0.1: ZERO-TRUST DISCOVERY
 # ======================================================
-echo -e "${CYAN}📡 Querying Azure for VMs in [$RG_NAME]...${NC}"
+echo -e "${CYAN}📡 Querying Azure for VMs in [${RG_NAME}]...${NC}"
 
 if [ "$H_TARGETS" == "all" ] || [ -z "$H_TARGETS" ]; then
-    VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[].[name, publicIps, storageProfile.osDisk.osType, powerState, storageProfile.imageReference.offer]" -o tsv)
+    VM_DATA=$(az vm list -d -g "$RG_NAME" \
+        --query "[].[name, publicIps, storageProfile.osDisk.osType, powerState, storageProfile.imageReference.offer]" \
+        -o tsv)
 else
-    VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[?tags.Environment=='$H_TARGETS'].[name, publicIps, storageProfile.osDisk.osType, powerState, storageProfile.imageReference.offer]" -o tsv)
+    VM_DATA=$(az vm list -d -g "$RG_NAME" \
+        --query "[?tags.Environment=='$H_TARGETS'].[name, publicIps, storageProfile.osDisk.osType, powerState, storageProfile.imageReference.offer]" \
+        -o tsv)
 fi
 
 UBUNTU_MACHINES=()
@@ -395,62 +551,99 @@ RHEL_MACHINES=()
 ROCKY_MACHINES=()
 ALMA_MACHINES=()
 WINDOWS_MACHINES=()
-
 declare -A IP_TO_VM_NAME
 
 while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
-    vm_name=$(echo "$raw_name" | tr -d '\r' | xargs); ip=$(echo "$raw_ip" | tr -d '\r' | xargs); os=$(echo "$raw_os" | tr -d '\r' | xargs); power=$(echo "$raw_power" | tr -d '\r' | xargs); offer=$(echo "$raw_offer" | tr -d '\r' | tr '[:upper:]' '[:lower:]' | xargs)
-    
+    vm_name=$(echo "$raw_name"  | tr -d '\r' | xargs)
+    ip=$(echo "$raw_ip"         | tr -d '\r' | xargs)
+    os=$(echo "$raw_os"         | tr -d '\r' | xargs)
+    power=$(echo "$raw_power"   | tr -d '\r' | xargs)
+    offer=$(echo "$raw_offer"   | tr -d '\r' | tr '[:upper:]' '[:lower:]' | xargs)
+
     if [ -z "$ip" ] || [ "$ip" == "None" ] || [[ "$power" != *"VM running"* ]]; then continue; fi
     IP_TO_VM_NAME["$ip"]="$vm_name"
-    
+
     if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
-        if [[ "${offer,,}" == *"rocky"* ]] || [[ "${vm_name,,}" == *"rocky"* ]]; then ROCKY_MACHINES+=("$ip"); echo -e "${CYAN}🏔️ Mapped Rocky Node: $ip${NC}"
-        elif [[ "${offer,,}" == *"alma"* ]] || [[ "${vm_name,,}" == *"alma"* ]]; then ALMA_MACHINES+=("$ip"); echo -e "${CYAN}🦙 Mapped AlmaLinux Node: $ip${NC}"
-        elif [[ "${offer,,}" == *"rhel"* ]] || [[ "${vm_name,,}" == *"rhel"* ]]; then RHEL_MACHINES+=("$ip"); echo -e "${CYAN}🔴 Mapped RHEL Node: $ip${NC}"
-        else UBUNTU_MACHINES+=("$ip"); echo -e "${CYAN}🟠 Mapped Ubuntu Node: $ip${NC}"; fi
-    elif [[ "$os" == *"Windows"* ]]; then 
-        WINDOWS_MACHINES+=("$ip"); echo -e "${CYAN}🪟 Mapped Windows Node: $ip${NC}"
+        if   [[ "${offer}" == *"rocky"* ]] || [[ "${vm_name,,}" == *"rocky"* ]]; then
+            ROCKY_MACHINES+=("$ip"); echo -e "${CYAN}🏔️  Mapped Rocky Node:    $ip${NC}"
+        elif [[ "${offer}" == *"alma"*  ]] || [[ "${vm_name,,}" == *"alma"*  ]]; then
+            ALMA_MACHINES+=("$ip");  echo -e "${CYAN}🦙 Mapped AlmaLinux Node: $ip${NC}"
+        elif [[ "${offer}" == *"rhel"*  ]] || [[ "${vm_name,,}" == *"rhel"*  ]]; then
+            RHEL_MACHINES+=("$ip");  echo -e "${CYAN}🔴 Mapped RHEL Node:      $ip${NC}"
+        else
+            UBUNTU_MACHINES+=("$ip"); echo -e "${CYAN}🟠 Mapped Ubuntu Node:    $ip${NC}"
+        fi
+    elif [[ "$os" == *"Windows"* ]]; then
+        WINDOWS_MACHINES+=("$ip"); echo -e "${CYAN}🪟 Mapped Windows Node:   $ip${NC}"
     fi
 done <<< "$VM_DATA"
 
-# 🚨 MATRIX SHARDING: Force target to single IP if requested
+# Matrix sharding — isolate to single IP if requested
 if [ "$H_TARGET_IP" != "all" ] && [ -n "$H_TARGET_IP" ]; then
-    echo -e "${MAGENTA}🎯 MATRIX SHARDING: Isolating execution to node $H_TARGET_IP${NC}"
-    UBUNTU_MACHINES=(); RHEL_MACHINES=(); ROCKY_MACHINES=(); ALMA_MACHINES=(); WINDOWS_MACHINES=()
-    if [ "${H_TARGET_OS,,}" == "ubuntu" ]; then UBUNTU_MACHINES=("$H_TARGET_IP"); fi
-    if [ "${H_TARGET_OS,,}" == "rhel" ]; then RHEL_MACHINES=("$H_TARGET_IP"); fi
-    if [ "${H_TARGET_OS,,}" == "rocky" ]; then ROCKY_MACHINES=("$H_TARGET_IP"); fi
-    if [ "${H_TARGET_OS,,}" == "alma" ]; then ALMA_MACHINES=("$H_TARGET_IP"); fi
-    if [ "${H_TARGET_OS,,}" == "windows" ]; then WINDOWS_MACHINES=("$H_TARGET_IP"); fi
+    echo -e "${MAGENTA}🎯 MATRIX SHARDING: Isolating to node $H_TARGET_IP${NC}"
+    UBUNTU_MACHINES=(); RHEL_MACHINES=(); ROCKY_MACHINES=()
+    ALMA_MACHINES=();   WINDOWS_MACHINES=()
+    case "${H_TARGET_OS,,}" in
+        ubuntu)  UBUNTU_MACHINES=("$H_TARGET_IP")  ;;
+        rhel)    RHEL_MACHINES=("$H_TARGET_IP")    ;;
+        rocky)   ROCKY_MACHINES=("$H_TARGET_IP")   ;;
+        alma)    ALMA_MACHINES=("$H_TARGET_IP")    ;;
+        windows) WINDOWS_MACHINES=("$H_TARGET_IP") ;;
+    esac
 fi
 
 # ======================================================
-# 🚨 PHASE 0.2: EARLY EXIT
+# PHASE 0.2: EARLY EXIT (headless, single-OS runs)
 # ======================================================
 if [ "$HEADLESS" == true ] && [ "$H_TARGET_OS" != "all" ]; then
-    if [ "${H_TARGET_OS,,}" == "ubuntu" ] && [ ${#UBUNTU_MACHINES[@]} -eq 0 ]; then exit 0; fi
-    if [ "${H_TARGET_OS,,}" == "rhel" ] && [ ${#RHEL_MACHINES[@]} -eq 0 ]; then exit 0; fi
-    if [ "${H_TARGET_OS,,}" == "rocky" ] && [ ${#ROCKY_MACHINES[@]} -eq 0 ]; then exit 0; fi
-    if [ "${H_TARGET_OS,,}" == "alma" ] && [ ${#ALMA_MACHINES[@]} -eq 0 ]; then exit 0; fi
-    if [ "${H_TARGET_OS,,}" == "windows" ] && [ ${#WINDOWS_MACHINES[@]} -eq 0 ]; then exit 0; fi
+    case "${H_TARGET_OS,,}" in
+        ubuntu)  [ ${#UBUNTU_MACHINES[@]}  -eq 0 ] && exit 0 ;;
+        rhel)    [ ${#RHEL_MACHINES[@]}    -eq 0 ] && exit 0 ;;
+        rocky)   [ ${#ROCKY_MACHINES[@]}   -eq 0 ] && exit 0 ;;
+        alma)    [ ${#ALMA_MACHINES[@]}    -eq 0 ] && exit 0 ;;
+        windows) [ ${#WINDOWS_MACHINES[@]} -eq 0 ] && exit 0 ;;
+    esac
 fi
 
 # ======================================================
-# 🛡️ PHASE 0.3: AUTO-HEALER
+# PHASE 0.3: AUTO-HEALER (parallel infrastructure bootstrap)
 # ======================================================
-echo -e "\n${CYAN}⚙️ PHASE 0.3: PARALLEL INFRASTRUCTURE BOOTSTRAPPING${NC}"
+echo -e "\n${CYAN}⚙️  PHASE 0.3: PARALLEL INFRASTRUCTURE BOOTSTRAPPING${NC}"
 RUNNER_IP=$(curl -s https://api.ipify.org)
 
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
     for ip in "${UBUNTU_MACHINES[@]}"; do
         (
-            if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${UBUNTU_USER}@${ip} "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
+            if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 \
+                    -o StrictHostKeyChecking=no ${UBUNTU_USER}@${ip} \
+                    "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
                 VM_NAME="${IP_TO_VM_NAME[$ip]}"
-                NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv); NSG_NAME=$(basename "$NSG_ID")
-                az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_SSH_Runner_Only" --priority 998 --destination-port-ranges 22 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
+                NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" \
+                    --query "networkProfile.networkInterfaces[0].id" -o tsv)
+                NSG_ID=$(az network nic show --ids "$NIC_ID" \
+                    --query "networkSecurityGroup.id" -o tsv)
+                NSG_NAME=$(basename "$NSG_ID")
+                az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" \
+                    --name "Allow_SSH_Runner_Only" --priority 998 \
+                    --destination-port-ranges 22 \
+                    --source-address-prefixes "$RUNNER_IP" \
+                    --access Allow --protocol Tcp -o none >/dev/null 2>&1 || true
                 PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
-                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "useradd -m -s /bin/bash ${UBUNTU_USER} || true; echo '${UBUNTU_USER} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-${UBUNTU_USER}; chmod 440 /etc/sudoers.d/99-${UBUNTU_USER}; mkdir -p /home/${UBUNTU_USER}/.ssh; echo '$PUB_KEY' > /home/${UBUNTU_USER}/.ssh/authorized_keys; chown -R ${UBUNTU_USER}:${UBUNTU_USER} /home/${UBUNTU_USER}/.ssh; chmod 700 /home/${UBUNTU_USER}/.ssh; chmod 600 /home/${UBUNTU_USER}/.ssh/authorized_keys; systemctl restart sshd" -o none > /dev/null 2>&1 || true
+                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" \
+                    --command-id RunShellScript \
+                    --scripts "useradd -m -s /bin/bash ${UBUNTU_USER} || true
+                               echo '${UBUNTU_USER} ALL=(ALL) NOPASSWD:ALL' \
+                                   > /etc/sudoers.d/99-${UBUNTU_USER}
+                               chmod 440 /etc/sudoers.d/99-${UBUNTU_USER}
+                               mkdir -p /home/${UBUNTU_USER}/.ssh
+                               echo '$PUB_KEY' \
+                                   > /home/${UBUNTU_USER}/.ssh/authorized_keys
+                               chown -R ${UBUNTU_USER}:${UBUNTU_USER} \
+                                   /home/${UBUNTU_USER}/.ssh
+                               chmod 700 /home/${UBUNTU_USER}/.ssh
+                               chmod 600 /home/${UBUNTU_USER}/.ssh/authorized_keys
+                               systemctl restart sshd" \
+                    -o none >/dev/null 2>&1 || true
                 sleep 15
             fi
         ) &
@@ -460,12 +653,42 @@ fi
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" =~ ^(rhel|rocky|alma)$ ]]; then
     for ip in "${RHEL_MACHINES[@]}" "${ROCKY_MACHINES[@]}" "${ALMA_MACHINES[@]}"; do
         (
-            if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${GHOST_USER}@${ip} "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
+            if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 \
+                    -o StrictHostKeyChecking=no ${GHOST_USER}@${ip} \
+                    "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
                 VM_NAME="${IP_TO_VM_NAME[$ip]}"
-                NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv); NSG_NAME=$(basename "$NSG_ID")
-                az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_SSH_Runner_Only" --priority 998 --destination-port-ranges 22 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
+                NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" \
+                    --query "networkProfile.networkInterfaces[0].id" -o tsv)
+                NSG_ID=$(az network nic show --ids "$NIC_ID" \
+                    --query "networkSecurityGroup.id" -o tsv)
+                NSG_NAME=$(basename "$NSG_ID")
+                az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" \
+                    --name "Allow_SSH_Runner_Only" --priority 998 \
+                    --destination-port-ranges 22 \
+                    --source-address-prefixes "$RUNNER_IP" \
+                    --access Allow --protocol Tcp -o none >/dev/null 2>&1 || true
                 PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
-                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "useradd -m -s /bin/bash ${GHOST_USER} || true; echo '${GHOST_USER} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-${GHOST_USER}; chmod 440 /etc/sudoers.d/99-${GHOST_USER}; mkdir -p /home/${GHOST_USER}/.ssh; echo '$PUB_KEY' > /home/${GHOST_USER}/.ssh/authorized_keys; chown -R ${GHOST_USER}:${GHOST_USER} /home/${GHOST_USER}/.ssh; chmod 700 /home/${GHOST_USER}/.ssh; chmod 600 /home/${GHOST_USER}/.ssh/authorized_keys; if command -v restorecon &> /dev/null; then restorecon -Rv /home/${GHOST_USER}/.ssh >/dev/null 2>&1 || true; fi; echo 'PubkeyAcceptedKeyTypes +ssh-rsa' > /etc/ssh/sshd_config.d/99-runner-key.conf 2>/dev/null || true; systemctl restart sshd" -o none > /dev/null 2>&1 || true
+                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" \
+                    --command-id RunShellScript \
+                    --scripts "useradd -m -s /bin/bash ${GHOST_USER} || true
+                               echo '${GHOST_USER} ALL=(ALL) NOPASSWD:ALL' \
+                                   > /etc/sudoers.d/99-${GHOST_USER}
+                               chmod 440 /etc/sudoers.d/99-${GHOST_USER}
+                               mkdir -p /home/${GHOST_USER}/.ssh
+                               echo '$PUB_KEY' \
+                                   > /home/${GHOST_USER}/.ssh/authorized_keys
+                               chown -R ${GHOST_USER}:${GHOST_USER} \
+                                   /home/${GHOST_USER}/.ssh
+                               chmod 700 /home/${GHOST_USER}/.ssh
+                               chmod 600 /home/${GHOST_USER}/.ssh/authorized_keys
+                               command -v restorecon &>/dev/null && \
+                                   restorecon -Rv /home/${GHOST_USER}/.ssh \
+                                   >/dev/null 2>&1 || true
+                               echo 'PubkeyAcceptedKeyTypes +ssh-rsa' \
+                                   > /etc/ssh/sshd_config.d/99-runner-key.conf \
+                                   2>/dev/null || true
+                               systemctl restart sshd" \
+                    -o none >/dev/null 2>&1 || true
                 sleep 15
             fi
         ) &
@@ -476,12 +699,37 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
     for ip in "${WINDOWS_MACHINES[@]}"; do
         (
             VM_NAME="${IP_TO_VM_NAME[$ip]}"
-            NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv); NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
+            NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" \
+                --query "networkProfile.networkInterfaces[0].id" -o tsv)
+            NSG_ID=$(az network nic show --ids "$NIC_ID" \
+                --query "networkSecurityGroup.id" -o tsv)
             if [ -n "$NSG_ID" ]; then
                 NSG_NAME=$(basename "$NSG_ID")
-                az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_WinRM_Runner_Only" --priority 999 --destination-port-ranges 5985 --source-address-prefixes "$RUNNER_IP" --access Allow --protocol Tcp -o none > /dev/null 2>&1 || true
+                az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" \
+                    --name "Allow_WinRM_Runner_Only" --priority 999 \
+                    --destination-port-ranges 5985 \
+                    --source-address-prefixes "$RUNNER_IP" \
+                    --access Allow --protocol Tcp -o none >/dev/null 2>&1 || true
             fi
-            az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunPowerShellScript --scripts "Remove-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM' -Recurse -Force -ErrorAction SilentlyContinue; net user ${AUDIT_USER} '${AUDIT_PASS}' /add /y 2>&1 | Out-Null; net user ${AUDIT_USER} '${AUDIT_PASS}' 2>&1 | Out-Null; net localgroup Administrators ${AUDIT_USER} /add 2>&1 | Out-Null; WMIC USERACCOUNT WHERE Name='${AUDIT_USER}' SET PasswordExpires=FALSE 2>&1 | Out-Null; Enable-PSRemoting -SkipNetworkProfileCheck -Force; winrm set winrm/config/service/auth '@{Basic=\"true\"}'; winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'; New-ItemProperty -Name LocalAccountTokenFilterPolicy -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -PropertyType DWord -Value 1 -Force; Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' -Enabled True -Profile Any -ErrorAction SilentlyContinue; Restart-Service WinRM -Force;" -o none > /dev/null 2>&1 || true
+            az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" \
+                --command-id RunPowerShellScript \
+                --scripts "Remove-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM' \
+                               -Recurse -Force -ErrorAction SilentlyContinue
+                           net user ${AUDIT_USER} '${AUDIT_PASS}' /add /y 2>&1 | Out-Null
+                           net user ${AUDIT_USER} '${AUDIT_PASS}' 2>&1 | Out-Null
+                           net localgroup Administrators ${AUDIT_USER} /add 2>&1 | Out-Null
+                           WMIC USERACCOUNT WHERE Name='${AUDIT_USER}' \
+                               SET PasswordExpires=FALSE 2>&1 | Out-Null
+                           Enable-PSRemoting -SkipNetworkProfileCheck -Force
+                           winrm set winrm/config/service/auth '@{Basic=\"true\"}'
+                           winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'
+                           New-ItemProperty -Name LocalAccountTokenFilterPolicy \
+                               -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System \
+                               -PropertyType DWord -Value 1 -Force
+                           Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' \
+                               -Enabled True -Profile Any -ErrorAction SilentlyContinue
+                           Restart-Service WinRM -Force" \
+                -o none >/dev/null 2>&1 || true
             sleep 20
         ) &
     done
@@ -492,23 +740,39 @@ wait
 # INVENTORY BUILDER
 # ======================================================
 echo "[ubuntu_nodes]" > inventory.ini
-for ip in "${UBUNTU_MACHINES[@]}"; do echo "${ip} ansible_user=${UBUNTU_USER}" >> inventory.ini; done
+for ip in "${UBUNTU_MACHINES[@]}"; do
+    echo "${ip} ansible_user=${UBUNTU_USER}" >> inventory.ini
+done
 echo -e "\n[rhel_nodes]" >> inventory.ini
-for ip in "${RHEL_MACHINES[@]}"; do echo "${ip} ansible_user=${GHOST_USER}" >> inventory.ini; done
+for ip in "${RHEL_MACHINES[@]}"; do
+    echo "${ip} ansible_user=${GHOST_USER}" >> inventory.ini
+done
 echo -e "\n[rocky_nodes]" >> inventory.ini
-for ip in "${ROCKY_MACHINES[@]}"; do echo "${ip} ansible_user=${GHOST_USER}" >> inventory.ini; done
+for ip in "${ROCKY_MACHINES[@]}"; do
+    echo "${ip} ansible_user=${GHOST_USER}" >> inventory.ini
+done
 echo -e "\n[alma_nodes]" >> inventory.ini
-for ip in "${ALMA_MACHINES[@]}"; do echo "${ip} ansible_user=${GHOST_USER}" >> inventory.ini; done
+for ip in "${ALMA_MACHINES[@]}"; do
+    echo "${ip} ansible_user=${GHOST_USER}" >> inventory.ini
+done
 echo -e "\n[windows_nodes]" >> inventory.ini
-for ip in "${WINDOWS_MACHINES[@]}"; do echo "${ip} ansible_user=${AUDIT_USER} ansible_password=\"${AUDIT_PASS}\" ansible_port=5985 ansible_winrm_scheme=http ansible_connection=winrm ansible_winrm_transport=basic ansible_winrm_server_cert_validation=ignore" >> inventory.ini; done
+for ip in "${WINDOWS_MACHINES[@]}"; do
+    echo "${ip} ansible_user=${AUDIT_USER} ansible_password=\"${AUDIT_PASS}\" \
+ansible_port=5985 ansible_winrm_scheme=http ansible_connection=winrm \
+ansible_winrm_transport=basic ansible_winrm_server_cert_validation=ignore" \
+        >> inventory.ini
+done
 
 RUN_ORG=false; RUN_CIS=false
 if [ "$HEADLESS" == true ]; then
-    if [[ "${H_PROFILE,,}" == "tm" ]] || [[ "${H_PROFILE,,}" == "${ORG_PREFIX,,}" ]] || [[ "${H_PROFILE,,}" == "both" ]]; then RUN_ORG=true; fi
-    if [[ "${H_PROFILE,,}" == "cis" ]] || [[ "${H_PROFILE,,}" == "both" ]]; then RUN_CIS=true; fi
+    if [[ "${H_PROFILE,,}" == "tm"  ]] || \
+       [[ "${H_PROFILE,,}" == "${ORG_PREFIX,,}" ]] || \
+       [[ "${H_PROFILE,,}" == "both" ]]; then RUN_ORG=true; fi
+    if [[ "${H_PROFILE,,}" == "cis" ]] || \
+       [[ "${H_PROFILE,,}" == "both" ]]; then RUN_CIS=true; fi
 else
     echo -e "\n1) CUSTOM BASELINE\n2) CIS BASELINE\n3) BOTH"
-    read -p "Choose profile [1-3]: " pc
+    read -r -p "Choose profile [1-3]: " pc
     if [ "$pc" == "1" ] || [ "$pc" == "3" ]; then RUN_ORG=true; fi
     if [ "$pc" == "2" ] || [ "$pc" == "3" ]; then RUN_CIS=true; fi
 fi
@@ -528,13 +792,13 @@ update_profile_vars() {
 }
 
 # ======================================================
-# PHASE 1: SCAN
+# PHASE 1: INITIAL SCAN
 # ======================================================
 run_phase_1() {
-    echo -e "\n${BOLD}🔍 PHASE 1: Running Initial Baselines (Asynchronous)...${NC}"
+    echo -e "\n${BOLD}🔍 PHASE 1: Initial Baselines (SCP install → scan)...${NC}"
 
     # -------------------- UBUNTU --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "ubuntu" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
             for IP in "${UBUNTU_MACHINES[@]}"; do
                 (
@@ -543,20 +807,21 @@ run_phase_1() {
                         exit 1
                     fi
 
-                    RAW_VER=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} \
+                    RAW_VER=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                        ${UBUNTU_USER}@${IP} \
                         "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
                     UBUNTU_VER=${RAW_VER:-2404}
                     UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
 
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Ubuntu/CIS L${OS_LVL}] Scanning $IP...${NC}"
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} \
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                            ${UBUNTU_USER}@${IP} \
                             "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE \
                              --report /tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html \
                              $UBUNTU_CIS_XCCDF"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            # FIX 1: use fetch_remote_report so root-owned HTML gets chmod'd before SCP
                             fetch_remote_report "$UBUNTU_USER" "$IP" \
                                 "/tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html" \
                                 "./report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html" \
@@ -569,15 +834,16 @@ run_phase_1() {
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Ubuntu/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                            "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" ${UBUNTU_USER}@${IP}:/tmp/ \
+                            "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" \
+                            ${UBUNTU_USER}@${IP}:/tmp/ \
                             || { echo -e "${RED}❌ [Phase1] SCP of custom content failed for $IP${NC}"; exit 1; }
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} \
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                            ${UBUNTU_USER}@${IP} \
                             "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
                              --report /tmp/report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html \
                              /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            # FIX 1: use fetch_remote_report so root-owned HTML gets chmod'd before SCP
                             fetch_remote_report "$UBUNTU_USER" "$IP" \
                                 "/tmp/report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html" \
                                 "./report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html" \
@@ -593,7 +859,7 @@ run_phase_1() {
     fi
 
     # -------------------- RHEL --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rhel" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rhel" ]]; then
         if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
             for IP in "${RHEL_MACHINES[@]}"; do
                 (
@@ -604,13 +870,16 @@ run_phase_1() {
 
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/RHEL/CIS L${OS_LVL}] Scanning $IP...${NC}"
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} \
-                            "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); \
-                             sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE \
-                             --report /tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$TARGET_XML\""
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                            ${GHOST_USER}@${IP} \
+                            "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
+                                 -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                             sudo /usr/bin/oscap xccdf eval \
+                                 --profile $RHEL_CIS_PROFILE \
+                                 --report /tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \
+                                 \"\$TARGET_XML\""
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            # FIX 1: use fetch_remote_report
                             fetch_remote_report "$GHOST_USER" "$IP" \
                                 "/tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html" \
                                 "./report_before_CIS_L${OS_LVL}_RHEL_${IP}.html" \
@@ -623,16 +892,19 @@ run_phase_1() {
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/RHEL/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                            "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ \
+                            "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" \
+                            ${GHOST_USER}@${IP}:/tmp/ \
                             || { echo -e "${RED}❌ [Phase1] SCP of custom content failed for $IP${NC}"; exit 1; }
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} \
-                            "sudo env OSCAP_CPE_DICT_PATH=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1) \
-                             /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
-                             --report /tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html \
-                             /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                            ${GHOST_USER}@${IP} \
+                            "sudo env OSCAP_CPE_DICT_PATH=\$(find /usr/share/xml/scap/ssg/content/ \
+                                 -name 'ssg-rhel*-cpe-dictionary.xml' | sort -V | tail -n 1) \
+                             /usr/bin/oscap xccdf eval \
+                                 --profile $CUSTOM_XCCDF_PROFILE \
+                                 --report /tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html \
+                                 /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            # FIX 1: use fetch_remote_report
                             fetch_remote_report "$GHOST_USER" "$IP" \
                                 "/tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html" \
                                 "./report_before_${ORG_PREFIX^^}_RHEL_${IP}.html" \
@@ -648,7 +920,7 @@ run_phase_1() {
     fi
 
     # -------------------- ROCKY --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rocky" ]]; then
         if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
             for IP in "${ROCKY_MACHINES[@]}"; do
                 (
@@ -659,19 +931,23 @@ run_phase_1() {
 
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Rocky/CIS L${OS_LVL}] Scanning $IP...${NC}"
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                            ${GHOST_USER}@${IP} "
                             ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                             TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
                             if [ ! -f \"\$TARGET_XML\" ]; then
-                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
+                                    -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
                             fi
-                            if [ -z \"\$TARGET_XML\" ] || [ ! -f \"\$TARGET_XML\" ]; then echo 'NO_SCAP_CONTENT'; exit 99; fi
-                            sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE \
-                                --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \"\$TARGET_XML\"
+                            [ -z \"\$TARGET_XML\" ] || [ ! -f \"\$TARGET_XML\" ] && \
+                                { echo 'NO_SCAP_CONTENT'; exit 99; }
+                            sudo /usr/bin/oscap xccdf eval \
+                                --profile $RHEL_CIS_PROFILE \
+                                --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \
+                                \"\$TARGET_XML\"
                         "
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            # FIX 1: use fetch_remote_report
                             fetch_remote_report "$GHOST_USER" "$IP" \
                                 "/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html" \
                                 "./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html" \
@@ -684,15 +960,17 @@ run_phase_1() {
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Rocky/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                            "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ \
+                            "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" \
+                            ${GHOST_USER}@${IP}:/tmp/ \
                             || { echo -e "${RED}❌ [Phase1] SCP of custom content failed for $IP${NC}"; exit 1; }
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} \
-                            "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
-                             --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html \
-                             /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                            ${GHOST_USER}@${IP} \
+                            "sudo /usr/bin/oscap xccdf eval \
+                                 --profile $CUSTOM_XCCDF_PROFILE \
+                                 --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html \
+                                 /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            # FIX 1: use fetch_remote_report
                             fetch_remote_report "$GHOST_USER" "$IP" \
                                 "/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html" \
                                 "./report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html" \
@@ -708,7 +986,7 @@ run_phase_1() {
     fi
 
     # -------------------- ALMA --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "alma" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "alma" ]]; then
         if [ ${#ALMA_MACHINES[@]} -gt 0 ]; then
             for IP in "${ALMA_MACHINES[@]}"; do
                 (
@@ -719,24 +997,28 @@ run_phase_1() {
 
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Alma/CIS L${OS_LVL}] Scanning $IP...${NC}"
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                            ${GHOST_USER}@${IP} "
                             ALMA_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                             TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-almalinux\${ALMA_VER}-ds.xml\"
                             if [ ! -f \"\$TARGET_XML\" ]; then
-                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
+                                    -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
                             fi
-                            if [ -z \"\$TARGET_XML\" ] || [ ! -f \"\$TARGET_XML\" ]; then echo 'NO_SCAP_CONTENT'; exit 99; fi
+                            [ -z \"\$TARGET_XML\" ] || [ ! -f \"\$TARGET_XML\" ] && \
+                                { echo 'NO_SCAP_CONTENT'; exit 99; }
                             if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then
                                 ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"
                             else
                                 ALMA_PROF=\"$RHEL_CIS_PROFILE\"
                             fi
-                            sudo /usr/bin/oscap xccdf eval --profile \$ALMA_PROF \
-                                --report /tmp/report_before_CIS_L${OS_LVL}_ALMA_${IP}.html \"\$TARGET_XML\"
+                            sudo /usr/bin/oscap xccdf eval \
+                                --profile \$ALMA_PROF \
+                                --report /tmp/report_before_CIS_L${OS_LVL}_ALMA_${IP}.html \
+                                \"\$TARGET_XML\"
                         "
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            # FIX 1: use fetch_remote_report
                             fetch_remote_report "$GHOST_USER" "$IP" \
                                 "/tmp/report_before_CIS_L${OS_LVL}_ALMA_${IP}.html" \
                                 "./report_before_CIS_L${OS_LVL}_ALMA_${IP}.html" \
@@ -749,15 +1031,17 @@ run_phase_1() {
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Alma/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                            "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" ${GHOST_USER}@${IP}:/tmp/ \
+                            "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" \
+                            ${GHOST_USER}@${IP}:/tmp/ \
                             || { echo -e "${RED}❌ [Phase1] SCP of custom content failed for $IP${NC}"; exit 1; }
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} \
-                            "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
-                             --report /tmp/report_before_${ORG_PREFIX^^}_ALMA_${IP}.html \
-                             /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                            ${GHOST_USER}@${IP} \
+                            "sudo /usr/bin/oscap xccdf eval \
+                                 --profile $CUSTOM_XCCDF_PROFILE \
+                                 --report /tmp/report_before_${ORG_PREFIX^^}_ALMA_${IP}.html \
+                                 /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            # FIX 1: use fetch_remote_report
                             fetch_remote_report "$GHOST_USER" "$IP" \
                                 "/tmp/report_before_${ORG_PREFIX^^}_ALMA_${IP}.html" \
                                 "./report_before_${ORG_PREFIX^^}_ALMA_${IP}.html" \
@@ -773,13 +1057,14 @@ run_phase_1() {
     fi
 
     # -------------------- WINDOWS --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
-                    # FIX 2: wait for WinRM to be ready before attempting any scan
-                    wait_for_winrm "$IP" || { echo -e "${RED}❌ [Phase1/Win] WinRM unreachable: $IP — skipping${NC}"; exit 1; }
-
+                    wait_for_winrm "$IP" || {
+                        echo -e "${RED}❌ [Phase1/Win] WinRM unreachable: $IP — skipping${NC}"
+                        exit 1
+                    }
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP...${NC}"
                         cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} \
@@ -813,188 +1098,189 @@ run_phase_1() {
 }
 
 # ======================================================
-# PHASE 2/3: REMEDIATION (Hardened SSH + Win multi-version)
+# PHASE 2/3: REMEDIATION
 # ======================================================
 run_remediation() {
     echo -e "\n${BOLD}🛠️  PHASE 2 & 3: Executing Remediation (Hardened SSH)...${NC}"
 
     # -------------------- UBUNTU --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "ubuntu" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
             for IP in "${UBUNTU_MACHINES[@]}"; do
                 (
                     echo -e "${CYAN}🛠️  [Remediation/Ubuntu] Starting on ${IP} (max ${REMEDIATION_TIMEOUT_SEC}s)...${NC}"
                     timeout $REMEDIATION_TIMEOUT_SEC \
                         ssh $REMEDIATION_SSH_OPTS ${UBUNTU_USER}@${IP} \
-                        "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1); \
-                         sudo /usr/bin/oscap xccdf eval --remediate --profile $UBUNTU_CIS_PROFILE \
-                         --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\""
+                        "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ \
+                             -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1)
+                         sudo /usr/bin/oscap xccdf eval --remediate \
+                             --profile $UBUNTU_CIS_PROFILE \
+                             --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\""
                     rc=$?
-                    if [ $rc -eq 124 ]; then
-                        echo -e "${RED}⏱️  [Remediation/Ubuntu] TIMEOUT after ${REMEDIATION_TIMEOUT_SEC}s on ${IP} — likely sshd restart mid-scan${NC}"
-                    elif [ $rc -eq 255 ]; then
-                        echo -e "${RED}🔌 [Remediation/Ubuntu] SSH dropped on ${IP} (rc=255) — sshd likely restarted${NC}"
-                    elif [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                        echo -e "${GREEN}✅ [Remediation/Ubuntu] ${IP} finished (oscap rc=${rc})${NC}"
-                    else
-                        echo -e "${YELLOW}⚠️  [Remediation/Ubuntu] ${IP} finished with rc=${rc}${NC}"
-                    fi
+                    case $rc in
+                        124) echo -e "${RED}⏱️  [Remediation/Ubuntu] TIMEOUT on ${IP}${NC}" ;;
+                        255) echo -e "${RED}🔌 [Remediation/Ubuntu] SSH dropped on ${IP} (sshd restart expected)${NC}" ;;
+                        0|2) echo -e "${GREEN}✅ [Remediation/Ubuntu] ${IP} done (rc=${rc})${NC}" ;;
+                        *)   echo -e "${YELLOW}⚠️  [Remediation/Ubuntu] ${IP} rc=${rc}${NC}" ;;
+                    esac
                 ) &
             done
             wait
         fi
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [ "$RUN_ORG" == true ]; then
-            ansible-playbook -i inventory.ini $UBUNTU_CUSTOM_PLAYBOOK --limit ubuntu_nodes > /dev/null 2>&1 || true
+            ansible-playbook -i inventory.ini $UBUNTU_CUSTOM_PLAYBOOK \
+                --limit ubuntu_nodes >/dev/null 2>&1 || true
         fi
     fi
 
     # -------------------- RHEL --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rhel" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rhel" ]]; then
         if [ ${#RHEL_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
             for IP in "${RHEL_MACHINES[@]}"; do
                 (
                     echo -e "${CYAN}🛠️  [Remediation/RHEL] Starting on ${IP} (max ${REMEDIATION_TIMEOUT_SEC}s)...${NC}"
                     timeout $REMEDIATION_TIMEOUT_SEC \
                         ssh $REMEDIATION_SSH_OPTS ${GHOST_USER}@${IP} \
-                        "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); \
-                         sudo /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE \
-                         --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\""
+                        "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ \
+                             -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                         sudo /usr/bin/oscap xccdf eval --remediate \
+                             --profile $RHEL_CIS_PROFILE \
+                             --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\""
                     rc=$?
-                    if [ $rc -eq 124 ]; then
-                        echo -e "${RED}⏱️  [Remediation/RHEL] TIMEOUT after ${REMEDIATION_TIMEOUT_SEC}s on ${IP}${NC}"
-                    elif [ $rc -eq 255 ]; then
-                        echo -e "${RED}🔌 [Remediation/RHEL] SSH dropped on ${IP} (rc=255)${NC}"
-                    elif [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                        echo -e "${GREEN}✅ [Remediation/RHEL] ${IP} finished (oscap rc=${rc})${NC}"
-                    else
-                        echo -e "${YELLOW}⚠️  [Remediation/RHEL] ${IP} finished with rc=${rc}${NC}"
-                    fi
+                    case $rc in
+                        124) echo -e "${RED}⏱️  [Remediation/RHEL] TIMEOUT on ${IP}${NC}" ;;
+                        255) echo -e "${RED}🔌 [Remediation/RHEL] SSH dropped on ${IP}${NC}" ;;
+                        0|2) echo -e "${GREEN}✅ [Remediation/RHEL] ${IP} done (rc=${rc})${NC}" ;;
+                        *)   echo -e "${YELLOW}⚠️  [Remediation/RHEL] ${IP} rc=${rc}${NC}" ;;
+                    esac
                 ) &
             done
             wait
         fi
         if [ ${#RHEL_MACHINES[@]} -gt 0 ] && [ "$RUN_ORG" == true ]; then
-            ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rhel_nodes > /dev/null 2>&1 || true
+            ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK \
+                --limit rhel_nodes >/dev/null 2>&1 || true
         fi
     fi
 
     # -------------------- ROCKY --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rocky" ]]; then
         if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
                 for IP in "${ROCKY_MACHINES[@]}"; do
                     (
-                        echo -e "${CYAN}🛠️  [Remediation/Rocky] Starting on ${IP} (max ${REMEDIATION_TIMEOUT_SEC}s)...${NC}"
+                        echo -e "${CYAN}🛠️  [Remediation/Rocky] Starting on ${IP}...${NC}"
                         timeout $REMEDIATION_TIMEOUT_SEC \
                             ssh $REMEDIATION_SSH_OPTS ${GHOST_USER}@${IP} "
-                                ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
-                                TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
-                                if [ ! -f \"\$TARGET_XML\" ]; then
-                                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                                fi
-                                if [ -z \"\$TARGET_XML\" ] || [ ! -f \"\$TARGET_XML\" ]; then exit 99; fi
-                                sudo /usr/bin/oscap xccdf eval --remediate --profile $RHEL_CIS_PROFILE \
-                                    --report /tmp/report_remediation_CIS_ROCKY_${IP}.html \"\$TARGET_XML\"
-                            "
+                            ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
+                            TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
+                            [ ! -f \"\$TARGET_XML\" ] && \
+                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
+                                    -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                            [ -z \"\$TARGET_XML\" ] && exit 99
+                            sudo /usr/bin/oscap xccdf eval --remediate \
+                                --profile $RHEL_CIS_PROFILE \
+                                --report /tmp/report_remediation_CIS_ROCKY_${IP}.html \
+                                \"\$TARGET_XML\"
+                        "
                         rc=$?
-                        if [ $rc -eq 124 ]; then
-                            echo -e "${RED}⏱️  [Remediation/Rocky] TIMEOUT after ${REMEDIATION_TIMEOUT_SEC}s on ${IP}${NC}"
-                        elif [ $rc -eq 255 ]; then
-                            echo -e "${RED}🔌 [Remediation/Rocky] SSH dropped on ${IP} (rc=255)${NC}"
-                        elif [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            echo -e "${GREEN}✅ [Remediation/Rocky] ${IP} finished (oscap rc=${rc})${NC}"
-                        else
-                            echo -e "${YELLOW}⚠️  [Remediation/Rocky] ${IP} finished with rc=${rc}${NC}"
-                        fi
+                        case $rc in
+                            124) echo -e "${RED}⏱️  [Remediation/Rocky] TIMEOUT on ${IP}${NC}" ;;
+                            255) echo -e "${RED}🔌 [Remediation/Rocky] SSH dropped on ${IP}${NC}" ;;
+                            0|2) echo -e "${GREEN}✅ [Remediation/Rocky] ${IP} done (rc=${rc})${NC}" ;;
+                            *)   echo -e "${YELLOW}⚠️  [Remediation/Rocky] ${IP} rc=${rc}${NC}" ;;
+                        esac
                     ) &
                 done
                 wait
             fi
             if [ "$RUN_ORG" == true ]; then
-                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rocky_nodes > /dev/null 2>&1 || true
+                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK \
+                    --limit rocky_nodes >/dev/null 2>&1 || true
             fi
         fi
     fi
 
     # -------------------- ALMA --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "alma" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "alma" ]]; then
         if [ ${#ALMA_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
                 for IP in "${ALMA_MACHINES[@]}"; do
                     (
-                        echo -e "${CYAN}🛠️  [Remediation/Alma] Starting on ${IP} (max ${REMEDIATION_TIMEOUT_SEC}s)...${NC}"
+                        echo -e "${CYAN}🛠️  [Remediation/Alma] Starting on ${IP}...${NC}"
                         timeout $REMEDIATION_TIMEOUT_SEC \
                             ssh $REMEDIATION_SSH_OPTS ${GHOST_USER}@${IP} "
-                                ALMA_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
-                                TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-almalinux\${ALMA_VER}-ds.xml\"
-                                if [ ! -f \"\$TARGET_XML\" ]; then
-                                    TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                                fi
-                                if [ -z \"\$TARGET_XML\" ] || [ ! -f \"\$TARGET_XML\" ]; then exit 99; fi
-                                if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then
-                                    ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"
-                                else
-                                    ALMA_PROF=\"$RHEL_CIS_PROFILE\"
-                                fi
-                                sudo /usr/bin/oscap xccdf eval --remediate --profile \$ALMA_PROF \
-                                    --report /tmp/report_remediation_CIS_ALMA_${IP}.html \"\$TARGET_XML\"
-                            "
+                            ALMA_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
+                            TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-almalinux\${ALMA_VER}-ds.xml\"
+                            [ ! -f \"\$TARGET_XML\" ] && \
+                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
+                                    -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                            [ -z \"\$TARGET_XML\" ] && exit 99
+                            if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then
+                                ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"
+                            else
+                                ALMA_PROF=\"$RHEL_CIS_PROFILE\"
+                            fi
+                            sudo /usr/bin/oscap xccdf eval --remediate \
+                                --profile \$ALMA_PROF \
+                                --report /tmp/report_remediation_CIS_ALMA_${IP}.html \
+                                \"\$TARGET_XML\"
+                        "
                         rc=$?
-                        if [ $rc -eq 124 ]; then
-                            echo -e "${RED}⏱️  [Remediation/Alma] TIMEOUT after ${REMEDIATION_TIMEOUT_SEC}s on ${IP}${NC}"
-                        elif [ $rc -eq 255 ]; then
-                            echo -e "${RED}🔌 [Remediation/Alma] SSH dropped on ${IP} (rc=255)${NC}"
-                        elif [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            echo -e "${GREEN}✅ [Remediation/Alma] ${IP} finished (oscap rc=${rc})${NC}"
-                        else
-                            echo -e "${YELLOW}⚠️  [Remediation/Alma] ${IP} finished with rc=${rc}${NC}"
-                        fi
+                        case $rc in
+                            124) echo -e "${RED}⏱️  [Remediation/Alma] TIMEOUT on ${IP}${NC}" ;;
+                            255) echo -e "${RED}🔌 [Remediation/Alma] SSH dropped on ${IP}${NC}" ;;
+                            0|2) echo -e "${GREEN}✅ [Remediation/Alma] ${IP} done (rc=${rc})${NC}" ;;
+                            *)   echo -e "${YELLOW}⚠️  [Remediation/Alma] ${IP} rc=${rc}${NC}" ;;
+                        esac
                     ) &
                 done
                 wait
             fi
             if [ "$RUN_ORG" == true ]; then
-                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit alma_nodes > /dev/null 2>&1 || true
+                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK \
+                    --limit alma_nodes >/dev/null 2>&1 || true
             fi
         fi
     fi
 
-    # -------------------- WINDOWS (multi-version dispatcher) --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
+    # -------------------- WINDOWS --------------------
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
                 for IP in "${WINDOWS_MACHINES[@]}"; do
                     (
-                        # FIX 2: wait for WinRM before remediation
-                        wait_for_winrm "$IP" || { echo -e "${RED}❌ [Remediation/Win] WinRM unreachable: $IP — skipping${NC}"; exit 1; }
+                        wait_for_winrm "$IP" || {
+                            echo -e "${RED}❌ [Remediation/Win] WinRM unreachable: $IP — skipping${NC}"
+                            exit 1
+                        }
                         remediate_windows_host "$IP" "$CIS_LEVEL"
                     ) &
                 done
                 wait
             fi
             if [ "$RUN_ORG" == true ]; then
-                # FIX 2: wait for WinRM on every host before running the playbook
                 for IP in "${WINDOWS_MACHINES[@]}"; do
-                    wait_for_winrm "$IP" || echo -e "${YELLOW}⚠️  [Remediation/Win/${ORG_PREFIX^^}] WinRM not ready on $IP — playbook may fail${NC}"
+                    wait_for_winrm "$IP" || \
+                        echo -e "${YELLOW}⚠️  [Remediation/Win/${ORG_PREFIX^^}] WinRM not ready on $IP${NC}"
                 done
                 echo -e "${CYAN}🛠️  [Remediation/Win/${ORG_PREFIX^^}] Running custom playbook...${NC}"
-                ansible-playbook -i inventory.ini "$WIN_CUSTOM_PLAYBOOK" --limit windows_nodes
+                ansible-playbook -i inventory.ini "$WIN_CUSTOM_PLAYBOOK" \
+                    --limit windows_nodes
                 rc=$?
-                if [ $rc -eq 0 ]; then
-                    echo -e "${GREEN}✅ [Remediation/Win/${ORG_PREFIX^^}] Completed${NC}"
-                else
-                    echo -e "${RED}❌ [Remediation/Win/${ORG_PREFIX^^}] failed (rc=$rc)${NC}"
-                fi
+                [ $rc -eq 0 ] \
+                    && echo -e "${GREEN}✅ [Remediation/Win/${ORG_PREFIX^^}] Completed${NC}" \
+                    || echo -e "${RED}❌ [Remediation/Win/${ORG_PREFIX^^}] failed (rc=$rc)${NC}"
             fi
         fi
     fi
 }
 
 # ======================================================
-# PHASE 4: VERIFICATION (bulletproof fetch)
+# PHASE 4: VERIFICATION
 # ======================================================
 run_phase_4() {
-    echo -e "\n${BOLD}🔄 PHASE 4: Running Verification Scans (Asynchronous)...${NC}"
+    echo -e "\n${BOLD}🔄 PHASE 4: Verification Scans (SCP install → scan)...${NC}"
 
     local SCAN_SSH_OPTS="-n -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ControlMaster=no -o ControlPath=none \
@@ -1002,12 +1288,18 @@ run_phase_4() {
         -o ConnectTimeout=10"
 
     # -------------------- UBUNTU VERIFY --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "ubuntu" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
             for IP in "${UBUNTU_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$UBUNTU_USER" || { echo -e "${RED}❌ [Phase4/Ubuntu] SSH unreachable: $IP${NC}"; exit 1; }
-                    ensure_linux_scap_tools "$UBUNTU_USER" "$IP" "apt" || { echo -e "${RED}❌ [Phase4/Ubuntu] Tools missing on $IP${NC}"; exit 1; }
+                    wait_for_ssh "$IP" "$UBUNTU_USER" || {
+                        echo -e "${RED}❌ [Phase4/Ubuntu] SSH unreachable: $IP${NC}"; exit 1
+                    }
+                    # ensure_linux_scap_tools fast-paths if already installed;
+                    # if cleanup removed them, SCP re-installs offline ✅
+                    ensure_linux_scap_tools "$UBUNTU_USER" "$IP" "apt" || {
+                        echo -e "${RED}❌ [Phase4/Ubuntu] Tools missing on $IP${NC}"; exit 1
+                    }
 
                     UBUNTU_VER=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
                         "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
@@ -1022,11 +1314,9 @@ run_phase_4() {
                             "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE \
                              --report ${REMOTE} $UBUNTU_CIS_XCCDF"
                         rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" "Ubuntu/CIS"
-                        else
+                        [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
+                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" "Ubuntu/CIS" || \
                             echo -e "${RED}❌ [Phase4/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
-                        fi
                     fi
 
                     if [ "$RUN_ORG" == true ]; then
@@ -1037,11 +1327,10 @@ run_phase_4() {
                             "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
                              --report ${REMOTE} /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
                         rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" "Ubuntu/${ORG_PREFIX^^}"
-                        else
+                        [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
+                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" \
+                                "Ubuntu/${ORG_PREFIX^^}" || \
                             echo -e "${RED}❌ [Phase4/Ubuntu/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
-                        fi
                     fi
                 ) &
             done
@@ -1050,27 +1339,31 @@ run_phase_4() {
     fi
 
     # -------------------- RHEL VERIFY --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rhel" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rhel" ]]; then
         if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
             for IP in "${RHEL_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/RHEL] SSH unreachable: $IP${NC}"; exit 1; }
-                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/RHEL] Tools missing on $IP${NC}"; exit 1; }
+                    wait_for_ssh "$IP" "$GHOST_USER" || {
+                        echo -e "${RED}❌ [Phase4/RHEL] SSH unreachable: $IP${NC}"; exit 1
+                    }
+                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || {
+                        echo -e "${RED}❌ [Phase4/RHEL] Tools missing on $IP${NC}"; exit 1
+                    }
 
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html"
                         echo -e "${GREEN}✅ [Phase4/RHEL/CIS L${OS_LVL}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
-                            "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1); \
-                             sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE \
-                             --report ${REMOTE} \"\$TARGET_XML\""
+                            "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
+                                 -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                             sudo /usr/bin/oscap xccdf eval \
+                                 --profile $RHEL_CIS_PROFILE \
+                                 --report ${REMOTE} \"\$TARGET_XML\""
                         rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "RHEL/CIS"
-                        else
+                        [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "RHEL/CIS" || \
                             echo -e "${RED}❌ [Phase4/RHEL/CIS] oscap failed on $IP (rc=$rc)${NC}"
-                        fi
                     fi
 
                     if [ "$RUN_ORG" == true ]; then
@@ -1078,14 +1371,14 @@ run_phase_4() {
                         LOCAL="./report_after_${ORG_PREFIX^^}_RHEL_${IP}.html"
                         echo -e "${GREEN}✅ [Phase4/RHEL/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
-                            "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
-                             --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                            "sudo /usr/bin/oscap xccdf eval \
+                                 --profile $CUSTOM_XCCDF_PROFILE \
+                                 --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "RHEL/${ORG_PREFIX^^}"
-                        else
+                        [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
+                                "RHEL/${ORG_PREFIX^^}" || \
                             echo -e "${RED}❌ [Phase4/RHEL/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
-                        fi
                     fi
                 ) &
             done
@@ -1094,12 +1387,16 @@ run_phase_4() {
     fi
 
     # -------------------- ROCKY VERIFY --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rocky" ]]; then
         if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
             for IP in "${ROCKY_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/Rocky] SSH unreachable: $IP${NC}"; exit 1; }
-                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/Rocky] Tools missing on $IP${NC}"; exit 1; }
+                    wait_for_ssh "$IP" "$GHOST_USER" || {
+                        echo -e "${RED}❌ [Phase4/Rocky] SSH unreachable: $IP${NC}"; exit 1
+                    }
+                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || {
+                        echo -e "${RED}❌ [Phase4/Rocky] Tools missing on $IP${NC}"; exit 1
+                    }
 
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html"
@@ -1108,19 +1405,18 @@ run_phase_4() {
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} "
                             ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                             TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
-                            if [ ! -f \"\$TARGET_XML\" ]; then
-                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                            fi
-                            if [ -z \"\$TARGET_XML\" ] || [ ! -f \"\$TARGET_XML\" ]; then echo 'NO_SCAP_CONTENT'; exit 99; fi
-                            sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE \
+                            [ ! -f \"\$TARGET_XML\" ] && \
+                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
+                                    -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                            [ -z \"\$TARGET_XML\" ] && { echo 'NO_SCAP_CONTENT'; exit 99; }
+                            sudo /usr/bin/oscap xccdf eval \
+                                --profile $RHEL_CIS_PROFILE \
                                 --report ${REMOTE} \"\$TARGET_XML\"
                         "
                         rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Rocky/CIS"
-                        else
+                        [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Rocky/CIS" || \
                             echo -e "${RED}❌ [Phase4/Rocky/CIS] oscap failed on $IP (rc=$rc)${NC}"
-                        fi
                     fi
 
                     if [ "$RUN_ORG" == true ]; then
@@ -1128,14 +1424,14 @@ run_phase_4() {
                         LOCAL="./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html"
                         echo -e "${GREEN}✅ [Phase4/Rocky/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
-                            "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
-                             --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                            "sudo /usr/bin/oscap xccdf eval \
+                                 --profile $CUSTOM_XCCDF_PROFILE \
+                                 --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Rocky/${ORG_PREFIX^^}"
-                        else
+                        [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
+                                "Rocky/${ORG_PREFIX^^}" || \
                             echo -e "${RED}❌ [Phase4/Rocky/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
-                        fi
                     fi
                 ) &
             done
@@ -1144,12 +1440,16 @@ run_phase_4() {
     fi
 
     # -------------------- ALMA VERIFY --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "alma" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "alma" ]]; then
         if [ ${#ALMA_MACHINES[@]} -gt 0 ]; then
             for IP in "${ALMA_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/Alma] SSH unreachable: $IP${NC}"; exit 1; }
-                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/Alma] Tools missing on $IP${NC}"; exit 1; }
+                    wait_for_ssh "$IP" "$GHOST_USER" || {
+                        echo -e "${RED}❌ [Phase4/Alma] SSH unreachable: $IP${NC}"; exit 1
+                    }
+                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || {
+                        echo -e "${RED}❌ [Phase4/Alma] Tools missing on $IP${NC}"; exit 1
+                    }
 
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html"
@@ -1158,24 +1458,23 @@ run_phase_4() {
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} "
                             ALMA_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                             TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-almalinux\${ALMA_VER}-ds.xml\"
-                            if [ ! -f \"\$TARGET_XML\" ]; then
-                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                            fi
-                            if [ -z \"\$TARGET_XML\" ] || [ ! -f \"\$TARGET_XML\" ]; then echo 'NO_SCAP_CONTENT'; exit 99; fi
+                            [ ! -f \"\$TARGET_XML\" ] && \
+                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
+                                    -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                            [ -z \"\$TARGET_XML\" ] && { echo 'NO_SCAP_CONTENT'; exit 99; }
                             if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then
                                 ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"
                             else
                                 ALMA_PROF=\"$RHEL_CIS_PROFILE\"
                             fi
-                            sudo /usr/bin/oscap xccdf eval --profile \$ALMA_PROF \
+                            sudo /usr/bin/oscap xccdf eval \
+                                --profile \$ALMA_PROF \
                                 --report ${REMOTE} \"\$TARGET_XML\"
                         "
                         rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Alma/CIS"
-                        else
+                        [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Alma/CIS" || \
                             echo -e "${RED}❌ [Phase4/Alma/CIS] oscap failed on $IP (rc=$rc)${NC}"
-                        fi
                     fi
 
                     if [ "$RUN_ORG" == true ]; then
@@ -1183,14 +1482,14 @@ run_phase_4() {
                         LOCAL="./report_after_${ORG_PREFIX^^}_ALMA_${IP}.html"
                         echo -e "${GREEN}✅ [Phase4/Alma/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
-                            "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
-                             --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                            "sudo /usr/bin/oscap xccdf eval \
+                                 --profile $CUSTOM_XCCDF_PROFILE \
+                                 --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Alma/${ORG_PREFIX^^}"
-                        else
+                        [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
+                                "Alma/${ORG_PREFIX^^}" || \
                             echo -e "${RED}❌ [Phase4/Alma/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
-                        fi
                     fi
                 ) &
             done
@@ -1199,13 +1498,14 @@ run_phase_4() {
     fi
 
     # -------------------- WINDOWS VERIFY --------------------
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
-                    # FIX 2: wait for WinRM before verification scans
-                    wait_for_winrm "$IP" || { echo -e "${RED}❌ [Phase4/Win] WinRM unreachable: $IP — skipping${NC}"; exit 1; }
-
+                    wait_for_winrm "$IP" || {
+                        echo -e "${RED}❌ [Phase4/Win] WinRM unreachable: $IP — skipping${NC}"
+                        exit 1
+                    }
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
                         cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} \
@@ -1239,61 +1539,128 @@ run_phase_4() {
 }
 
 # ======================================================
-# PHASE 5: CLEANUP
+# PHASE 5: CLEANUP — tools removed, VM stays HARDENED
+# ======================================================
+# Uses rpm -e --nodeps and dpkg -r intentionally:
+#   • No internet on VM (CIS blocks port 80/443)
+#   • dnf/apt remove would try repo metadata — this avoids it
+#   • Next month: Phase 0.2b SCP flow re-installs cleanly ✅
 # ======================================================
 run_cleanup() {
-    echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP (THE GHOST METHOD)${NC}"
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "ubuntu" ]; then
+    echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP${NC}"
+    echo -e "${CYAN}   VM stays HARDENED — only SCAP tools + audit user are removed.${NC}"
+    echo -e "${CYAN}   Next audit: Phase 0.2b SCP re-installs offline. ✅${NC}\n"
+
+    # Offline-safe removal commands (no repo access needed)
+    local remove_rpm="sudo rpm -e --nodeps \
+        openscap openscap-scanner scap-security-guide 2>/dev/null || true; \
+        sudo rm -rf /tmp/scap_offline /tmp/report_*.html"
+
+    local remove_deb="sudo dpkg -r openscap-scanner ssg-base 2>/dev/null || true; \
+        sudo rm -rf /tmp/scap_offline /tmp/report_*.html"
+
+    # ---- Ubuntu ----
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
         for IP in "${UBUNTU_MACHINES[@]}"; do
-            echo -e "   ${YELLOW}Removing tools & nuking user from Ubuntu: $IP...${NC}"
-            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${UBUNTU_USER}@${IP} "sudo apt-get purge -y openscap-scanner ssg-base && sudo apt-get autoremove -y" > /dev/null 2>&1
+            echo -e "   ${YELLOW}[Cleanup/Ubuntu] Removing tools from $IP...${NC}"
+            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                -o ControlMaster=no -o ControlPath=none \
+                ${UBUNTU_USER}@${IP} "$remove_deb" >/dev/null 2>&1 || true
             VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            if [ -n "$VM_NAME" ]; then az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "userdel -r ${UBUNTU_USER}" -o none > /dev/null 2>&1 || true; fi
+            [ -n "$VM_NAME" ] && az vm run-command invoke \
+                -g "$RG_NAME" -n "$VM_NAME" \
+                --command-id RunShellScript \
+                --scripts "userdel -r ${UBUNTU_USER} 2>/dev/null || true" \
+                -o none >/dev/null 2>&1 || true &
         done
     fi
 
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rhel" ]; then
+    # ---- RHEL ----
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rhel" ]]; then
         for IP in "${RHEL_MACHINES[@]}"; do
-            echo -e "   ${YELLOW}Removing tools & nuking user from RHEL: $IP...${NC}"
-            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf remove -y openscap-scanner scap-security-guide -C --setopt=metadata_expire=never" > /dev/null 2>&1
+            echo -e "   ${YELLOW}[Cleanup/RHEL] Removing tools from $IP...${NC}"
+            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                -o ControlMaster=no -o ControlPath=none \
+                ${GHOST_USER}@${IP} "$remove_rpm" >/dev/null 2>&1 || true
             VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            if [ -n "$VM_NAME" ]; then az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "userdel -r ${GHOST_USER}" -o none > /dev/null 2>&1 || true; fi
+            [ -n "$VM_NAME" ] && az vm run-command invoke \
+                -g "$RG_NAME" -n "$VM_NAME" \
+                --command-id RunShellScript \
+                --scripts "userdel -r ${GHOST_USER} 2>/dev/null || true" \
+                -o none >/dev/null 2>&1 || true &
         done
     fi
 
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "rocky" ]; then
+    # ---- Rocky ----
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rocky" ]]; then
         for IP in "${ROCKY_MACHINES[@]}"; do
-            echo -e "   ${YELLOW}Removing tools & nuking user from Rocky: $IP...${NC}"
-            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf remove -y openscap-scanner scap-security-guide -C --setopt=metadata_expire=never" > /dev/null 2>&1
+            echo -e "   ${YELLOW}[Cleanup/Rocky] Removing tools from $IP...${NC}"
+            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                -o ControlMaster=no -o ControlPath=none \
+                ${GHOST_USER}@${IP} "$remove_rpm" >/dev/null 2>&1 || true
             VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            if [ -n "$VM_NAME" ]; then az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "userdel -r ${GHOST_USER}" -o none > /dev/null 2>&1 || true; fi
+            [ -n "$VM_NAME" ] && az vm run-command invoke \
+                -g "$RG_NAME" -n "$VM_NAME" \
+                --command-id RunShellScript \
+                --scripts "userdel -r ${GHOST_USER} 2>/dev/null || true" \
+                -o none >/dev/null 2>&1 || true &
         done
     fi
 
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "alma" ]; then
+    # ---- Alma ----
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "alma" ]]; then
         for IP in "${ALMA_MACHINES[@]}"; do
-            echo -e "   ${YELLOW}Removing tools & nuking user from AlmaLinux: $IP...${NC}"
-            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no ${GHOST_USER}@${IP} "sudo dnf remove -y openscap-scanner scap-security-guide -C --setopt=metadata_expire=never" > /dev/null 2>&1
+            echo -e "   ${YELLOW}[Cleanup/Alma] Removing tools from $IP...${NC}"
+            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                -o ControlMaster=no -o ControlPath=none \
+                ${GHOST_USER}@${IP} "$remove_rpm" >/dev/null 2>&1 || true
             VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            if [ -n "$VM_NAME" ]; then az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunShellScript --scripts "userdel -r ${GHOST_USER}" -o none > /dev/null 2>&1 || true; fi
+            [ -n "$VM_NAME" ] && az vm run-command invoke \
+                -g "$RG_NAME" -n "$VM_NAME" \
+                --command-id RunShellScript \
+                --scripts "userdel -r ${GHOST_USER} 2>/dev/null || true" \
+                -o none >/dev/null 2>&1 || true &
         done
     fi
 
-    if [ "$H_TARGET_OS" == "all" ] || [ "${H_TARGET_OS,,}" == "windows" ]; then
+    # ---- Windows ----
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         for IP in "${WINDOWS_MACHINES[@]}"; do
-            echo -e "   ${CYAN}🧹 Reversing security changes & nuking user on Windows: $IP...${NC}"
+            echo -e "   ${CYAN}[Cleanup/Windows] Reversing WinRM + removing audit user: $IP...${NC}"
             VM_NAME="${IP_TO_VM_NAME[$IP]}"
             if [ -n "$VM_NAME" ]; then
-                NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv)
-                NSG_ID=$(az network nic show --ids "$NIC_ID" --query "networkSecurityGroup.id" -o tsv)
+                NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" \
+                    --query "networkProfile.networkInterfaces[0].id" -o tsv)
+                NSG_ID=$(az network nic show --ids "$NIC_ID" \
+                    --query "networkSecurityGroup.id" -o tsv)
                 if [ -n "$NSG_ID" ]; then
                     NSG_NAME=$(basename "$NSG_ID")
-                    az network nsg rule delete -g "$RG_NAME" --nsg-name "$NSG_NAME" --name "Allow_WinRM_Runner_Only" -o none > /dev/null 2>&1 || true
+                    az network nsg rule delete -g "$RG_NAME" \
+                        --nsg-name "$NSG_NAME" \
+                        --name "Allow_WinRM_Runner_Only" \
+                        -o none >/dev/null 2>&1 || true
                 fi
-                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" --command-id RunPowerShellScript --scripts "Stop-Service WinRM -WarningAction SilentlyContinue; Set-Service WinRM -StartupType Disabled; Remove-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'LocalAccountTokenFilterPolicy' -Force -ErrorAction SilentlyContinue; Disable-NetFirewallRule -DisplayGroup 'Windows Remote Management' -ErrorAction SilentlyContinue; Remove-LocalUser -Name '$AUDIT_USER' -ErrorAction SilentlyContinue" -o none > /dev/null 2>&1 || true
+                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" \
+                    --command-id RunPowerShellScript \
+                    --scripts "Stop-Service WinRM -WarningAction SilentlyContinue
+                               Set-Service WinRM -StartupType Disabled
+                               Remove-ItemProperty \
+                                   -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' \
+                                   -Name 'LocalAccountTokenFilterPolicy' \
+                                   -Force -ErrorAction SilentlyContinue
+                               Disable-NetFirewallRule \
+                                   -DisplayGroup 'Windows Remote Management' \
+                                   -ErrorAction SilentlyContinue
+                               Remove-LocalUser -Name '$AUDIT_USER' \
+                                   -ErrorAction SilentlyContinue" \
+                    -o none >/dev/null 2>&1 || true
             fi
         done
     fi
+
+    wait
+    echo -e "\n${GREEN}✅ [Phase 5] Tools removed. VM remains HARDENED. Audit user deleted.${NC}"
+    echo -e "${GREEN}   Next month: Phase 0.2b SCP flow will re-install cleanly. ✅${NC}"
 }
 
 # ======================================================
@@ -1301,61 +1668,90 @@ run_cleanup() {
 # ======================================================
 execute_phases() {
     case $H_MODE in
-        scan) run_phase_1 ;;
-        remediate) run_remediation ;;
-        full) run_phase_1; run_remediation; run_phase_4 ;;
+        scan)
+            # Phase 0.2b already called before this; just scan
+            run_phase_1
+            ;;
+        remediate)
+            run_remediation
+            ;;
+        full)
+            # Full monthly pipeline:
+            #   0.2b → 1 (scan before) → 2/3 (remediate) → 4 (verify after) → [5 cleanup]
+            run_phase_1
+            run_remediation
+            run_phase_4
+            ;;
     esac
 }
 
+# ======================================================
+# HEADLESS (CI/CD) RUNNER
+# ======================================================
 if [ "$HEADLESS" == true ]; then
     echo -e "\n${CYAN}${BOLD}======================================================"
-    echo -e "🚀 EXECUTING CI/CD WORKFLOW: MODE -> $H_MODE"
+    echo -e "🚀 CI/CD WORKFLOW: MODE → $H_MODE | OS → $H_TARGET_OS"
     echo -e "======================================================${NC}"
-    
+
     if [ "${H_PROFILE,,}" == "all" ]; then
         echo -e "\n${MAGENTA}======================================================${NC}"
-        echo -e "${MAGENTA} 🔄 INITIATING FULL FLEET AUDIT (L1, L2, TM)...${NC}"
+        echo -e "${MAGENTA} 🔄 FULL FLEET AUDIT (L1 + L2 + ${ORG_PREFIX^^})...${NC}"
         echo -e "${MAGENTA}======================================================${NC}"
+
+        # Phase 0.2b — fetch once, reuse for all three passes
+        prefetch_scap_packages
 
         export CIS_LEVEL="Level 1"; export RUN_CIS=true; export RUN_ORG=false
         update_profile_vars
-        echo -e "\n${CYAN}▶️ STEP 1/3: EXECUTING CIS LEVEL 1${NC}"
+        echo -e "\n${CYAN}▶️ STEP 1/3: CIS LEVEL 1${NC}"
         execute_phases
 
         export CIS_LEVEL="Level 2"; export RUN_CIS=true; export RUN_ORG=false
         update_profile_vars
-        echo -e "\n${CYAN}▶️ STEP 2/3: EXECUTING CIS LEVEL 2${NC}"
+        echo -e "\n${CYAN}▶️ STEP 2/3: CIS LEVEL 2${NC}"
         execute_phases
 
         export RUN_CIS=false; export RUN_ORG=true
         update_profile_vars
-        echo -e "\n${CYAN}▶️ STEP 3/3: EXECUTING TM BASELINE${NC}"
+        echo -e "\n${CYAN}▶️ STEP 3/3: ${ORG_PREFIX^^} BASELINE${NC}"
         execute_phases
+
     else
+        # Single-profile run — still prefetch first
+        prefetch_scap_packages
         update_profile_vars
         execute_phases
     fi
 
     if [ "$H_CLEANUP" == "true" ]; then run_cleanup; fi
 
-    chmod 755 *.json *.html 2>/dev/null || true
-    echo -e "\n${GREEN}✅ CI/CD Pipeline Execution Complete. All reports generated.${NC}"
+    chmod 755 ./*.json ./*.html 2>/dev/null || true
+    echo -e "\n${GREEN}✅ CI/CD Pipeline complete. All reports generated.${NC}"
     exit 0
 fi
 
+# ======================================================
 # INTERACTIVE MODE
+# ======================================================
+
+# Prefetch packages once at startup before any menu choice
+prefetch_scap_packages
+
 while true; do
     update_profile_vars
     echo -e "\n${CYAN}------------------------------------------------------${NC}"
-    echo -e "1) ${BOLD}SCAN ONLY${NC}      (Initial Baseline)"
-    echo -e "2) ${BOLD}REMEDIATE ONLY${NC} (Ansible Fixes)"
-    echo -e "3) ${BOLD}FULL PIPELINE${NC}  (Run all phases in order)"
-    echo -e "4) ${BOLD}EXIT${NC}"
-    read -p "Choose an option [1-4]: " choice
+    echo -e "1) ${BOLD}SCAN ONLY${NC}      (Phase 0.2b done ✅ — SCP install → scan)"
+    echo -e "2) ${BOLD}REMEDIATE ONLY${NC} (Ansible / oscap --remediate)"
+    echo -e "3) ${BOLD}FULL PIPELINE${NC}  (Scan → Remediate → Verify)"
+    echo -e "4) ${BOLD}CLEANUP${NC}        (Remove tools + user; VM stays hardened)"
+    echo -e "5) ${BOLD}EXIT${NC}"
+    read -r -p "Choose an option [1-5]: " choice
     case $choice in
         1) run_phase_1 ;;
         2) run_remediation ;;
         3) run_phase_1; run_remediation; run_phase_4 ;;
-        4) exit 0 ;;
+        4) run_cleanup ;;
+        5) exit 0 ;;
+        *) echo -e "${RED}Invalid choice.${NC}" ;;
     esac
 done
