@@ -2,7 +2,7 @@
 - name: TM LSB Full Remediation (RHEL Standardized)
   hosts: all
   become: yes
-  gather_facts: no  # <-- CRITICAL: Prevents the instant crash on RHEL 8
+  gather_facts: no  # CRITICAL: Prevents instant crash on RHEL 8 (no Python 3 yet)
 
   # ==========================================
   # SMART BOOTSTRAP (OS SNIFFER & PYTHON FIX)
@@ -31,128 +31,43 @@
 
     # ==========================================
     # PATCHING & SELINUX (LSB14, LSB25, LSB26)
+    # NOTE: Must run BEFORE firewall DROP — needs outbound 80/443
     # ==========================================
-    
+
     - name: LSB14 - Ensure all system packages are up to date
       command: dnf upgrade -y
       changed_when: false
 
     - name: LSB14 - Write Patch Trace Evidence for OpenSCAP
-      copy: 
+      copy:
         dest: /var/log/tm_patch_status.log
         content: "PATCH_STATUS=COMPLIANT\n"
 
     - name: LSB25 - Ensure SELinux core packages are installed
-      command: dnf install -y libselinux policycoreutils
-      args:
-        creates: /usr/sbin/semanage
+      ansible.builtin.package:
+        name:
+          - libselinux
+          - policycoreutils
+        state: present
 
     - name: LSB26 - Enforce SELinux in config file
       lineinfile:
         path: /etc/selinux/config
         regexp: '^SELINUX='
         line: 'SELINUX=enforcing'
-      
+
     - name: LSB26 - Apply SELinux Enforcing immediately in runtime
       command: setenforce 1
-      ignore_errors: yes # Ignores error if it's already enforcing
-
-    # ==========================================
-    # FIREWALL (LSB27 & LSB29 - iptables)
-    # ==========================================
-
-    # 🚨 THE FIX 1: Kill the default firewall so it doesn't fight iptables
-    - name: Pre-Safety - Disable firewalld (Prevents kernel lockup)
-      systemd:
-        name: firewalld
-        state: stopped
-        enabled: no
-      ignore_errors: true
-
-    - name: LSB27 - Install iptables-services
-      command: dnf install -y iptables-services
-      args:
-        creates: /usr/lib/systemd/system/iptables.service
-
-    # --- ADD THESE TWO NEW TASKS HERE ---
-    - name: Safety Check 1.1 - Allow Localhost (Loopback) INPUT (CRITICAL)
-      ansible.builtin.iptables:
-        chain: INPUT
-        in_interface: lo
-        jump: ACCEPT
-
-    - name: Safety Check 1.2 - Allow Localhost (Loopback) OUTPUT (CRITICAL)
-      ansible.builtin.iptables:
-        chain: OUTPUT
-        out_interface: lo
-        jump: ACCEPT
-
-    - name: Safety Check 1.3 - Allow all ESTABLISHED and RELATED traffic
-      ansible.builtin.iptables:
-        chain: "{{ item }}"
-        ctstate: ESTABLISHED,RELATED
-        jump: ACCEPT
-      loop: 
-        - INPUT
-        - OUTPUT
-    # ------------------------------------
-
-    # 🚨 THE FIX 1: Allow SSH packets IN statelessly
-    - name: Safety Check 2.1 - Allow ALL incoming SSH connections (INPUT)
-      ansible.builtin.iptables:
-        chain: INPUT
-        protocol: tcp
-        destination_port: 22
-        jump: ACCEPT
-
-    # 🚨 THE FIX 2: Allow SSH reply packets OUT statelessly
-    - name: Safety Check 2.2 - Allow ALL outgoing SSH responses (OUTPUT)
-      ansible.builtin.iptables:
-        chain: OUTPUT
-        protocol: tcp
-        source_port: 22
-        jump: ACCEPT
-
-    # 🚨 THE FIX 3: Prevent Azure Agent from dying under OUTPUT DROP
-    - name: Safety Check 3 - Allow Azure WireServer/Metadata traffic (CRITICAL)
-      ansible.builtin.iptables:
-        chain: OUTPUT
-        destination: 168.63.129.16
-        jump: ACCEPT
-
-    - name: LSB29 - Set iptables Default Policies to DROP (INPUT/FORWARD/OUTPUT)
-      ansible.builtin.iptables:
-        chain: "{{ item }}"
-        policy: DROP
-      loop: 
-        - INPUT
-        - FORWARD
-        - OUTPUT # Kept here as required by your baseline!
-
-    - name: LSB29 - Save iptables rules to /etc/sysconfig/iptables
-      shell: iptables-save > /etc/sysconfig/iptables
-
-    # 🚨 THE FIX 2: Fire & Forget the start command, don't wait for a reply!
-    - name: LSB27 - Enable and Start iptables service (Async)
-      systemd:
-        name: iptables
-        state: restarted
-        enabled: yes
-      async: 45
-      poll: 0
-
-    # 🚨 THE FIX 3: Gracefully reconnect to the new SSH session
-    - name: Safety Check - Wait for SSH to stabilize after firewall reload
-      wait_for_connection:
-        delay: 5
-        timeout: 60
+      ignore_errors: yes  # Ignores error if already enforcing
 
     # ==========================================
     # SYSTEM CONFIGURATIONS (LSB15, 19, 20, 28)
+    # NOTE: Must run BEFORE firewall DROP — sshd restart must happen
+    #       before OUTPUT is locked down (BUG 6 FIX)
     # ==========================================
 
     - name: LSB15 - Enforce Timezone (Modern Systemd)
-      timezone: 
+      timezone:
         name: Asia/Kuala_Lumpur
 
     - name: LSB15 - Enforce Timezone (OVAL Scanner Compliance)
@@ -167,7 +82,7 @@
         regexp: "{{ item.r }}"
         line: "{{ item.l }}"
       loop:
-        - { r: '^#?Banner', l: 'Banner /etc/sshbanner.txt' }
+        - { r: '^#?Banner',          l: 'Banner /etc/sshbanner.txt' }
         - { r: '^#?PermitRootLogin', l: 'PermitRootLogin no' }
       notify: Restart SSH
 
@@ -188,14 +103,23 @@
           install squashfs /bin/true
           install udf /bin/true
 
+    # BUG 6 FIX: Flush the SSH handler NOW, before the firewall is applied.
+    # This ensures sshd restarts cleanly while OUTPUT is still open.
+    # If sshd restarts after OUTPUT DROP, the handler's connection back
+    # to Ansible is blocked and the play hangs.
+    - name: Flush handlers - Restart SSH before applying firewall rules
+      meta: flush_handlers
+
     # ==========================================
     # AUDITING & LOGGING (LSB39, LSB41)
+    # NOTE: Must run BEFORE firewall DROP — dnf needs outbound 80/443
+    #       (BUG 7 FIX: moved above the firewall section)
     # ==========================================
 
     - name: LSB39 - Install Auditing Library (audit)
-      command: dnf install -y audit
-      args:
-        creates: /sbin/auditd
+      ansible.builtin.package:
+        name: audit
+        state: present
 
     - name: LSB41 - Configure Rsyslog Forwarding to NGSIEM
       lineinfile:
@@ -206,18 +130,182 @@
 
     # ==========================================
     # SERVICE PURGE (LSB30 - LSB38)
+    # NOTE: Must run BEFORE firewall DROP — dnf remove may need repo access
+    #       (BUG 7 FIX: moved above the firewall section)
     # ==========================================
 
     - name: LSB30 to LSB38 - Purge All Forbidden Packages
-      command: dnf remove -y squid dovecot vsftpd bind dhcp-server telnet-server rsh openldap-clients net-snmp
-      ignore_errors: yes
+      # BUG 5 FIX: Use package module instead of `command: dnf remove`.
+      # `command:` is not idempotent and always reports changed.
+      # `package: state=absent` is a no-op if the package isn't installed.
+      ansible.builtin.package:
+        name:
+          - squid
+          - dovecot
+          - vsftpd
+          - bind
+          - dhcp-server
+          - telnet-server
+          - rsh
+          - openldap-clients
+          - net-snmp
+        state: absent
+      ignore_errors: yes  # Non-fatal: some packages may not exist on all distros
+
+    # ==========================================
+    # FIREWALL (LSB27 & LSB29 - iptables)
+    # All firewall work is grouped here so the ordering is unambiguous.
+    # ==========================================
+
+    # Disable firewalld first — it manages the same netfilter stack.
+    # Running both causes rule-ordering races and kernel table conflicts.
+    - name: Pre-Safety - Disable firewalld (prevents netfilter conflicts)
+      systemd:
+        name: firewalld
+        state: stopped
+        enabled: no
+      ignore_errors: true
+
+    # BUG 3 FIX: Use package module — idempotent, distro-agnostic,
+    # not fooled by a pre-existing service file from another package.
+    - name: LSB27 - Install iptables-services
+      ansible.builtin.package:
+        name: iptables-services
+        state: present
+
+    # ── Loopback (must be first or localhost breaks everything) ──────────────
+    - name: Safety - Allow loopback INPUT
+      ansible.builtin.iptables:
+        chain: INPUT
+        in_interface: lo
+        jump: ACCEPT
+
+    - name: Safety - Allow loopback OUTPUT
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        out_interface: lo
+        jump: ACCEPT
+
+    # ── Stateful tracking (covers reply traffic for all allowed flows) ────────
+    - name: Safety - Allow ESTABLISHED/RELATED INPUT and OUTPUT
+      ansible.builtin.iptables:
+        chain: "{{ item }}"
+        ctstate: ESTABLISHED,RELATED
+        jump: ACCEPT
+      loop:
+        - INPUT
+        - OUTPUT
+
+    # ── SSH (stateless rules for belt-and-suspenders) ────────────────────────
+    - name: Safety - Allow incoming SSH (INPUT)
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: 22
+        jump: ACCEPT
+
+    - name: Safety - Allow outgoing SSH responses (OUTPUT)
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        protocol: tcp
+        source_port: 22
+        jump: ACCEPT
+
+    # ── Azure platform traffic ────────────────────────────────────────────────
+    - name: Safety - Allow Azure WireServer (168.63.129.16) OUTPUT
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        destination: 168.63.129.16
+        jump: ACCEPT
+
+    # BUG 2 FIX: Allow Azure IMDS — required for VM identity, extensions, etc.
+    - name: Safety - Allow Azure IMDS (169.254.169.254) OUTPUT
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        destination: 169.254.169.254
+        jump: ACCEPT
+
+    # BUG 2 FIX: Allow DNS outbound — without this, dnf, rsyslog, and auditd
+    # cannot resolve hostnames after the OUTPUT DROP policy is applied.
+    - name: Safety - Allow DNS OUTPUT (UDP 53)
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        protocol: udp
+        destination_port: 53
+        jump: ACCEPT
+
+    - name: Safety - Allow DNS OUTPUT (TCP 53, for large responses)
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        protocol: tcp
+        destination_port: 53
+        jump: ACCEPT
+
+    # BUG 2 FIX: Allow HTTPS/HTTP outbound for dnf repo access and package
+    # downloads. Without this, any post-firewall dnf task will hang or fail.
+    - name: Safety - Allow HTTPS outbound (dnf repos, package downloads)
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        protocol: tcp
+        destination_port: 443
+        jump: ACCEPT
+
+    - name: Safety - Allow HTTP outbound (some dnf mirrors are plain HTTP)
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        protocol: tcp
+        destination_port: 80
+        jump: ACCEPT
+
+    # BUG 2 FIX: Allow SIEM/rsyslog destination explicitly.
+    # With OUTPUT DROP, rsyslog cannot reach the collector without this rule.
+    - name: Safety - Allow rsyslog OUTPUT to SIEM (10.0.0.50:514 TCP)
+      ansible.builtin.iptables:
+        chain: OUTPUT
+        protocol: tcp
+        destination: 10.0.0.50
+        destination_port: 514
+        jump: ACCEPT
+
+    # ── Default DROP policies (LSB29) ────────────────────────────────────────
+    # Applied AFTER all ACCEPT rules are in place.
+    - name: LSB29 - Set iptables Default Policies to DROP (INPUT/FORWARD/OUTPUT)
+      ansible.builtin.iptables:
+        chain: "{{ item }}"
+        policy: DROP
+      loop:
+        - INPUT
+        - FORWARD
+        - OUTPUT
+
+    # BUG 1 FIX: Start the service BEFORE saving rules.
+    # iptables-save captures the LIVE kernel ruleset. If we save before
+    # the service start, we save the pre-ACCEPT state, and the node boots
+    # with pure DROP on all chains — locking everyone out permanently.
+    - name: LSB27 - Enable and start iptables service (async to survive OUTPUT DROP)
+      systemd:
+        name: iptables
+        state: restarted
+        enabled: yes
+      async: 45
+      poll: 0
+
+    - name: Safety - Wait for SSH to stabilize after firewall reload
+      wait_for_connection:
+        delay: 5
+        timeout: 60
+
+    # BUG 1 FIX: Save AFTER the service is running and SSH is confirmed stable.
+    # This captures the complete live ruleset (all ACCEPT rules + DROP policies).
+    - name: LSB29 - Save iptables rules to /etc/sysconfig/iptables (persists across reboots)
+      shell: iptables-save > /etc/sysconfig/iptables
 
   handlers:
     - name: Restart SSH
-      service: 
-        name: sshd 
+      service:
+        name: sshd
         state: restarted
-        
+
     - name: Restart Rsyslog
       service:
         name: rsyslog
