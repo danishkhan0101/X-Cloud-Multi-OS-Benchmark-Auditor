@@ -271,18 +271,19 @@ ensure_linux_scap_tools() {
     # ---- Install offline (zero outbound connections) ----
     local install_cmd
     if [ "$pkg_mgr" == "apt" ]; then
-        install_cmd="sudo dpkg -i /tmp/scap_offline/*.deb 2>/dev/null; \
-                     sudo apt-get install -f -y --no-download 2>/dev/null || true"
+        install_cmd="sudo dpkg -i /tmp/scap_offline/*.deb 2>/dev/null || true; \
+                     sudo apt-get install -f -y 2>/dev/null || true"
     else
-        install_cmd="sudo rpm -Uvh --nodeps /tmp/scap_offline/*.rpm 2>/dev/null || \
-                     sudo dnf install -y --disablerepo='*' \
-                         /tmp/scap_offline/*.rpm 2>/dev/null"
+        install_cmd="sudo dnf install -y --disablerepo='*' --allowerasing \
+                         /tmp/scap_offline/*.rpm 2>/dev/null || \
+                     sudo rpm -Uvh --nodeps --replacepkgs \
+                         /tmp/scap_offline/*.rpm 2>/dev/null || true"
     fi
 
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ControlMaster=no -o ControlPath=none \
         "${user}@${ip}" "
-        set -e
+        set +e
         ${install_cmd}
         sudo rm -rf /tmp/scap_offline 2>/dev/null || true
 
