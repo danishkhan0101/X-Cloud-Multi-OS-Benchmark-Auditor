@@ -274,6 +274,42 @@ wait_for_ssh() {
 }
 
 # ======================================================
+# FIX 2: WinRM READINESS HELPER
+# ------------------------------------------------------
+# Polls TCP port 5985 until WinRM is accepting connections.
+# Called at the top of every Windows sub-shell in Phase 1,
+# Remediation, and Phase 4 to prevent "execution expired"
+# and ConnectTimeoutError failures caused by the WinRM
+# service still restarting after Phase 0.3 bootstrap.
+#
+# Args : $1 ip
+# Env  : WINRM_TIMEOUT_SEC (default 180 = 3 min)
+#        WINRM_RETRY_INTERVAL (default 10 s)
+# ======================================================
+WINRM_TIMEOUT_SEC="${WINRM_TIMEOUT_SEC:-180}"
+WINRM_RETRY_INTERVAL="${WINRM_RETRY_INTERVAL:-10}"
+
+wait_for_winrm() {
+    local ip="$1"
+    local elapsed=0
+
+    echo -e "${CYAN}⏳ [WinRM] Waiting for port 5985 on ${ip} (max ${WINRM_TIMEOUT_SEC}s)...${NC}"
+    while true; do
+        # nc/bash TCP probe — works without winrm credentials
+        if bash -c ">/dev/tcp/${ip}/5985" 2>/dev/null; then
+            echo -e "${GREEN}✅ [WinRM] ${ip} is accepting connections (${elapsed}s elapsed)${NC}"
+            return 0
+        fi
+        if [ "$elapsed" -ge "$WINRM_TIMEOUT_SEC" ]; then
+            echo -e "${RED}❌ [WinRM] Timeout after ${WINRM_TIMEOUT_SEC}s waiting for ${ip}:5985${NC}"
+            return 1
+        fi
+        sleep "$WINRM_RETRY_INTERVAL"
+        elapsed=$((elapsed + WINRM_RETRY_INTERVAL))
+    done
+}
+
+# ======================================================
 # HEADLESS MODE PARSER
 # ======================================================
 HEADLESS=false
@@ -520,10 +556,11 @@ run_phase_1() {
                              $UBUNTU_CIS_XCCDF"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                                ${UBUNTU_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html \
-                                ./report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html \
-                                || echo -e "${RED}❌ [Phase1] SCP failed for before-CIS report on $IP${NC}"
+                            # FIX 1: use fetch_remote_report so root-owned HTML gets chmod'd before SCP
+                            fetch_remote_report "$UBUNTU_USER" "$IP" \
+                                "/tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html" \
+                                "./report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html" \
+                                "Ubuntu/CIS-before"
                         else
                             echo -e "${RED}❌ [Phase1/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
@@ -540,10 +577,11 @@ run_phase_1() {
                              /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                                ${UBUNTU_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html \
-                                ./report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html \
-                                || echo -e "${RED}❌ [Phase1] SCP failed for before-${ORG_PREFIX^^} report on $IP${NC}"
+                            # FIX 1: use fetch_remote_report so root-owned HTML gets chmod'd before SCP
+                            fetch_remote_report "$UBUNTU_USER" "$IP" \
+                                "/tmp/report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html" \
+                                "./report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html" \
+                                "Ubuntu/${ORG_PREFIX^^}-before"
                         else
                             echo -e "${RED}❌ [Phase1/Ubuntu/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
                         fi
@@ -572,10 +610,11 @@ run_phase_1() {
                              --report /tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \"\$TARGET_XML\""
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                                ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \
-                                ./report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \
-                                || echo -e "${RED}❌ [Phase1] SCP failed for before-CIS report on $IP${NC}"
+                            # FIX 1: use fetch_remote_report
+                            fetch_remote_report "$GHOST_USER" "$IP" \
+                                "/tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html" \
+                                "./report_before_CIS_L${OS_LVL}_RHEL_${IP}.html" \
+                                "RHEL/CIS-before"
                         else
                             echo -e "${RED}❌ [Phase1/RHEL/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
@@ -593,10 +632,11 @@ run_phase_1() {
                              /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                                ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html \
-                                ./report_before_${ORG_PREFIX^^}_RHEL_${IP}.html \
-                                || echo -e "${RED}❌ [Phase1] SCP failed for before-${ORG_PREFIX^^} report on $IP${NC}"
+                            # FIX 1: use fetch_remote_report
+                            fetch_remote_report "$GHOST_USER" "$IP" \
+                                "/tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html" \
+                                "./report_before_${ORG_PREFIX^^}_RHEL_${IP}.html" \
+                                "RHEL/${ORG_PREFIX^^}-before"
                         else
                             echo -e "${RED}❌ [Phase1/RHEL/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
                         fi
@@ -631,10 +671,11 @@ run_phase_1() {
                         "
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                                ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \
-                                ./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \
-                                || echo -e "${RED}❌ [Phase1] SCP failed for before-CIS report on $IP${NC}"
+                            # FIX 1: use fetch_remote_report
+                            fetch_remote_report "$GHOST_USER" "$IP" \
+                                "/tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html" \
+                                "./report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html" \
+                                "Rocky/CIS-before"
                         else
                             echo -e "${RED}❌ [Phase1/Rocky/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
@@ -651,10 +692,11 @@ run_phase_1() {
                              /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                                ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html \
-                                ./report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html \
-                                || echo -e "${RED}❌ [Phase1] SCP failed for before-${ORG_PREFIX^^} report on $IP${NC}"
+                            # FIX 1: use fetch_remote_report
+                            fetch_remote_report "$GHOST_USER" "$IP" \
+                                "/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html" \
+                                "./report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html" \
+                                "Rocky/${ORG_PREFIX^^}-before"
                         else
                             echo -e "${RED}❌ [Phase1/Rocky/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
                         fi
@@ -694,10 +736,11 @@ run_phase_1() {
                         "
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                                ${GHOST_USER}@${IP}:/tmp/report_before_CIS_L${OS_LVL}_ALMA_${IP}.html \
-                                ./report_before_CIS_L${OS_LVL}_ALMA_${IP}.html \
-                                || echo -e "${RED}❌ [Phase1] SCP failed for before-CIS report on $IP${NC}"
+                            # FIX 1: use fetch_remote_report
+                            fetch_remote_report "$GHOST_USER" "$IP" \
+                                "/tmp/report_before_CIS_L${OS_LVL}_ALMA_${IP}.html" \
+                                "./report_before_CIS_L${OS_LVL}_ALMA_${IP}.html" \
+                                "Alma/CIS-before"
                         else
                             echo -e "${RED}❌ [Phase1/Alma/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
@@ -714,10 +757,11 @@ run_phase_1() {
                              /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                                ${GHOST_USER}@${IP}:/tmp/report_before_${ORG_PREFIX^^}_ALMA_${IP}.html \
-                                ./report_before_${ORG_PREFIX^^}_ALMA_${IP}.html \
-                                || echo -e "${RED}❌ [Phase1] SCP failed for before-${ORG_PREFIX^^} report on $IP${NC}"
+                            # FIX 1: use fetch_remote_report
+                            fetch_remote_report "$GHOST_USER" "$IP" \
+                                "/tmp/report_before_${ORG_PREFIX^^}_ALMA_${IP}.html" \
+                                "./report_before_${ORG_PREFIX^^}_ALMA_${IP}.html" \
+                                "Alma/${ORG_PREFIX^^}-before"
                         else
                             echo -e "${RED}❌ [Phase1/Alma/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
                         fi
@@ -733,6 +777,9 @@ run_phase_1() {
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
+                    # FIX 2: wait for WinRM to be ready before attempting any scan
+                    wait_for_winrm "$IP" || { echo -e "${RED}❌ [Phase1/Win] WinRM unreachable: $IP — skipping${NC}"; exit 1; }
+
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP...${NC}"
                         cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} \
@@ -917,11 +964,19 @@ run_remediation() {
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
                 for IP in "${WINDOWS_MACHINES[@]}"; do
-                    ( remediate_windows_host "$IP" "$CIS_LEVEL" ) &
+                    (
+                        # FIX 2: wait for WinRM before remediation
+                        wait_for_winrm "$IP" || { echo -e "${RED}❌ [Remediation/Win] WinRM unreachable: $IP — skipping${NC}"; exit 1; }
+                        remediate_windows_host "$IP" "$CIS_LEVEL"
+                    ) &
                 done
                 wait
             fi
             if [ "$RUN_ORG" == true ]; then
+                # FIX 2: wait for WinRM on every host before running the playbook
+                for IP in "${WINDOWS_MACHINES[@]}"; do
+                    wait_for_winrm "$IP" || echo -e "${YELLOW}⚠️  [Remediation/Win/${ORG_PREFIX^^}] WinRM not ready on $IP — playbook may fail${NC}"
+                done
                 echo -e "${CYAN}🛠️  [Remediation/Win/${ORG_PREFIX^^}] Running custom playbook...${NC}"
                 ansible-playbook -i inventory.ini "$WIN_CUSTOM_PLAYBOOK" --limit windows_nodes
                 rc=$?
@@ -1148,6 +1203,9 @@ run_phase_4() {
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
+                    # FIX 2: wait for WinRM before verification scans
+                    wait_for_winrm "$IP" || { echo -e "${RED}❌ [Phase4/Win] WinRM unreachable: $IP — skipping${NC}"; exit 1; }
+
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
                         cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} \
