@@ -1182,8 +1182,13 @@ run_remediation() {
             wait
         fi
         if [ ${#RHEL_MACHINES[@]} -gt 0 ] && [ "$RUN_ORG" == true ]; then
+            echo -e "${CYAN}🛠️  [Remediation/RHEL/${ORG_PREFIX^^}] Running custom playbook...${NC}"
             ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK \
-                --limit rhel_nodes >/dev/null 2>&1 || true
+                --limit rhel_nodes
+            rc=$?
+            [ $rc -eq 0 ] \
+                && echo -e "${GREEN}✅ [Remediation/RHEL/${ORG_PREFIX^^}] Completed${NC}" \
+                || echo -e "${RED}❌ [Remediation/RHEL/${ORG_PREFIX^^}] failed (rc=$rc)${NC}"
         fi
     fi
 
@@ -1219,8 +1224,13 @@ run_remediation() {
                 wait
             fi
             if [ "$RUN_ORG" == true ]; then
+                echo -e "${CYAN}🛠️  [Remediation/Rocky/${ORG_PREFIX^^}] Running custom playbook...${NC}"
                 ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK \
-                    --limit rocky_nodes >/dev/null 2>&1 || true
+                    --limit rocky_nodes
+                rc=$?
+                [ $rc -eq 0 ] \
+                    && echo -e "${GREEN}✅ [Remediation/Rocky/${ORG_PREFIX^^}] Completed${NC}" \
+                    || echo -e "${RED}❌ [Remediation/Rocky/${ORG_PREFIX^^}] failed (rc=$rc)${NC}"
             fi
         fi
     fi
@@ -1262,8 +1272,13 @@ run_remediation() {
                 wait
             fi
             if [ "$RUN_ORG" == true ]; then
+                echo -e "${CYAN}🛠️  [Remediation/Alma/${ORG_PREFIX^^}] Running custom playbook...${NC}"
                 ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK \
-                    --limit alma_nodes >/dev/null 2>&1 || true
+                    --limit alma_nodes
+                rc=$?
+                [ $rc -eq 0 ] \
+                    && echo -e "${GREEN}✅ [Remediation/Alma/${ORG_PREFIX^^}] Completed${NC}" \
+                    || echo -e "${RED}❌ [Remediation/Alma/${ORG_PREFIX^^}] failed (rc=$rc)${NC}"
             fi
         fi
     fi
