@@ -98,15 +98,21 @@ prefetch_scap_packages() {
     # ---- RHEL 10 / Rocky 10 (use Rocky10 container) ----
     if [ ! "$(ls -A "${SCAP_CACHE_DIR}/rhel10/"*.rpm 2>/dev/null)" ]; then
         echo -e "${CYAN}   Fetching RHEL10 packages...${NC}"
-        docker run --rm \
-            -v "${SCAP_CACHE_DIR}/rhel10:/output" \
-            rockylinux:10 \
-            bash -c "dnf install -y --downloadonly --downloaddir=/output \
-                     openscap-scanner scap-security-guide 2>/dev/null" \
-            && echo -e "${GREEN}   ✅ RHEL10 cached${NC}" \
-            || echo -e "${RED}   ❌ RHEL10 fetch failed${NC}"
-        cp -f "${SCAP_CACHE_DIR}"/rhel10/*.rpm \
-              "${SCAP_CACHE_DIR}/rocky10/" 2>/dev/null || true
+        if docker pull rockylinux:10 >/dev/null 2>&1; then
+            docker run --rm \
+                -v "${SCAP_CACHE_DIR}/rhel10:/output" \
+                rockylinux:10 \
+                bash -c "dnf install -y --downloadonly --downloaddir=/output \
+                         openscap-scanner scap-security-guide 2>/dev/null" \
+                && echo -e "${GREEN}   ✅ RHEL10 cached${NC}" \
+                || echo -e "${RED}   ❌ RHEL10 fetch failed${NC}"
+            cp -f "${SCAP_CACHE_DIR}"/rhel10/*.rpm \
+                  "${SCAP_CACHE_DIR}/rocky10/" 2>/dev/null || true
+        else
+            echo -e "${YELLOW}   ⚠️  rockylinux:10 image not yet on Docker Hub — marking as skipped${NC}"
+            touch "${SCAP_CACHE_DIR}/rhel10/.skipped"
+            touch "${SCAP_CACHE_DIR}/rocky10/.skipped"
+        fi
     else
         echo -e "${GREEN}   ✅ RHEL10/Rocky10 cache valid — skipping download${NC}"
     fi
@@ -170,12 +176,17 @@ prefetch_scap_packages() {
     # ---- Validate all required caches are populated ----
     local failed=0
     for d in rhel9 rhel10 alma9 alma10 rocky9 rocky10 ubuntu2204 ubuntu2404; do
+        # Skip dirs that were intentionally marked unavailable (e.g. image not yet released)
+        if [ -f "${SCAP_CACHE_DIR}/${d}/.skipped" ]; then
+            echo -e "${YELLOW}⚠️  [Phase 0.2b] ${d} skipped (image unavailable) — runtime will skip these targets${NC}"
+            continue
+        fi
         if [ ! "$(ls -A "${SCAP_CACHE_DIR}/${d}/" 2>/dev/null)" ]; then
             echo -e "${RED}⚠️  [Phase 0.2b] Cache still empty: ${d}${NC}"
             failed=1
         fi
     done
-
+    
     if [ $failed -eq 0 ]; then
         echo -e "${GREEN}✅ [Phase 0.2b] All SCAP packages ready on runner. No VM internet needed.${NC}"
     else
