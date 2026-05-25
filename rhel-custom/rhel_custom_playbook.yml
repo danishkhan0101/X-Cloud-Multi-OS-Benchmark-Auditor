@@ -279,52 +279,65 @@
         - FORWARD
         - OUTPUT
 
-    - name: LSB27 - Enable and start iptables service
+    # Save FIRST — captures live kernel rules with DROP policies in place.
+    # The iptables service on restart loads FROM this file, so order is critical:
+    # save → enable → restart (loads saved rules back) → verify file unchanged.
+    - name: LSB29 - Confirm live kernel INPUT policy is DROP
+      shell: iptables -L INPUT | head -1
+      register: live_input
+      changed_when: false
+
+    - name: LSB29 - Debug live kernel policy if not DROP
+      debug:
+        msg: "INPUT chain policy is: {{ live_input.stdout }}"
+
+    - name: LSB29 - Force flush and save live iptables rules
+      shell: |
+        iptables-save | tee /etc/sysconfig/iptables
+
+    - name: LSB29 - Verify DROP policies in saved file
+      shell: |
+        echo "=== /etc/sysconfig/iptables ===" && cat /etc/sysconfig/iptables
+        echo "--- INPUT ---"  && grep "^:INPUT"   /etc/sysconfig/iptables
+        echo "--- FORWARD ---" && grep "^:FORWARD" /etc/sysconfig/iptables
+        echo "--- OUTPUT ---"  && grep "^:OUTPUT"  /etc/sysconfig/iptables
+      register: verify_out
+      changed_when: false
+
+    - name: LSB29 - Show verify output
+      debug:
+        msg: "{{ verify_out.stdout_lines }}"
+
+    - name: LSB29 - Fail if INPUT DROP missing
+      shell: grep -c "^:INPUT DROP" /etc/sysconfig/iptables
+      register: chk_input
+      changed_when: false
+      failed_when: chk_input.stdout | int < 1
+
+    - name: LSB29 - Fail if FORWARD DROP missing
+      shell: grep -c "^:FORWARD DROP" /etc/sysconfig/iptables
+      register: chk_forward
+      changed_when: false
+      failed_when: chk_forward.stdout | int < 1
+
+    - name: LSB29 - Fail if OUTPUT DROP missing
+      shell: grep -c "^:OUTPUT DROP" /etc/sysconfig/iptables
+      register: chk_output
+      changed_when: false
+      failed_when: chk_output.stdout | int < 1
+
+    # NOW enable the service — it will load the correctly saved file on reboot.
+    - name: LSB27 - Enable iptables service (loads saved rules on boot)
       systemd:
         name: iptables
-        state: restarted
         enabled: yes
-      async: 45
+      async: 30
       poll: 0
 
-    - name: Safety - Wait for SSH to stabilize after firewall reload
+    - name: Safety - Wait for SSH to stabilize
       wait_for_connection:
         delay: 5
         timeout: 60
-
-    - name: Safety - Wait for iptables service to fully start
-      shell: systemctl is-active iptables
-      register: iptables_status
-      until: iptables_status.stdout == "active"
-      retries: 10
-      delay: 3
-      changed_when: false
-
-    - name: LSB29 - Save iptables rules to /etc/sysconfig/iptables
-      shell: iptables-save > /etc/sysconfig/iptables
-
-    - name: LSB29 - Verify INPUT DROP policy line
-      shell: grep -c "^:INPUT DROP" /etc/sysconfig/iptables
-      register: input_drop
-      changed_when: false
-      failed_when: input_drop.stdout | int < 1
-
-    - name: LSB29 - Verify FORWARD DROP policy line
-      shell: grep -c "^:FORWARD DROP" /etc/sysconfig/iptables
-      register: forward_drop
-      changed_when: false
-      failed_when: forward_drop.stdout | int < 1
-
-    - name: LSB29 - Verify OUTPUT DROP policy line
-      shell: grep -c "^:OUTPUT DROP" /etc/sysconfig/iptables
-      register: output_drop
-      changed_when: false
-      failed_when: output_drop.stdout | int < 1
-
-    - name: LSB29 - Debug saved iptables content on failure
-      shell: cat /etc/sysconfig/iptables
-      changed_when: false
-      when: input_drop.stdout | int < 1 or forward_drop.stdout | int < 1 or output_drop.stdout | int < 1
 
   handlers:
     - name: Restart SSH
