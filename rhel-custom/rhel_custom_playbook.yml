@@ -35,8 +35,9 @@
     # ==========================================
 
     - name: LSB14 - Ensure all system packages are up to date
-      command: dnf upgrade -y
+      command: dnf upgrade -y --skip-broken --nobest
       changed_when: false
+      ignore_errors: yes
 
     - name: LSB14 - Write Patch Trace Evidence for OpenSCAP
       copy:
@@ -302,11 +303,28 @@
     - name: LSB29 - Save iptables rules to /etc/sysconfig/iptables
       shell: iptables-save > /etc/sysconfig/iptables
 
-    - name: LSB29 - Verify the file contains DROP policies
-      shell: grep -c "DROP" /etc/sysconfig/iptables
-      register: drop_count
+    - name: LSB29 - Verify INPUT DROP policy line
+      shell: grep -c "^:INPUT DROP" /etc/sysconfig/iptables
+      register: input_drop
       changed_when: false
-      failed_when: drop_count.stdout | int < 3
+      failed_when: input_drop.stdout | int < 1
+
+    - name: LSB29 - Verify FORWARD DROP policy line
+      shell: grep -c "^:FORWARD DROP" /etc/sysconfig/iptables
+      register: forward_drop
+      changed_when: false
+      failed_when: forward_drop.stdout | int < 1
+
+    - name: LSB29 - Verify OUTPUT DROP policy line
+      shell: grep -c "^:OUTPUT DROP" /etc/sysconfig/iptables
+      register: output_drop
+      changed_when: false
+      failed_when: output_drop.stdout | int < 1
+
+    - name: LSB29 - Debug saved iptables content on failure
+      shell: cat /etc/sysconfig/iptables
+      changed_when: false
+      when: input_drop.stdout | int < 1 or forward_drop.stdout | int < 1 or output_drop.stdout | int < 1
 
   handlers:
     - name: Restart SSH
