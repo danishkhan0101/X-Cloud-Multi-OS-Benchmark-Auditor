@@ -77,106 +77,138 @@ prefetch_scap_packages() {
         return 0
     fi
 
-    mkdir -p "${SCAP_CACHE_DIR}"/{rhel9,rhel10,alma9,alma10,rocky9,rocky10,ubuntu2204,ubuntu2404}
+    # ---- Only fetch caches relevant to the target OS ----
+    local need_rhel=false need_alma=false need_rocky=false need_ubuntu=false
+
+    case "${H_TARGET_OS,,}" in
+        rhel)   need_rhel=true ;;
+        alma)   need_alma=true ;;
+        rocky)  need_rocky=true ;;
+        ubuntu) need_ubuntu=true ;;
+        all)    need_rhel=true; need_alma=true; need_rocky=true; need_ubuntu=true ;;
+    esac
+
+    # ---- Create only needed dirs ----
+    $need_rhel   && mkdir -p "${SCAP_CACHE_DIR}"/{rhel9,rhel10}
+    $need_rocky  && mkdir -p "${SCAP_CACHE_DIR}"/{rocky9,rocky10}
+    $need_alma   && mkdir -p "${SCAP_CACHE_DIR}"/{alma9,alma10}
+    $need_ubuntu && mkdir -p "${SCAP_CACHE_DIR}"/{ubuntu2204,ubuntu2404}
 
     # ---- RHEL 9 / Rocky 9 (same RPMs, use Rocky9 container) ----
-    if [ ! "$(ls -A "${SCAP_CACHE_DIR}/rhel9/"*.rpm 2>/dev/null)" ]; then
-        echo -e "${CYAN}   Fetching RHEL9 packages...${NC}"
-        docker run --rm \
-            -v "${SCAP_CACHE_DIR}/rhel9:/output" \
-            rockylinux:9 \
-            bash -c "dnf install -y --downloadonly --downloaddir=/output \
-                     openscap-scanner scap-security-guide 2>/dev/null" \
-            && echo -e "${GREEN}   ✅ RHEL9 cached${NC}" \
-            || echo -e "${RED}   ❌ RHEL9 fetch failed${NC}"
-        cp -f "${SCAP_CACHE_DIR}"/rhel9/*.rpm \
-              "${SCAP_CACHE_DIR}/rocky9/" 2>/dev/null || true
-    else
-        echo -e "${GREEN}   ✅ RHEL9/Rocky9 cache valid — skipping download${NC}"
-    fi
-
-    # ---- RHEL 10 / Rocky 10 (use Rocky10 container) ----
-    if [ ! "$(ls -A "${SCAP_CACHE_DIR}/rhel10/"*.rpm 2>/dev/null)" ]; then
-        echo -e "${CYAN}   Fetching RHEL10 packages...${NC}"
-        if docker pull rockylinux:10 >/dev/null 2>&1; then
+    if $need_rhel || $need_rocky; then
+        if [ ! "$(ls -A "${SCAP_CACHE_DIR}/rhel9/"*.rpm 2>/dev/null)" ]; then
+            echo -e "${CYAN}   Fetching RHEL9 packages...${NC}"
             docker run --rm \
-                -v "${SCAP_CACHE_DIR}/rhel10:/output" \
-                rockylinux:10 \
+                -v "${SCAP_CACHE_DIR}/rhel9:/output" \
+                rockylinux:9 \
                 bash -c "dnf install -y --downloadonly --downloaddir=/output \
                          openscap-scanner scap-security-guide 2>/dev/null" \
-                && echo -e "${GREEN}   ✅ RHEL10 cached${NC}" \
-                || echo -e "${RED}   ❌ RHEL10 fetch failed${NC}"
-            cp -f "${SCAP_CACHE_DIR}"/rhel10/*.rpm \
-                  "${SCAP_CACHE_DIR}/rocky10/" 2>/dev/null || true
+                && echo -e "${GREEN}   ✅ RHEL9 cached${NC}" \
+                || echo -e "${RED}   ❌ RHEL9 fetch failed${NC}"
+            $need_rocky && cp -f "${SCAP_CACHE_DIR}"/rhel9/*.rpm \
+                "${SCAP_CACHE_DIR}/rocky9/" 2>/dev/null || true
         else
-            echo -e "${YELLOW}   ⚠️  rockylinux:10 image not yet on Docker Hub — marking as skipped${NC}"
-            touch "${SCAP_CACHE_DIR}/rhel10/.skipped"
-            touch "${SCAP_CACHE_DIR}/rocky10/.skipped"
+            echo -e "${GREEN}   ✅ RHEL9/Rocky9 cache valid — skipping download${NC}"
         fi
-    else
-        echo -e "${GREEN}   ✅ RHEL10/Rocky10 cache valid — skipping download${NC}"
+    fi
+
+    # ---- RHEL 10 / Rocky 10 ----
+    if $need_rhel || $need_rocky; then
+        if [ ! "$(ls -A "${SCAP_CACHE_DIR}/rhel10/"*.rpm 2>/dev/null)" ]; then
+            echo -e "${CYAN}   Fetching RHEL10 packages...${NC}"
+            if docker pull rockylinux:10 >/dev/null 2>&1; then
+                docker run --rm \
+                    -v "${SCAP_CACHE_DIR}/rhel10:/output" \
+                    rockylinux:10 \
+                    bash -c "dnf install -y --downloadonly --downloaddir=/output \
+                             openscap-scanner scap-security-guide 2>/dev/null" \
+                    && echo -e "${GREEN}   ✅ RHEL10 cached${NC}" \
+                    || echo -e "${RED}   ❌ RHEL10 fetch failed${NC}"
+                $need_rocky && cp -f "${SCAP_CACHE_DIR}"/rhel10/*.rpm \
+                    "${SCAP_CACHE_DIR}/rocky10/" 2>/dev/null || true
+            else
+                echo -e "${YELLOW}   ⚠️  rockylinux:10 image not yet on Docker Hub — marking as skipped${NC}"
+                touch "${SCAP_CACHE_DIR}/rhel10/.skipped"
+                touch "${SCAP_CACHE_DIR}/rocky10/.skipped"
+            fi
+        else
+            echo -e "${GREEN}   ✅ RHEL10/Rocky10 cache valid — skipping download${NC}"
+        fi
     fi
 
     # ---- AlmaLinux 9 ----
-    if [ ! "$(ls -A "${SCAP_CACHE_DIR}/alma9/"*.rpm 2>/dev/null)" ]; then
-        echo -e "${CYAN}   Fetching Alma9 packages...${NC}"
-        docker run --rm \
-            -v "${SCAP_CACHE_DIR}/alma9:/output" \
-            almalinux:9 \
-            bash -c "dnf install -y --downloadonly --downloaddir=/output \
-                     openscap-scanner scap-security-guide 2>/dev/null" \
-            && echo -e "${GREEN}   ✅ Alma9 cached${NC}" \
-            || echo -e "${RED}   ❌ Alma9 fetch failed${NC}"
-    else
-        echo -e "${GREEN}   ✅ Alma9 cache valid — skipping download${NC}"
+    if $need_alma; then
+        if [ ! "$(ls -A "${SCAP_CACHE_DIR}/alma9/"*.rpm 2>/dev/null)" ]; then
+            echo -e "${CYAN}   Fetching Alma9 packages...${NC}"
+            docker run --rm \
+                -v "${SCAP_CACHE_DIR}/alma9:/output" \
+                almalinux:9 \
+                bash -c "dnf install -y --downloadonly --downloaddir=/output \
+                         openscap-scanner scap-security-guide 2>/dev/null" \
+                && echo -e "${GREEN}   ✅ Alma9 cached${NC}" \
+                || echo -e "${RED}   ❌ Alma9 fetch failed${NC}"
+        else
+            echo -e "${GREEN}   ✅ Alma9 cache valid — skipping download${NC}"
+        fi
     fi
 
     # ---- AlmaLinux 10 ----
-    if [ ! "$(ls -A "${SCAP_CACHE_DIR}/alma10/"*.rpm 2>/dev/null)" ]; then
-        echo -e "${CYAN}   Fetching Alma10 packages...${NC}"
-        docker run --rm \
-            -v "${SCAP_CACHE_DIR}/alma10:/output" \
-            almalinux:10 \
-            bash -c "dnf install -y --downloadonly --downloaddir=/output \
-                     openscap-scanner scap-security-guide 2>/dev/null" \
-            && echo -e "${GREEN}   ✅ Alma10 cached${NC}" \
-            || echo -e "${RED}   ❌ Alma10 fetch failed${NC}"
-    else
-        echo -e "${GREEN}   ✅ Alma10 cache valid — skipping download${NC}"
+    if $need_alma; then
+        if [ ! "$(ls -A "${SCAP_CACHE_DIR}/alma10/"*.rpm 2>/dev/null)" ]; then
+            echo -e "${CYAN}   Fetching Alma10 packages...${NC}"
+            docker run --rm \
+                -v "${SCAP_CACHE_DIR}/alma10:/output" \
+                almalinux:10 \
+                bash -c "dnf install -y --downloadonly --downloaddir=/output \
+                         openscap-scanner scap-security-guide 2>/dev/null" \
+                && echo -e "${GREEN}   ✅ Alma10 cached${NC}" \
+                || echo -e "${RED}   ❌ Alma10 fetch failed${NC}"
+        else
+            echo -e "${GREEN}   ✅ Alma10 cache valid — skipping download${NC}"
+        fi
     fi
 
     # ---- Ubuntu 22.04 ----
-    if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2204/"*.deb 2>/dev/null)" ]; then
-        echo -e "${CYAN}   Fetching Ubuntu2204 packages...${NC}"
-        sudo apt-get install --download-only -y \
-            openscap-scanner ssg-base 2>/dev/null
-        sudo find /var/cache/apt/archives/ \
-            \( -name "openscap*.deb" -o -name "ssg*.deb" \) \
-            -not -path "*/partial/*" \
-            | xargs -I{} cp {} "${SCAP_CACHE_DIR}/ubuntu2204/" 2>/dev/null
-        echo -e "${GREEN}   ✅ Ubuntu2204 cached${NC}"
-    else
-        echo -e "${GREEN}   ✅ Ubuntu2204 cache valid — skipping download${NC}"
+    if $need_ubuntu; then
+        if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2204/"*.deb 2>/dev/null)" ]; then
+            echo -e "${CYAN}   Fetching Ubuntu2204 packages...${NC}"
+            sudo apt-get install --download-only -y \
+                openscap-scanner ssg-base 2>/dev/null
+            sudo find /var/cache/apt/archives/ \
+                \( -name "openscap*.deb" -o -name "ssg*.deb" \) \
+                -not -path "*/partial/*" \
+                | xargs -I{} cp {} "${SCAP_CACHE_DIR}/ubuntu2204/" 2>/dev/null
+            echo -e "${GREEN}   ✅ Ubuntu2204 cached${NC}"
+        else
+            echo -e "${GREEN}   ✅ Ubuntu2204 cache valid — skipping download${NC}"
+        fi
     fi
 
     # ---- Ubuntu 24.04 ----
-    if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2404/"*.deb 2>/dev/null)" ]; then
-        echo -e "${CYAN}   Fetching Ubuntu2404 packages...${NC}"
-        sudo apt-get install --download-only -y \
-            openscap-scanner ssg-base 2>/dev/null
-        sudo find /var/cache/apt/archives/ \
-            \( -name "openscap*.deb" -o -name "ssg*.deb" \) \
-            -not -path "*/partial/*" \
-            | xargs -I{} cp {} "${SCAP_CACHE_DIR}/ubuntu2404/" 2>/dev/null
-        echo -e "${GREEN}   ✅ Ubuntu2404 cached${NC}"
-    else
-        echo -e "${GREEN}   ✅ Ubuntu2404 cache valid — skipping download${NC}"
+    if $need_ubuntu; then
+        if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2404/"*.deb 2>/dev/null)" ]; then
+            echo -e "${CYAN}   Fetching Ubuntu2404 packages...${NC}"
+            sudo apt-get install --download-only -y \
+                openscap-scanner ssg-base 2>/dev/null
+            sudo find /var/cache/apt/archives/ \
+                \( -name "openscap*.deb" -o -name "ssg*.deb" \) \
+                -not -path "*/partial/*" \
+                | xargs -I{} cp {} "${SCAP_CACHE_DIR}/ubuntu2404/" 2>/dev/null
+            echo -e "${GREEN}   ✅ Ubuntu2404 cached${NC}"
+        else
+            echo -e "${GREEN}   ✅ Ubuntu2404 cache valid — skipping download${NC}"
+        fi
     fi
 
-    # ---- Validate all required caches are populated ----
+    # ---- Validate only relevant caches ----
     local failed=0
-    for d in rhel9 rhel10 alma9 alma10 rocky9 rocky10 ubuntu2204 ubuntu2404; do
-        # Skip dirs that were intentionally marked unavailable (e.g. image not yet released)
+    local check_dirs=()
+    $need_rhel   && check_dirs+=(rhel9)
+    $need_rocky  && check_dirs+=(rocky9)
+    $need_alma   && check_dirs+=(alma9 alma10)
+    $need_ubuntu && check_dirs+=(ubuntu2204 ubuntu2404)
+
+    for d in "${check_dirs[@]}"; do
         if [ -f "${SCAP_CACHE_DIR}/${d}/.skipped" ]; then
             echo -e "${YELLOW}⚠️  [Phase 0.2b] ${d} skipped (image unavailable) — runtime will skip these targets${NC}"
             continue
@@ -186,7 +218,7 @@ prefetch_scap_packages() {
             failed=1
         fi
     done
-    
+
     if [ $failed -eq 0 ]; then
         echo -e "${GREEN}✅ [Phase 0.2b] All SCAP packages ready on runner. No VM internet needed.${NC}"
     else
@@ -234,8 +266,17 @@ ensure_linux_scap_tools() {
         rocky10)     cache_key="rocky10"    ;;
         ubuntu22)    cache_key="ubuntu2204" ;;
         ubuntu24)    cache_key="ubuntu2404" ;;
+        # RHEL-family fallback — any unknown el9 variant uses rhel9 RPMs
+        *9)
+            echo -e "${YELLOW}⚠️  [Tool Guard] Unknown distro '${distro_id}${distro_ver}' — falling back to rhel9 cache${NC}"
+            cache_key="rhel9"
+            ;;
+        *10)
+            echo -e "${YELLOW}⚠️  [Tool Guard] Unknown distro '${distro_id}${distro_ver}' — falling back to alma10 cache${NC}"
+            cache_key="alma10"
+            ;;
         *)
-            echo -e "${RED}❌ [Tool Guard] Unknown distro: '${distro_id}${distro_ver}' on ${ip}${NC}"
+            echo -e "${RED}❌ [Tool Guard] Unknown distro: '${distro_id}${distro_ver}' on ${ip} — cannot determine cache${NC}"
             return 1
             ;;
     esac
