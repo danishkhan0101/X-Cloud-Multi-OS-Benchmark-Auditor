@@ -1,85 +1,52 @@
+---
 # =============================================================================
-# CIS Microsoft Windows Server 2022 Benchmark v5.0.0 — InSpec Inputs
-# =============================================================================
-# Passed to cinc-auditor via --input-file window-default-cis/inputs.yml
+# CIS Microsoft Windows Server 2022 Benchmark v5.0.0
+# InSpec / CINC Auditor profile — single-file layout
 #
-# Two naming conventions are covered — both sets of .rb controls are supported:
-#   server_role / profile_level  → section_*.rb files (files_2.zip)
-#   ms_or_dc   / level_1_or_2   → older profile controls
+# Controls file:  controls/cis_ws2022_v5_0_0_benchmark.rb  (433 controls)
+# Remediation:    Invoke-CISRemediation-Combined.ps1        (self-contained)
 #
-# Override any value via GitHub Actions Variable or .env:
-#   WIN_SERVER_ROLE=member_server  (or domain_controller)
-#   CIS_LEVEL=Level 1              (or Level 2)
+# Run (scan):
+#   cinc-auditor exec window-default-cis/window-baseline \
+#     -t winrm://HOST --user USER --password PASS \
+#     --input server_role=member_server \
+#     --input profile_level=1 \
+#     --reporter json:report.json
+#
+# Run (remediate):
+#   .\Invoke-CISRemediation-Combined.ps1 -ServerRole member_server
+#   .\Invoke-CISRemediation-Combined.ps1 -ServerRole member_server -WhatIf
+#   .\Invoke-CISRemediation-Combined.ps1 -ServerRole domain_controller -Sections 17,18
 # =============================================================================
 
-# ── Role / Level (both naming conventions) ───────────────────────────────────
-server_role: "member_server"      # member_server | domain_controller
-profile_level: 1                  # 1 = L1 only, 2 = L1 + L2
+name: cis-ws2022-v5
+title: CIS Microsoft Windows Server 2022 Benchmark v5.0.0
+maintainer: Your Organization
+copyright: CIS
+license: Apache-2.0
+summary: >
+  Single-file CIS WS2022 v5.0.0 CINC/InSpec profile.
+  433 controls (352 L1 + 75 L2) — Sections 1, 2, 5, 9, 17, 18, 19.
+  Companion to Invoke-CISRemediation-Combined.ps1 (self-contained, no helper).
+version: 5.0.0
 
-ms_or_dc: "member_server"         # mirrors server_role for older controls
-level_1_or_2: 1                   # mirrors profile_level for older controls
+supports:
+  - os-family: windows
 
-# ── Password Policy ───────────────────────────────────────────────────────────
-# CIS 1.1.1 — Enforce password history (CIS: 24 or more)
-password_history_size: 24
+inputs:
+  # ── server_role ──────────────────────────────────────────────────────────
+  # Controls DC-only vs member-server-only rules inside the benchmark.
+  # Override on the CLI: --input server_role=domain_controller
+  - name: server_role
+    description: 'Role of the target server: member_server or domain_controller'
+    type: string
+    value: 'member_server'
 
-# CIS 1.1.2 — Maximum password age (CIS: 365 or fewer, but not 0)
-maximum_password_age: 365
-
-# ── User Rights Assignment (Section 2.2) ─────────────────────────────────────
-# Each input is the ALLOWED list for that privilege.
-# Empty list = no accounts should hold this right (most restrictive).
-# Add accounts your environment requires, e.g. ["BUILTIN\\Administrators"]
-
-se_network_logon_right:
-  - "BUILTIN\\Administrators"
-  - "BUILTIN\\Users"
-
-se_interactive_logon_right:
-  - "BUILTIN\\Administrators"
-  - "BUILTIN\\Users"
-
-se_remote_interactive_logon_right:
-  - "BUILTIN\\Administrators"
-  - "Remote Desktop Users"
-
-se_backup_privilege:
-  - "BUILTIN\\Administrators"
-
-se_systemtime_privilege:
-  - "BUILTIN\\Administrators"
-  - "LOCAL SERVICE"
-
-se_time_zone_privilege:
-  - "BUILTIN\\Administrators"
-  - "LOCAL SERVICE"
-
-se_create_symbolic_link_privilege:
-  - "BUILTIN\\Administrators"
-
-se_deny_network_logon_right:
-  - "Guest"
-
-se_deny_remote_interactive_logon_right:
-  - "Guest"
-
-se_enable_delegation_privilege: []
-
-se_impersonate_privilege:
-  - "BUILTIN\\Administrators"
-  - "LOCAL SERVICE"
-  - "NETWORK SERVICE"
-  - "SERVICE"
-
-se_load_driver_privilege:
-  - "BUILTIN\\Administrators"
-
-se_security_privilege:
-  - "BUILTIN\\Administrators"
-
-se_assign_primary_token_privilege:
-  - "LOCAL SERVICE"
-  - "NETWORK SERVICE"
-
-se_restore_privilege:
-  - "BUILTIN\\Administrators"
+  # ── profile_level ────────────────────────────────────────────────────────
+  # Metadata consumed by Heimdall / SAF CLI to filter report views.
+  # 1 → show L1 controls only; 2 → show L1 + L2 controls.
+  # All 433 controls always execute regardless of this value.
+  - name: profile_level
+    description: 'CIS level for report metadata: 1 (L1 view) or 2 (L1+L2 view)'
+    type: numeric
+    value: 1
