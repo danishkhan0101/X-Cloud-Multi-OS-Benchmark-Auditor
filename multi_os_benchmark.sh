@@ -19,23 +19,30 @@ UBUNTU_USER="${LINUX_ADMIN_USER:-ubuntu}"
 AUDIT_USER="${WINDOWS_ADMIN_USER:-Windows_Admin}"
 
 # ------------------------------------------------------------------
-# Windows cinc-auditor profile settings (files_2.zip / CIS WS2022 v5)
+# Windows cinc-auditor profile settings (CIS WS2022 v5.0.0)
+#
+# Profile layout (single combined .rb, no setup_win_profile.sh needed):
+#
+#   window-default-cis/
+#   ├── inputs.yml                              ← default cinc-auditor inputs
+#   ├── Invoke-CISRemediation-Combined.ps1      ← single-file PS1 remediation
+#   └── window-baseline/                        ← WIN_CIS_BENCHMARK
+#       ├── inspec.yml                          ← profile metadata + input defs
+#       └── controls/
+#           └── cis_ws2022_v5_0_0_benchmark.rb  ← combined benchmark (all sections)
 #
 # WIN_SERVER_ROLE : 'member_server' (default) or 'domain_controller'
 #                  Controls DC-only / member-server-only rules inside
-#                  the InSpec profile.  Set via env or .env file.
+#                  the InSpec profile and the PS1 remediation.
 #
-# WIN_CIS_BENCHMARK folder layout expected on the runner:
-#   window-default-cis/
-#   └── window-baseline/          ← WIN_CIS_BENCHMARK points here
-#       ├── inspec.yml            ← from files_2.zip (root)
-#       └── controls/
-#           ├── section_01_account_policies.rb
-#           ├── section_02_local_policies.rb
-#           ├── section_09_windows_firewall.rb
-#           ├── section_17_advanced_audit_policy.rb
-#           ├── section_18_admin_templates_computer.rb
-#           └── section_19_admin_templates_user.rb
+# The benchmark (.rb) always runs all 433 controls.
+# profile_level is metadata only — Heimdall/SAF-CLI uses it to filter
+# the report view (L1-only vs L1+L2). rc=100/101 = pass/fail with
+# findings; both are treated as success by this pipeline.
+#
+# The PS1 (Invoke-CISRemediation-Combined.ps1) applies all applicable
+# controls for the given role in one pass (no -Level parameter).
+# Use -Sections to target individual sections (1 2 5 9 17 18 19).
 # ------------------------------------------------------------------
 WIN_SERVER_ROLE="${WIN_SERVER_ROLE:-member_server}"
 
@@ -55,22 +62,19 @@ WIN_CUSTOM_PLAYBOOK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_remediate.yml"
 
 WIN_CIS_DIR="window-default-cis"
 WIN_CIS_BENCHMARK="${WIN_CIS_DIR}/window-baseline"
-# NOTE: WIN_CIS_PLAYBOOK is no longer used directly — remediate_windows_host()
-# selects the per-version playbook (cis_remediate_2022.yml / _2025.yml / etc).
 
 # ------------------------------------------------------------------
-# PowerShell-native remediation (files_2.zip — no Ansible needed)
+# PowerShell-native remediation (single combined script — no helper)
 # ------------------------------------------------------------------
-# WIN_PS1_REMEDIATE : Invoke-CISRemediation.ps1 (main orchestrator)
-# WIN_PS1_HELPER    : 02_user_rights.ps1 (user-rights helper, auto-loaded)
-#
-# These are uploaded to the target VM via az run-command and executed
-# by run_win_ps1_remediation() — used when Ansible is unavailable or
-# for WS2022 hosts only.  The Ansible path (cis_remediate_2022.yml)
-# remains the primary path; PS1 is the fallback / standalone option.
+# WIN_PS1_REMEDIATE : Invoke-CISRemediation-Combined.ps1
+#   Self-contained; covers Sections 1, 2, 5, 9, 17, 18, 19.
+#   No separate helper file needed (user-rights are embedded).
+#   Parameters: -ServerRole <role> [-Sections <1,2,...>] [-WhatIf] [-SkipBackup]
+#   Does NOT have a -Level parameter; applies all controls for the
+#   given role in one pass. Level filtering happens at the audit layer
+#   (cinc-auditor --input profile_level=).
 # ------------------------------------------------------------------
-WIN_PS1_REMEDIATE="${WIN_CIS_BENCHMARK}/Invoke-CISRemediation.ps1"
-WIN_PS1_HELPER="${WIN_CIS_BENCHMARK}/02_user_rights.ps1"
+WIN_PS1_REMEDIATE="${WIN_CIS_DIR}/Invoke-CISRemediation-Combined.ps1"
 
 export INSPEC_SSH_CONFIG_NO_SECURE=true
 BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; MAGENTA='\033[0;35m'; NC='\033[0m'
@@ -266,37 +270,58 @@ prefetch_scap_packages() {
 # ======================================================
 # GUARD: validate_win_cis_profile
 # ------------------------------------------------------
-# Verifies that window-default-cis/window-baseline/
-# contains inspec.yml (from files_2.zip) and at least one
-# controls/*.rb file before any cinc-auditor call.
+# Verifies that the CIS WS2022 v5.0.0 combined profile is
+# correctly placed before any cinc-auditor call.
+#
+# Expected layout (committed directly — no setup_win_profile.sh):
+#
+#   window-default-cis/
+#   ├── inputs.yml
+#   ├── Invoke-CISRemediation-Combined.ps1
+#   └── window-baseline/                        ← WIN_CIS_BENCHMARK
+#       ├── inspec.yml
+#       └── controls/
+#           └── cis_ws2022_v5_0_0_benchmark.rb  ← 433-control combined file
+#
 # Called once per script run, not per host.
 # ======================================================
 validate_win_cis_profile() {
     local ok=true
+    local rb_file="${WIN_CIS_BENCHMARK}/controls/cis_ws2022_v5_0_0_benchmark.rb"
 
+    # --- inspec.yml ---
     if [ ! -f "${WIN_CIS_BENCHMARK}/inspec.yml" ]; then
         echo -e "${RED}❌ [Profile Guard] ${WIN_CIS_BENCHMARK}/inspec.yml not found.${NC}"
-        echo -e "${YELLOW}   Expected layout (from files_2.zip):${NC}"
-        echo -e "${YELLOW}     ${WIN_CIS_BENCHMARK}/inspec.yml${NC}"
-        echo -e "${YELLOW}     ${WIN_CIS_BENCHMARK}/controls/section_01_account_policies.rb${NC}"
-        echo -e "${YELLOW}     ${WIN_CIS_BENCHMARK}/controls/section_02_local_policies.rb   ... etc${NC}"
+        echo -e "${YELLOW}   Expected: ${WIN_CIS_BENCHMARK}/inspec.yml${NC}"
         ok=false
     fi
 
-    if [ ! "$(ls -A "${WIN_CIS_BENCHMARK}/controls/"*.rb 2>/dev/null)" ]; then
-        echo -e "${RED}❌ [Profile Guard] No .rb control files found in ${WIN_CIS_BENCHMARK}/controls/${NC}"
+    # --- Combined benchmark file ---
+    if [ ! -f "$rb_file" ]; then
+        echo -e "${RED}❌ [Profile Guard] Combined benchmark not found: ${rb_file}${NC}"
+        echo -e "${YELLOW}   Commit cis_ws2022_v5_0_0_benchmark.rb to:${NC}"
+        echo -e "${YELLOW}     ${WIN_CIS_BENCHMARK}/controls/cis_ws2022_v5_0_0_benchmark.rb${NC}"
+        ok=false
+    fi
+
+    # --- Combined PS1 remediation script ---
+    if [ ! -f "$WIN_PS1_REMEDIATE" ]; then
+        echo -e "${RED}❌ [Profile Guard] ${WIN_PS1_REMEDIATE} not found.${NC}"
+        echo -e "${YELLOW}   Commit Invoke-CISRemediation-Combined.ps1 to:${NC}"
+        echo -e "${YELLOW}     ${WIN_CIS_DIR}/Invoke-CISRemediation-Combined.ps1${NC}"
         ok=false
     fi
 
     if [ "$ok" == "false" ]; then
-        echo -e "${RED}   Place inspec.yml in ${WIN_CIS_DIR}/window-baseline/ and .rb files in controls/ subfolder.${NC}"
+        echo -e "${RED}   Ensure all three files above are present in the repo tree.${NC}"
         return 1
     fi
 
     local ctrl_count
-    ctrl_count=$(grep -rl "^control " "${WIN_CIS_BENCHMARK}/controls/" 2>/dev/null | xargs grep -c "^control " 2>/dev/null | awk -F: '{s+=$2} END {print s}')
-    echo -e "${GREEN}✅ [Profile Guard] CIS WS2022 v5 profile OK — ${ctrl_count} controls found (L1+L2).${NC}"
-    echo -e "${CYAN}   server_role=${WIN_SERVER_ROLE} | profile_level driven by CIS_LEVEL at scan time${NC}"
+    ctrl_count=$(grep -c "^control " "$rb_file" 2>/dev/null || echo 0)
+    echo -e "${GREEN}✅ [Profile Guard] CIS WS2022 v5.0.0 profile OK — ${ctrl_count} controls in combined benchmark.${NC}"
+    echo -e "${CYAN}   server_role=${WIN_SERVER_ROLE} | profile_level driven by WIN_INSPEC_LVL at scan time${NC}"
+    echo -e "${CYAN}   remediation: ${WIN_PS1_REMEDIATE} (single-file, no helper)${NC}"
     return 0
 }
 
@@ -304,27 +329,34 @@ validate_win_cis_profile() {
 # ======================================================
 # HELPER: run_win_ps1_remediation
 # ------------------------------------------------------
-# PowerShell-native CIS remediation using Invoke-CISRemediation.ps1
-# from files_2.zip.  Fallback / standalone path when Ansible is
-# unavailable, or for targeted section-level remediation.
+# PowerShell-native CIS remediation using the combined
+# Invoke-CISRemediation-Combined.ps1 from the repo.
 #
-# Usage:  run_win_ps1_remediation <ip> <cis_level> [sections]
+# This is a SINGLE-FILE script — no separate helper is
+# needed. User-rights assignment is embedded in Section 2.
+#
+# The script does NOT have a -Level parameter; it always
+# applies all applicable controls for the given role.
+# Use -Sections to target individual sections.
+#
+# Usage:  run_win_ps1_remediation <ip> [sections]
 #   ip         : target VM IP
-#   cis_level  : "Level 1" or "Level 2"
-#   sections   : optional space-separated list e.g. "01 02 09"
-#                default: all sections
+#   sections   : optional space-separated e.g. "01 02 09"
+#                default: all sections (1 2 5 9 17 18 19)
 #
-# Requires WIN_PS1_REMEDIATE to point at Invoke-CISRemediation.ps1
-# (auto-set by setup_win_profile.sh, lives inside window-baseline/).
+# PS1 parameters supported:
+#   -ServerRole member_server | domain_controller  (from WIN_SERVER_ROLE)
+#   -Sections   @(1,2,5,...)                       (optional)
+#   -WhatIf     (dry-run, writes nothing)
+#   -SkipBackup (skip pre-change secedit/auditpol/reg export)
 # ======================================================
 run_win_ps1_remediation() {
     local ip="$1"
-    local cis_level="${2:-Level 1}"
-    local sections="${3:-}"
+    local sections="${2:-}"
 
     if [ ! -f "$WIN_PS1_REMEDIATE" ]; then
         echo -e "${RED}❌ [WinPS1] ${WIN_PS1_REMEDIATE} not found.${NC}"
-        echo -e "${YELLOW}   Run: ./setup_win_profile.sh /path/to/files_2.zip${NC}"
+        echo -e "${YELLOW}   Commit Invoke-CISRemediation-Combined.ps1 to ${WIN_CIS_DIR}/${NC}"
         return 1
     fi
 
@@ -334,45 +366,46 @@ run_win_ps1_remediation() {
         return 1
     fi
 
-    local level_num=1
-    [ "$cis_level" == "Level 2" ] && level_num=2
-
+    # Build optional -Sections argument  e.g. "1 2 9" → "-Sections @(1,2,9)"
     local sections_arg=""
-    [ -n "$sections" ] && sections_arg="-Sections @(${sections// /,})"
+    if [ -n "$sections" ]; then
+        local joined
+        joined=$(echo "$sections" | tr ' ' ',')
+        sections_arg="-Sections @(${joined})"
+    fi
 
-    echo -e "${CYAN}📤 [WinPS1/${ip}] Uploading + running Invoke-CISRemediation.ps1 (L${level_num}, role=${WIN_SERVER_ROLE})...${NC}"
+    echo -e "${CYAN}📤 [WinPS1/${ip}] Uploading + running Invoke-CISRemediation-Combined.ps1${NC}"
+    echo -e "${CYAN}   role=${WIN_SERVER_ROLE} | sections=${sections:-all (1,2,5,9,17,18,19)}${NC}"
 
-    # Escape backticks and dollar signs in PS1 content for bash heredoc
-    local ps1_content helper_content encoded_main encoded_helper
+    # Base64-encode the combined script (no helper needed)
+    local encoded_main
     encoded_main=$(base64 -w0 < "$WIN_PS1_REMEDIATE")
-    encoded_helper=""
-    [ -f "$WIN_PS1_HELPER" ] && encoded_helper=$(base64 -w0 < "$WIN_PS1_HELPER")
 
     az vm run-command invoke \
         -g "$RG_NAME" -n "$vm_name" \
         --command-id RunPowerShellScript \
         --scripts "
 \$ErrorActionPreference = 'Continue'
-# Decode + write helper
-if ('${encoded_helper}') {
-    [IO.File]::WriteAllBytes('C:\Windows\Temp\02_user_rights.ps1',
-        [Convert]::FromBase64String('${encoded_helper}'))
-}
-# Decode + write main script
-[IO.File]::WriteAllBytes('C:\Windows\Temp\Invoke-CISRemediation.ps1',
-    [Convert]::FromBase64String('${encoded_main}'))
-# Execute
-& 'C:\Windows\Temp\Invoke-CISRemediation.ps1' \`
+
+# Decode and write the combined remediation script
+[IO.File]::WriteAllBytes(
+    'C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1',
+    [Convert]::FromBase64String('${encoded_main}')
+)
+
+# Execute — applies all applicable controls for the given role
+& 'C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1' \`
     -ServerRole '${WIN_SERVER_ROLE}' \`
-    -Level ${level_num} \`
     ${sections_arg}
+
 # Cleanup
-Remove-Item 'C:\Windows\Temp\Invoke-CISRemediation.ps1','C:\Windows\Temp\02_user_rights.ps1' -Force -EA SilentlyContinue
+Remove-Item 'C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1' \`
+    -Force -ErrorAction SilentlyContinue
 " -o tsv 2>/dev/null
 
     local rc=$?
     if [ $rc -eq 0 ]; then
-        echo -e "${GREEN}✅ [WinPS1/${ip}] PS1 remediation complete (L${level_num})${NC}"
+        echo -e "${GREEN}✅ [WinPS1/${ip}] Combined PS1 remediation complete (role=${WIN_SERVER_ROLE})${NC}"
     else
         echo -e "${RED}❌ [WinPS1/${ip}] az run-command failed (rc=${rc})${NC}"
     fi
@@ -529,15 +562,22 @@ remediate_windows_host() {
     fi
     echo -e "${CYAN}   → Detected: Windows ${ver}${NC}"
 
+    # ------------------------------------------------------------------
+    # WS2022: primary path is the combined PS1 (no Ansible role needed).
+    # Other versions use Ansible ansible-lockdown roles as before.
+    # PS1 does not filter by level — it applies all applicable controls.
+    # ------------------------------------------------------------------
+    if [ "$ver" == "2022" ]; then
+        echo -e "${CYAN}🛡️  [Win/2022] Using Invoke-CISRemediation-Combined.ps1 (role=${WIN_SERVER_ROLE})${NC}"
+        run_win_ps1_remediation "$ip"
+        return $?
+    fi
+
     local role_name role_install_target playbook_file tag_scope_l1
     case "$ver" in
         2019) role_name="ansible-lockdown.windows_2019_cis"
               role_install_target="ansible-lockdown.windows_2019_cis"
               playbook_file="window-default-cis/cis_remediate_2019.yml"
-              tag_scope_l1="level1-memberserver" ;;
-        2022) role_name="ansible-lockdown.windows_2022_cis"
-              role_install_target="ansible-lockdown.windows_2022_cis"
-              playbook_file="window-default-cis/cis_remediate_2022.yml"
               tag_scope_l1="level1-memberserver" ;;
         2025) role_name="Windows-2025-CIS"
               role_install_target="git+https://github.com/ansible-lockdown/Windows-2025-CIS.git"
@@ -995,12 +1035,12 @@ update_profile_vars() {
             UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level1_server"
             RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_server_l1"
             OS_LVL="1"
-            WIN_INSPEC_LVL="1"   # → --input profile_level=1 → L1-tagged controls in scope
+            WIN_INSPEC_LVL="1"   # → --input profile_level=1 → L1 view in Heimdall/SAF-CLI
         else
             UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level2_server"
             RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis"
             OS_LVL="2"
-            WIN_INSPEC_LVL="2"   # → --input profile_level=2 → L1 + L2 controls in scope
+            WIN_INSPEC_LVL="2"   # → --input profile_level=2 → L1+L2 view in Heimdall/SAF-CLI
         fi
     fi
 }
@@ -1271,21 +1311,22 @@ run_phase_1() {
     fi
 
     # ================================================================
-    # WINDOWS — cinc-auditor (CIS WS2022 v5.0.0, files_2.zip profile)
+    # WINDOWS — cinc-auditor (CIS WS2022 v5.0.0 combined profile)
     # ================================================================
-    # Profile inputs (from inspec.yml in window-default-cis/window-baseline/):
-    #   server_role  = member_server | domain_controller  (WIN_SERVER_ROLE)
-    #   profile_level= 1 | 2                              (WIN_INSPEC_LVL)
+    # Profile: window-default-cis/window-baseline/ (inspec.yml +
+    #          controls/cis_ws2022_v5_0_0_benchmark.rb)
     #
-    # All 427 controls (352 L1 + 75 L2) always execute.
-    # The profile_level input is metadata: Heimdall / SAF CLI uses it to
-    # filter the report view (L1-only vs L1+L2).  rc=100/101 = pass/fail
-    # with findings — both are success for our purposes.
+    # Inputs:
+    #   server_role   = member_server | domain_controller  (WIN_SERVER_ROLE)
+    #   profile_level = 1 | 2                              (WIN_INSPEC_LVL)
+    #
+    # All controls always execute. profile_level is metadata only —
+    # Heimdall/SAF-CLI uses it to filter the report view.
+    # rc=100/101 = pass/fail with findings — both treated as success.
     # ================================================================
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
 
-            # Validate profile structure once before forking
             validate_win_cis_profile || {
                 echo -e "${RED}❌ [Phase1/Win] Profile validation failed — skipping all Windows hosts.${NC}"
                 return 1
@@ -1298,7 +1339,7 @@ run_phase_1() {
                         exit 1
                     }
 
-                    # ---- CIS benchmark (files_2.zip profile) ----
+                    # ---- CIS benchmark (combined .rb profile) ----
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP${NC}"
                         echo -e "${CYAN}   profile: ${WIN_CIS_BENCHMARK} | role: ${WIN_SERVER_ROLE} | level: ${WIN_INSPEC_LVL}${NC}"
@@ -1307,7 +1348,7 @@ run_phase_1() {
                             -t "winrm://${IP}" \
                             --user="${AUDIT_USER}" \
                             --password="${AUDIT_PASS}" \
-                            --input-file "window-default-cis/inputs.yml" \
+                            --input-file "${WIN_CIS_DIR}/inputs.yml" \
                             --input "server_role=${WIN_SERVER_ROLE}" \
                             --input "profile_level=${WIN_INSPEC_LVL}" \
                             --input "ms_or_dc=${WIN_SERVER_ROLE}" \
@@ -1509,6 +1550,8 @@ run_remediation() {
     fi
 
     # -------------------- WINDOWS --------------------
+    # WS2022: Invoke-CISRemediation-Combined.ps1 (direct PS1 via az run-command)
+    # WS2019/2025/Win10/11: Ansible ansible-lockdown roles (unchanged)
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
@@ -1760,7 +1803,7 @@ run_phase_4() {
     fi
 
     # ================================================================
-    # WINDOWS VERIFY — cinc-auditor (CIS WS2022 v5.0.0, files_2.zip)
+    # WINDOWS VERIFY — cinc-auditor (CIS WS2022 v5.0.0 combined profile)
     # Same inputs as Phase 1; report filename uses 'after' prefix.
     # ================================================================
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
@@ -1787,7 +1830,7 @@ run_phase_4() {
                             -t "winrm://${IP}" \
                             --user="${AUDIT_USER}" \
                             --password="${AUDIT_PASS}" \
-                            --input-file "window-default-cis/inputs.yml" \
+                            --input-file "${WIN_CIS_DIR}/inputs.yml" \
                             --input "server_role=${WIN_SERVER_ROLE}" \
                             --input "profile_level=${WIN_INSPEC_LVL}" \
                             --input "ms_or_dc=${WIN_SERVER_ROLE}" \
@@ -2016,7 +2059,7 @@ while true; do
     update_profile_vars
     echo -e "\n${CYAN}------------------------------------------------------${NC}"
     echo -e "1) ${BOLD}SCAN ONLY${NC}      (Phase 0.2b done ✅ — SCP install → scan)"
-    echo -e "2) ${BOLD}REMEDIATE ONLY${NC} (Ansible / oscap --remediate)"
+    echo -e "2) ${BOLD}REMEDIATE ONLY${NC} (Ansible / oscap --remediate / PS1)"
     echo -e "3) ${BOLD}FULL PIPELINE${NC}  (Scan → Remediate → Verify)"
     echo -e "4) ${BOLD}CLEANUP${NC}        (Remove tools + user; VM stays hardened)"
     echo -e "5) ${BOLD}EXIT${NC}"
