@@ -1,56 +1,67 @@
 ---
-- name: Remediate Windows Server 2022 - CIS Benchmark
+# =============================================================================
+# CIS Windows Server 2022 Benchmark v5.0.0 — Ansible Remediation Playbook
+# =============================================================================
+# Called by: remediate_windows_host() in audit_main.sh
+# Invocation:
+#   ansible-playbook -i inventory.ini window-default-cis/cis_remediate_2022.yml \
+#     --limit <ip> --tags level1-memberserver
+#
+# Level 1 only:  --tags level1-memberserver
+# Level 1 + 2:   --tags level1-memberserver,level2-memberserver
+#
+# Role source:  ansible-galaxy role install ansible-lockdown.windows_2022_cis
+#               https://github.com/ansible-lockdown/Windows-2022-CIS
+# =============================================================================
+- name: CIS Microsoft Windows Server 2022 — Baseline Remediation
   hosts: windows_nodes
   gather_facts: true
 
-  # ─────────────────────────────────────────────
-  # Belt-and-suspenders against future ansible-core
-  # strictness changes. The ansible-lockdown role
-  # uses some legacy conditional patterns that newer
-  # cores reject. This setting matches the role's
-  # historical behavior.
-  # ─────────────────────────────────────────────
-  environment:
-    ANSIBLE_ALLOW_BROKEN_CONDITIONALS: "True"
-
   vars:
-    # ─────────────────────────────────────────────
-    # WinRM resilience — CIS hardening reboots the
-    # host mid-play. These timeouts give Ansible
-    # enough patience to reconnect after each reboot.
-    # ─────────────────────────────────────────────
-    ansible_winrm_read_timeout_sec: 180
-    ansible_winrm_operation_timeout_sec: 120
+    # -----------------------------------------------------------------------
+    # ansible-lockdown role variables
+    # -----------------------------------------------------------------------
+    # Set to true only if this host is a domain controller.
+    win22cis_is_domain_controller: false
 
-    # ─────────────────────────────────────────────
-    # Section toggles — note the CORRECT prefix
-    # is win22cis_ (NOT win2022cis_).
-    # ─────────────────────────────────────────────
-    win22cis_section1: true   # Account Policies
-    win22cis_section2: true   # Local Policies
-    win22cis_section5: true   # System Services
-    win22cis_section9: true   # Windows Firewall
-    win22cis_section17: true  # Advanced Audit Policy
-    win22cis_section18: true  # Administrative Templates (Computer)
-    win22cis_section19: true  # Administrative Templates (User)
+    # Rule-level toggles — set false to skip individual noisy rules.
+    # Uncomment and adjust as needed for your environment.
+    # win22cis_rule_2_3_1_1: true
+    # win22cis_rule_18_9_x: true
 
-    # ─────────────────────────────────────────────
-    # Server role — member server (not DC).
-    # ─────────────────────────────────────────────
-    win22cis_section_member_server: true
-    win22cis_section_domain_controller: false
+    # Screensaver / timeout — adjust to org policy.
+    win22cis_lock_timeout: 900
 
-    # ─────────────────────────────────────────────
-    # Safety overrides — rules that break automation
-    # ─────────────────────────────────────────────
-    win22cis_rule_2_3_10_5: false   # Don't disable anonymous SAM (breaks WinRM)
-    win22cis_rule_2_3_10_8: false   # Don't restrict named pipes (breaks remote mgmt)
+    # -----------------------------------------------------------------------
+    # Passed in from audit_main.sh via --extra-vars or inventory group_vars
+    # -----------------------------------------------------------------------
+    cis_remediation_level: "{{ cis_level_override | default('1') }}"
 
-    # ─────────────────────────────────────────────
-    # Audit log location
-    # ─────────────────────────────────────────────
-    win22cis_audit_log_dir: 'C:\Windows\Temp\AuditLogs'
-    win22cis_audit_output_dir: 'C:\Windows\Temp\AuditLogs'
+  pre_tasks:
+    - name: "[Pre] Confirm target is Windows Server 2022"
+      ansible.windows.win_shell: |
+        (Get-CimInstance Win32_OperatingSystem).Caption
+      register: os_caption
+      changed_when: false
+
+    - name: "[Pre] Print detected OS"
+      ansible.builtin.debug:
+        msg: "Target OS: {{ os_caption.stdout | trim }}"
+
+    - name: "[Pre] Fail if not Windows Server 2022"
+      ansible.builtin.fail:
+        msg: >-
+          This playbook is for Windows Server 2022 only.
+          Detected: {{ os_caption.stdout | trim }}
+      when: "'2022' not in os_caption.stdout"
 
   roles:
     - role: ansible-lockdown.windows_2022_cis
+
+  post_tasks:
+    - name: "[Post] Log remediation completion"
+      ansible.builtin.debug:
+        msg: >-
+          CIS WS2022 remediation complete on {{ inventory_hostname }}.
+          Tags applied: {{ ansible_run_tags | default('all') }}.
+          A reboot is recommended to fully apply all policy changes.
