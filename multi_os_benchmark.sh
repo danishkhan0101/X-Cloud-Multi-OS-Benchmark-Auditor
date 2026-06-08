@@ -1855,7 +1855,7 @@ run_cleanup() {
 execute_phases() {
     case $H_MODE in
         scan)      run_phase_1 ;;
-        remediate) run_remediation ;;
+        remediate) run_remediation; run_phase_4 ;;
         full)      run_phase_1; run_remediation; run_phase_4 ;;
     esac
 }
@@ -1919,7 +1919,7 @@ while true; do
     read -r -p "Choose an option [1-5]: " choice
     case $choice in
         1) run_phase_1 ;;
-        2) run_remediation ;;
+        2) run_remediation; run_phase_4 ;;
         3) run_phase_1; run_remediation; run_phase_4 ;;
         4) run_cleanup ;;
         5) exit 0 ;;
