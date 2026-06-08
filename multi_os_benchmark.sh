@@ -1307,8 +1307,11 @@ run_phase_1() {
                             -t "winrm://${IP}" \
                             --user="${AUDIT_USER}" \
                             --password="${AUDIT_PASS}" \
+                            --input-file "window-default-cis/inputs.yml" \
                             --input "server_role=${WIN_SERVER_ROLE}" \
                             --input "profile_level=${WIN_INSPEC_LVL}" \
+                            --input "ms_or_dc=${WIN_SERVER_ROLE}" \
+                            --input "level_1_or_2=${WIN_INSPEC_LVL}" \
                             --reporter "json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
                         rc=$?
 
@@ -1784,8 +1787,11 @@ run_phase_4() {
                             -t "winrm://${IP}" \
                             --user="${AUDIT_USER}" \
                             --password="${AUDIT_PASS}" \
+                            --input-file "window-default-cis/inputs.yml" \
                             --input "server_role=${WIN_SERVER_ROLE}" \
                             --input "profile_level=${WIN_INSPEC_LVL}" \
+                            --input "ms_or_dc=${WIN_SERVER_ROLE}" \
+                            --input "level_1_or_2=${WIN_INSPEC_LVL}" \
                             --reporter "json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
                         rc=$?
 
