@@ -637,6 +637,7 @@ control 'cis-2.2.36' do
   impact 0.7
   tag cis_id: '2.2.36'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'DC'
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -1049,6 +1050,7 @@ control 'cis-2.3.7.1' do
   impact 0.7
   tag cis_id: '2.3.7.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -1117,6 +1119,7 @@ control 'cis-2.3.7.6' do
   impact 0.7
   tag cis_id: '2.3.7.6'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'MS'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -1295,6 +1298,7 @@ control 'cis-2.3.10.4' do
   impact 0.7
   tag cis_id: '2.3.10.4'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2595,6 +2599,7 @@ control 'cis-18.1.3' do
   impact 0.7
   tag cis_id: '18.1.3'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2740,6 +2745,7 @@ control 'cis-18.5.5' do
   impact 0.7
   tag cis_id: '18.5.5'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2766,6 +2772,7 @@ control 'cis-18.5.7' do
   impact 0.7
   tag cis_id: '18.5.7'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2793,6 +2800,7 @@ control 'cis-18.5.9' do
   impact 0.7
   tag cis_id: '18.5.9'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2806,6 +2814,7 @@ control 'cis-18.5.10' do
   impact 0.7
   tag cis_id: '18.5.10'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2860,6 +2869,7 @@ control 'cis-18.6.4.3' do
   impact 0.7
   tag cis_id: '18.6.4.3'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2887,6 +2897,7 @@ control 'cis-18.6.5.1' do
   impact 0.7
   tag cis_id: '18.6.5.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2939,6 +2950,7 @@ control 'cis-18.6.9.1' do
   impact 0.7
   tag cis_id: '18.6.9.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2952,6 +2964,7 @@ control 'cis-18.6.9.2' do
   impact 0.7
   tag cis_id: '18.6.9.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2965,6 +2978,7 @@ control 'cis-18.6.10.2' do
   impact 0.7
   tag cis_id: '18.6.10.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3052,6 +3066,7 @@ control 'cis-18.6.20.1' do
   impact 0.7
   tag cis_id: '18.6.20.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3065,6 +3080,7 @@ control 'cis-18.6.20.2' do
   impact 0.7
   tag cis_id: '18.6.20.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3091,6 +3107,7 @@ control 'cis-18.6.21.2' do
   impact 0.7
   tag cis_id: '18.6.21.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'MS'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3266,6 +3283,7 @@ control 'cis-18.8.1.1' do
   impact 0.7
   tag cis_id: '18.8.1.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3516,6 +3534,7 @@ control 'cis-18.9.20.1.2' do
   impact 0.7
   tag cis_id: '18.9.20.1.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3529,6 +3548,7 @@ control 'cis-18.9.20.1.3' do
   impact 0.7
   tag cis_id: '18.9.20.1.3'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3542,6 +3562,7 @@ control 'cis-18.9.20.1.4' do
   impact 0.7
   tag cis_id: '18.9.20.1.4'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3568,6 +3589,7 @@ control 'cis-18.9.20.1.6' do
   impact 0.0
   tag cis_id: '18.9.20.1.6'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'manual'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3582,6 +3604,7 @@ control 'cis-18.9.20.1.7' do
   impact 0.7
   tag cis_id: '18.9.20.1.7'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3595,6 +3618,7 @@ control 'cis-18.9.20.1.8' do
   impact 0.7
   tag cis_id: '18.9.20.1.8'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3608,6 +3632,7 @@ control 'cis-18.9.20.1.9' do
   impact 0.7
   tag cis_id: '18.9.20.1.9'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3621,6 +3646,7 @@ control 'cis-18.9.20.1.10' do
   impact 0.7
   tag cis_id: '18.9.20.1.10'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3634,6 +3660,7 @@ control 'cis-18.9.20.1.11' do
   impact 0.7
   tag cis_id: '18.9.20.1.11'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3647,6 +3674,7 @@ control 'cis-18.9.20.1.12' do
   impact 0.7
   tag cis_id: '18.9.20.1.12'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3660,6 +3688,7 @@ control 'cis-18.9.20.1.13' do
   impact 0.7
   tag cis_id: '18.9.20.1.13'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3674,6 +3703,7 @@ control 'cis-18.9.23.1' do
   impact 0.7
   tag cis_id: '18.9.23.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3841,6 +3871,7 @@ control 'cis-18.9.28.1' do
   impact 0.7
   tag cis_id: '18.9.28.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3933,6 +3964,7 @@ control 'cis-18.9.33.1' do
   impact 0.7
   tag cis_id: '18.9.33.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3946,6 +3978,7 @@ control 'cis-18.9.33.2' do
   impact 0.7
   tag cis_id: '18.9.33.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3959,6 +3992,7 @@ control 'cis-18.9.35.6.1' do
   impact 0.7
   tag cis_id: '18.9.35.6.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3972,6 +4006,7 @@ control 'cis-18.9.35.6.2' do
   impact 0.7
   tag cis_id: '18.9.35.6.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4052,6 +4087,7 @@ control 'cis-18.9.38.2' do
   impact 0.0
   tag cis_id: '18.9.38.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'MS'
   tag mechanism: 'manual'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4080,6 +4116,7 @@ control 'cis-18.9.49.5.1' do
   impact 0.7
   tag cis_id: '18.9.49.5.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4093,6 +4130,7 @@ control 'cis-18.9.49.11.1' do
   impact 0.7
   tag cis_id: '18.9.49.11.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4106,6 +4144,7 @@ control 'cis-18.9.51.1' do
   impact 0.7
   tag cis_id: '18.9.51.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4146,6 +4185,7 @@ control 'cis-18.10.4.1' do
   impact 0.7
   tag cis_id: '18.10.4.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4224,6 +4264,7 @@ control 'cis-18.10.11.1' do
   impact 0.7
   tag cis_id: '18.10.11.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4250,6 +4291,7 @@ control 'cis-18.10.13.2' do
   impact 0.7
   tag cis_id: '18.10.13.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4315,6 +4357,7 @@ control 'cis-18.10.16.2' do
   impact 0.7
   tag cis_id: '18.10.16.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4341,6 +4384,7 @@ control 'cis-18.10.16.4' do
   impact 0.7
   tag cis_id: '18.10.16.4'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4354,6 +4398,7 @@ control 'cis-18.10.16.5' do
   impact 0.7
   tag cis_id: '18.10.16.5'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4367,6 +4412,7 @@ control 'cis-18.10.16.6' do
   impact 0.7
   tag cis_id: '18.10.16.6'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4380,6 +4426,7 @@ control 'cis-18.10.18.1' do
   impact 0.7
   tag cis_id: '18.10.18.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4458,6 +4505,7 @@ control 'cis-18.10.18.7' do
   impact 0.7
   tag cis_id: '18.10.18.7'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4627,6 +4675,7 @@ control 'cis-18.10.36.1' do
   impact 0.7
   tag cis_id: '18.10.36.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4640,6 +4689,7 @@ control 'cis-18.10.40.1' do
   impact 0.7
   tag cis_id: '18.10.40.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4761,6 +4811,7 @@ control 'cis-18.10.42.8.1' do
   impact 0.7
   tag cis_id: '18.10.42.8.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4909,6 +4960,7 @@ control 'cis-18.10.42.12.1' do
   impact 0.7
   tag cis_id: '18.10.42.12.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5015,6 +5067,7 @@ control 'cis-18.10.56.1' do
   impact 0.7
   tag cis_id: '18.10.56.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5041,6 +5094,7 @@ control 'cis-18.10.57.3.2.1' do
   impact 0.7
   tag cis_id: '18.10.57.3.2.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5054,6 +5108,7 @@ control 'cis-18.10.57.3.3.1' do
   impact 0.7
   tag cis_id: '18.10.57.3.3.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5067,6 +5122,7 @@ control 'cis-18.10.57.3.3.2' do
   impact 0.0
   tag cis_id: '18.10.57.3.3.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'manual'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5095,6 +5151,7 @@ control 'cis-18.10.57.3.3.4' do
   impact 0.7
   tag cis_id: '18.10.57.3.3.4'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5108,6 +5165,7 @@ control 'cis-18.10.57.3.3.5' do
   impact 0.0
   tag cis_id: '18.10.57.3.3.5'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'manual'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5122,6 +5180,7 @@ control 'cis-18.10.57.3.3.6' do
   impact 0.7
   tag cis_id: '18.10.57.3.3.6'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5135,6 +5194,7 @@ control 'cis-18.10.57.3.3.7' do
   impact 0.7
   tag cis_id: '18.10.57.3.3.7'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5214,6 +5274,7 @@ control 'cis-18.10.57.3.10.1' do
   impact 0.7
   tag cis_id: '18.10.57.3.10.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5228,6 +5289,7 @@ control 'cis-18.10.57.3.10.2' do
   impact 0.7
   tag cis_id: '18.10.57.3.10.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5294,6 +5356,7 @@ control 'cis-18.10.59.2' do
   impact 0.0
   tag cis_id: '18.10.59.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'manual'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5321,6 +5384,7 @@ control 'cis-18.10.59.4' do
   impact 0.7
   tag cis_id: '18.10.59.4'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5334,6 +5398,7 @@ control 'cis-18.10.63.1' do
   impact 0.0
   tag cis_id: '18.10.63.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'manual'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5362,6 +5427,7 @@ control 'cis-18.10.81.1' do
   impact 0.7
   tag cis_id: '18.10.81.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5414,6 +5480,7 @@ control 'cis-18.10.82.3' do
   impact 0.7
   tag cis_id: '18.10.82.3'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5453,6 +5520,7 @@ control 'cis-18.10.88.1' do
   impact 0.7
   tag cis_id: '18.10.88.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5466,6 +5534,7 @@ control 'cis-18.10.88.2' do
   impact 0.7
   tag cis_id: '18.10.88.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5531,6 +5600,7 @@ control 'cis-18.10.90.2.2' do
   impact 0.7
   tag cis_id: '18.10.90.2.2'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5570,6 +5640,7 @@ control 'cis-18.10.91.1' do
   impact 0.7
   tag cis_id: '18.10.91.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5715,6 +5786,7 @@ control 'cis-19.6.6.1.1' do
   impact 0.7
   tag cis_id: '19.6.6.1.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry_user'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5825,6 +5897,7 @@ control 'cis-19.7.8.3' do
   impact 0.7
   tag cis_id: '19.7.8.3'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry_user'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5847,6 +5920,7 @@ control 'cis-19.7.8.4' do
   impact 0.7
   tag cis_id: '19.7.8.4'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry_user'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5913,6 +5987,7 @@ control 'cis-19.7.46.2.1' do
   impact 0.7
   tag cis_id: '19.7.46.2.1'
   tag level: ['L2']
+  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry_user'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
