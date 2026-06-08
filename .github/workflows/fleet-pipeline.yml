@@ -69,20 +69,23 @@ permissions:
   contents: write
 
 jobs:
-  # 🏭 JOB 1: THE MATRIX FACTORY (Builds the JSON Queue)
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 1: THE MATRIX FACTORY — builds the JSON queue of OS targets
+  # ─────────────────────────────────────────────────────────────────────────
   prepare-queue:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.build-matrix.outputs.matrix }}
       safe_mode: ${{ steps.safety-gate.outputs.safe_mode }}
-      os_matrix: ${{ steps.discover-vms.outputs.os_matrix }} 
+      os_matrix: ${{ steps.discover-vms.outputs.os_matrix }}
+
     steps:
       - name: '🛡️ Safety Gate: Blast Radius Control'
         id: safety-gate
         run: |
           PROFILE="${{ github.event.inputs.profile }}"
           MODE="${{ github.event.inputs.mode }}"
-          
+
           if [[ "$PROFILE" == *"all"* ]] && [ "$MODE" != "scan" ]; then
             echo "⚠️ SAFETY WARNING: Mass remediation on 'all' profiles is blocked."
             echo "safe_mode=scan" >> $GITHUB_OUTPUT
@@ -95,7 +98,7 @@ jobs:
         run: |
           PROFILE_RAW="${{ github.event.inputs.profile }}"
           LEVEL="${{ github.event.inputs.cis_level }}"
-          
+
           if [[ "$PROFILE_RAW" == *"all"* ]]; then
             echo 'matrix=[{"profile":"all","level":"all","name":"Full-Fleet-Audit"}]' >> $GITHUB_OUTPUT
           elif [[ "$PROFILE_RAW" == *"cis"* ]]; then
@@ -116,50 +119,54 @@ jobs:
           TARGET_ENV="${{ github.event.inputs.environment_tag || 'all' }}"
           STRATEGY="${{ github.event.inputs.execution_strategy }}"
           RG_NAME="${{ vars.AZURE_RG_NAME }}"
-          
+
           echo "📡 Querying Azure for online VMs in [$RG_NAME]..."
-          
+
           if [ "$TARGET_ENV" == "all" ]; then
-              VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[?powerState=='VM running'].[storageProfile.osDisk.osType, storageProfile.imageReference.offer, name, publicIps]" -o tsv)
+            VM_DATA=$(az vm list -d -g "$RG_NAME" \
+              --query "[?powerState=='VM running'].[storageProfile.osDisk.osType, storageProfile.imageReference.offer, name, publicIps]" \
+              -o tsv)
           else
-              VM_DATA=$(az vm list -d -g "$RG_NAME" --query "[?tags.Environment=='$TARGET_ENV' && powerState=='VM running'].[storageProfile.osDisk.osType, storageProfile.imageReference.offer, name, publicIps]" -o tsv)
+            VM_DATA=$(az vm list -d -g "$RG_NAME" \
+              --query "[?tags.Environment=='$TARGET_ENV' && powerState=='VM running'].[storageProfile.osDisk.osType, storageProfile.imageReference.offer, name, publicIps]" \
+              -o tsv)
           fi
 
           HAS_UBUNTU=false; HAS_RHEL=false; HAS_ROCKY=false; HAS_ALMA=false; HAS_WINDOWS=false
           MATRIX_JSON="["
 
           while IFS=$'\t' read -r os offer name raw_ip; do
-              ip=$(echo "$raw_ip" | tr -d '\r' | xargs)
-              if [ -z "$ip" ] || [ "$ip" == "None" ]; then continue; fi
+            ip=$(echo "$raw_ip" | tr -d '\r' | xargs)
+            if [ -z "$ip" ] || [ "$ip" == "None" ]; then continue; fi
 
-              offer_lower="${offer,,}"
-              name_lower="${name,,}"
-              
-              if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
-                  if [[ "$offer_lower" == *"rocky"* ]] || [[ "$name_lower" == *"rocky"* ]]; then 
-                      HAS_ROCKY=true; NODE_OS="Rocky"
-                  elif [[ "$offer_lower" == *"alma"* ]] || [[ "$name_lower" == *"alma"* ]]; then 
-                      HAS_ALMA=true; NODE_OS="Alma"
-                  elif [[ "$offer_lower" == *"rhel"* ]] || [[ "$name_lower" == *"rhel"* ]]; then 
-                      HAS_RHEL=true; NODE_OS="RHEL"
-                  else 
-                      HAS_UBUNTU=true; NODE_OS="Ubuntu"
-                  fi
-              elif [[ "$os" == *"Windows"* ]]; then
-                  HAS_WINDOWS=true; NODE_OS="Windows"
-              fi
+            offer_lower="${offer,,}"
+            name_lower="${name,,}"
 
-              if [ "$STRATEGY" == "per-node" ]; then
-                  MATRIX_JSON+="{\"os\":\"$NODE_OS\", \"ip\":\"$ip\"},"
+            if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
+              if   [[ "$offer_lower" == *"rocky"* ]] || [[ "$name_lower" == *"rocky"* ]]; then
+                HAS_ROCKY=true; NODE_OS="Rocky"
+              elif [[ "$offer_lower" == *"alma"*  ]] || [[ "$name_lower" == *"alma"*  ]]; then
+                HAS_ALMA=true;  NODE_OS="Alma"
+              elif [[ "$offer_lower" == *"rhel"*  ]] || [[ "$name_lower" == *"rhel"*  ]]; then
+                HAS_RHEL=true;  NODE_OS="RHEL"
+              else
+                HAS_UBUNTU=true; NODE_OS="Ubuntu"
               fi
+            elif [[ "$os" == *"Windows"* ]]; then
+              HAS_WINDOWS=true; NODE_OS="Windows"
+            fi
+
+            if [ "$STRATEGY" == "per-node" ]; then
+              MATRIX_JSON+="{\"os\":\"$NODE_OS\", \"ip\":\"$ip\"},"
+            fi
           done <<< "$VM_DATA"
 
           if [ "$STRATEGY" == "os-grouped" ]; then
-              [ "$HAS_UBUNTU" == true ] && MATRIX_JSON+="{\"os\":\"Ubuntu\", \"ip\":\"all\"},"
-              [ "$HAS_RHEL" == true ] && MATRIX_JSON+="{\"os\":\"RHEL\", \"ip\":\"all\"},"
-              [ "$HAS_ROCKY" == true ] && MATRIX_JSON+="{\"os\":\"Rocky\", \"ip\":\"all\"},"
-              [ "$HAS_ALMA" == true ] && MATRIX_JSON+="{\"os\":\"Alma\", \"ip\":\"all\"},"
-              [ "$HAS_WINDOWS" == true ] && MATRIX_JSON+="{\"os\":\"Windows\", \"ip\":\"all\"},"
+            [ "$HAS_UBUNTU"  == true ] && MATRIX_JSON+="{\"os\":\"Ubuntu\",  \"ip\":\"all\"},"
+            [ "$HAS_RHEL"    == true ] && MATRIX_JSON+="{\"os\":\"RHEL\",    \"ip\":\"all\"},"
+            [ "$HAS_ROCKY"   == true ] && MATRIX_JSON+="{\"os\":\"Rocky\",   \"ip\":\"all\"},"
+            [ "$HAS_ALMA"    == true ] && MATRIX_JSON+="{\"os\":\"Alma\",    \"ip\":\"all\"},"
+            [ "$HAS_WINDOWS" == true ] && MATRIX_JSON+="{\"os\":\"Windows\", \"ip\":\"all\"},"
           fi
 
           MATRIX_JSON="${MATRIX_JSON%,}]"
@@ -168,26 +175,28 @@ jobs:
           echo "✅ Active Execution Matrix: $MATRIX_JSON"
           echo "os_matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
 
-  # 🚀 JOB 2: THE 2D EXECUTION ENGINE (Profiles x Operating Systems)
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 2: THE 2D EXECUTION ENGINE — Profiles × Operating Systems
+  # ─────────────────────────────────────────────────────────────────────────
   run-audit:
     needs: prepare-queue
-    if: ${{ needs.prepare-queue.outputs.os_matrix != '[]' }} 
+    if: ${{ needs.prepare-queue.outputs.os_matrix != '[]' }}
     runs-on: ubuntu-latest
-    
+
     strategy:
-      fail-fast: false      
+      fail-fast: false
       matrix:
-        target: ${{ fromJSON(needs.prepare-queue.outputs.matrix) }}
-        os_target: ${{ fromJSON(needs.prepare-queue.outputs.os_matrix) }} 
+        target:    ${{ fromJSON(needs.prepare-queue.outputs.matrix) }}
+        os_target: ${{ fromJSON(needs.prepare-queue.outputs.os_matrix) }}
 
     env:
-      TARGET_ENV: ${{ github.event.inputs.environment_tag || 'Prod' }}
-      MODE: ${{ needs.prepare-queue.outputs.safe_mode }}
-      PROFILE: ${{ matrix.target.profile }}
-      CIS_LEVEL: ${{ matrix.target.level }}
+      TARGET_ENV:  ${{ github.event.inputs.environment_tag || 'Prod' }}
+      MODE:        ${{ needs.prepare-queue.outputs.safe_mode }}
+      PROFILE:     ${{ matrix.target.profile }}
+      CIS_LEVEL:   ${{ matrix.target.level }}
       MATRIX_NAME: ${{ matrix.target.name }}
-      TARGET_OS: ${{ matrix.os_target.os }}
-      TARGET_IP: ${{ matrix.os_target.ip }}
+      TARGET_OS:   ${{ matrix.os_target.os }}
+      TARGET_IP:   ${{ matrix.os_target.ip }}
 
     steps:
       - name: 📥 Pull Repository Code
@@ -198,79 +207,134 @@ jobs:
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
-      - name: 🔑 Setup SSH Key for Ubuntu/RHEL Targets
+      - name: 🔑 Setup SSH Key for Linux Targets
         if: matrix.os_target.os != 'Windows'
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
-          
+
       - name: 🔓 Extract Public Key for Auto-Healing
         if: matrix.os_target.os != 'Windows'
         run: |
           mkdir -p ~/.ssh
           ssh-add -L > ~/.ssh/id_rsa.pub
 
-      # ────────────────────────────────────────────────────────────────
-      # NOTE: OpenSCAP scanner & SCAP content are NOT installed here.
-      # The runner only orchestrates — it never executes `oscap` itself.
-      # All target-side scanning tools are provisioned on-demand by the
-      # script's `ensure_linux_scap_tools()` helper (idempotent, per-VM).
-      # ────────────────────────────────────────────────────────────────
+      # ──────────────────────────────────────────────────────────────────
+      # LINUX: install Ansible only. oscap/SCAP content is pushed to each
+      # VM on-demand by ensure_linux_scap_tools() inside the script.
+      # ──────────────────────────────────────────────────────────────────
       - name: 🛠️ Install Runner Orchestration Tools (Linux)
         if: matrix.os_target.os != 'Windows'
         run: |
-          sudo apt-get update
+          sudo apt-get update -qq
           sudo apt-get install -y sshpass
           python3 -m pip install --user --upgrade pip
-          # Pin ansible to a version compatible with ansible-lockdown roles.
-          # ansible 10.x ships ansible-core 2.17.x, which the role supports.
-          # See: https://github.com/ansible-lockdown/Windows-2022-CIS
           python3 -m pip install --user 'ansible>=10.0.0,<11.0.0'
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           sudo sh -c 'printf "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null\n" >> /etc/ssh/ssh_config'
           export ANSIBLE_HOST_KEY_CHECKING=False
- 
-      - name: 🛠️ Install Windows Tools (Cinc Auditor & WinRM)
+
+      # ──────────────────────────────────────────────────────────────────
+      # WINDOWS STEP 1: install Cinc Auditor (scanner) + Ansible + pywinrm
+      # Cinc Auditor runs from the runner against the VM via WinRM.
+      # ──────────────────────────────────────────────────────────────────
+      - name: 🛠️ Install Windows Tools (Cinc Auditor + Ansible + pywinrm)
         if: matrix.os_target.os == 'Windows'
         run: |
           python3 -m pip install --user --upgrade pip
-          # Same Ansible pin for Windows runs — ansible-lockdown role needs it
           python3 -m pip install --user 'ansible>=10.0.0,<11.0.0' pywinrm requests
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-auditor
           sudo ln -sf /usr/bin/cinc-auditor /usr/bin/inspec
 
+      # ──────────────────────────────────────────────────────────────────
+      # WINDOWS STEP 2: build the InSpec profile layout from files_2.zip.
+      # setup_win_profile.sh extracts:
+      #   window-default-cis/window-baseline/inspec.yml
+      #   window-default-cis/window-baseline/controls/section_*.rb
+      #   window-default-cis/window-baseline/Invoke-CISRemediation.ps1
+      #   window-default-cis/window-baseline/02_user_rights.ps1
+      # The zip is committed to the repo at window-default-cis/profile-source/
+      # ──────────────────────────────────────────────────────────────────
+      - name: 🗂️ Build CIS WS2022 InSpec Profile (window-baseline layout)
+        if: matrix.os_target.os == 'Windows'
+        run: |
+          chmod +x setup_win_profile.sh
+          ./setup_win_profile.sh window-default-cis/profile-source/files_2.zip
+
+      # ──────────────────────────────────────────────────────────────────
+      # WINDOWS STEP 3: install ansible-lockdown CIS roles for remediation.
+      # Primary path for CIS remediation is Ansible (cis_remediate_2022.yml).
+      # PowerShell (Invoke-CISRemediation.ps1) is the fallback.
+      # ──────────────────────────────────────────────────────────────────
+      - name: 📦 Install Ansible CIS Roles for Windows Remediation
+        if: matrix.os_target.os == 'Windows'
+        run: |
+          ansible-galaxy role install ansible-lockdown.windows_2019_cis
+          ansible-galaxy role install ansible-lockdown.windows_2022_cis
+          # WS2025 role pulled from GitHub (no Galaxy release yet)
+          ansible-galaxy role install \
+            git+https://github.com/ansible-lockdown/Windows-2025-CIS.git \
+            2>/dev/null || echo "⚠️ WS2025 role unavailable — skipped"
+
+      # ──────────────────────────────────────────────────────────────────
+      # MAIN: run the orchestrator script in headless CI/CD mode.
+      # WIN_SERVER_ROLE controls DC-only vs member-server CIS controls.
+      # ──────────────────────────────────────────────────────────────────
       - name: 🚀 Execute Fleet Commander
         env:
-          AZURE_RG_NAME: ${{ vars.AZURE_RG_NAME }}
-          AZURE_KV_NAME: ${{ vars.AZURE_KV_NAME }}
-          AZURE_KV_SECRET: ${{ vars.AZURE_KV_SECRET }}
-          LINUX_ADMIN_USER: ${{ vars.LINUX_ADMIN_USER }}
-          WINDOWS_ADMIN_USER: ${{ vars.WINDOWS_ADMIN_USER }}
-          ORG_NAME: ${{ vars.ORG_NAME }}
-          ORG_PREFIX: ${{ vars.ORG_PREFIX }}
-          GHOST_USER: ${{ vars.GHOST_USER }}
+          AZURE_RG_NAME:        ${{ vars.AZURE_RG_NAME }}
+          AZURE_KV_NAME:        ${{ vars.AZURE_KV_NAME }}
+          AZURE_KV_SECRET:      ${{ vars.AZURE_KV_SECRET }}
+          LINUX_ADMIN_USER:     ${{ vars.LINUX_ADMIN_USER }}
+          WINDOWS_ADMIN_USER:   ${{ vars.WINDOWS_ADMIN_USER }}
+          ORG_NAME:             ${{ vars.ORG_NAME }}
+          ORG_PREFIX:           ${{ vars.ORG_PREFIX }}
+          GHOST_USER:           ${{ vars.GHOST_USER }}
           CUSTOM_XCCDF_PROFILE: ${{ vars.CUSTOM_XCCDF_PROFILE }}
-          TICKET_ID: ${{ github.event.inputs.ticket_id }}
-          DEBUG_MODE: ${{ github.event.inputs.debug_mode }}
-          CLEANUP: ${{ github.event.inputs.cleanup_mode }}
+          # WIN_SERVER_ROLE: 'member_server' (default) or 'domain_controller'
+          # Set this in repo → Settings → Variables → Actions
+          WIN_SERVER_ROLE:      ${{ vars.WIN_SERVER_ROLE || 'member_server' }}
+          TICKET_ID:            ${{ github.event.inputs.ticket_id }}
+          DEBUG_MODE:           ${{ github.event.inputs.debug_mode }}
+          CLEANUP:              ${{ github.event.inputs.cleanup_mode }}
         run: |
-          echo "🎯 Targeting Environment: $TARGET_ENV"
-          echo "🖥️  Assigned OS Runner: $TARGET_OS ($TARGET_IP)"
+          echo "🎯 Targeting Environment : $TARGET_ENV"
+          echo "🖥️  Assigned OS Runner   : $TARGET_OS ($TARGET_IP)"
+          echo "🛡️  WIN_SERVER_ROLE      : $WIN_SERVER_ROLE"
           chmod +x multi_os_benchmark.sh
-          
+
           if [ "$PROFILE" == "all" ]; then
-            echo "🚀 FULL AUDIT MODE: Executing comprehensive internal scan loop..."
-            ./multi_os_benchmark.sh --headless --profile "all" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP" --target-os "$TARGET_OS" --target-ip "$TARGET_IP"
+            echo "🚀 FULL AUDIT MODE — running comprehensive scan loop..."
+            ./multi_os_benchmark.sh \
+              --headless \
+              --profile "all" \
+              --mode    "$MODE" \
+              --targets "$TARGET_ENV" \
+              --ticket  "$TICKET_ID" \
+              --debug   "$DEBUG_MODE" \
+              --cleanup "$CLEANUP" \
+              --target-os "$TARGET_OS" \
+              --target-ip "$TARGET_IP"
           else
             echo "📋 Running Single Profile: $PROFILE"
-            ./multi_os_benchmark.sh --headless --profile "$PROFILE" --mode "$MODE" --targets "$TARGET_ENV" --ticket "$TICKET_ID" --debug "$DEBUG_MODE" --cleanup "$CLEANUP" --target-os "$TARGET_OS" --target-ip "$TARGET_IP"
+            ./multi_os_benchmark.sh \
+              --headless \
+              --profile "$PROFILE" \
+              --mode    "$MODE" \
+              --targets "$TARGET_ENV" \
+              --ticket  "$TICKET_ID" \
+              --debug   "$DEBUG_MODE" \
+              --cleanup "$CLEANUP" \
+              --target-os "$TARGET_OS" \
+              --target-ip "$TARGET_IP"
           fi
-      
+
       - name: 🔎 Verify Report Generation
         id: check_reports
         run: |
           REPORT_COUNT=$(find . -maxdepth 1 -type f \( -name "*.html" -o -name "*.json" \) | wc -l)
+          echo "📊 Reports found: $REPORT_COUNT"
           if [ "$REPORT_COUNT" -gt 0 ]; then
             echo "has_reports=true" >> $GITHUB_OUTPUT
           else
@@ -288,20 +352,22 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
 
-  # 🏆 JOB 3: THE FAN-IN (Gathers all matrix data into one Zip & Release)
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 3: THE FAN-IN — gathers all matrix data into one zip & release
+  # ─────────────────────────────────────────────────────────────────────────
   publish-release:
-    needs: run-audit 
+    needs: run-audit
     if: always() && needs.run-audit.result == 'success'
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: 🕒 Set Up Release Variables
         run: |
           echo "DATE_TAG=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
-          
+
           PROFILE_RAW="${{ github.event.inputs.profile }}"
           LEVEL="${{ github.event.inputs.cis_level }}"
-          
+
           if [[ "$PROFILE_RAW" == *"all"* ]]; then
             echo "DISPLAY_PROFILE=Full Audit (CIS L1, CIS L2 & TM)" >> $GITHUB_ENV
           elif [[ "$PROFILE_RAW" == *"cis"* ]]; then
@@ -319,26 +385,21 @@ jobs:
       - name: 🗂️ Organize Folders by Machine IP
         run: |
           cd consolidated-evidence
-          
-          # Move files
+
           find . -maxdepth 2 -type f \( -name "*.html" -o -name "*.json" \) | while read file; do
             BASENAME=$(basename "$file")
             IP_ADDR=$(echo "$BASENAME" | grep -oE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
             [ -z "$IP_ADDR" ] && IP_ADDR="unknown-node"
-            
-            if [[ "$BASENAME" == *"CIS_L1"* ]]; then
-              PROFILE_DIR="CIS Level 1"
-            elif [[ "$BASENAME" == *"CIS_L2"* ]]; then
-              PROFILE_DIR="CIS Level 2"
-            else
-              PROFILE_DIR="TM Baseline"
+
+            if   [[ "$BASENAME" == *"CIS_L1"* ]]; then PROFILE_DIR="CIS Level 1"
+            elif [[ "$BASENAME" == *"CIS_L2"* ]]; then PROFILE_DIR="CIS Level 2"
+            else                                        PROFILE_DIR="TM Baseline"
             fi
-            
+
             mkdir -p "$IP_ADDR/$PROFILE_DIR"
             mv "$file" "$IP_ADDR/$PROFILE_DIR/"
           done
-          
-          # Delete temp folders AFTER loop
+
           find . -maxdepth 1 -type d -name "temp-reports-*" -exec rm -rf {} +
 
       - name: 📦 Zip the Evidence Package
@@ -359,8 +420,8 @@ jobs:
             **Execution Mode:** `${{ github.event.inputs.mode }}`
             **Execution Strategy:** `${{ github.event.inputs.execution_strategy }}`
             **Compliance Profile:** `${{ env.DISPLAY_PROFILE }}`
-            
+
             All matrix execution reports have been successfully aggregated and categorized by Machine IP.
-            
+
             📥 **Download the ZIP below to access the HTML and JSON reports.**
           files: Fleet_Compliance_Evidence_*.zip
