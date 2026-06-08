@@ -248,24 +248,74 @@ jobs:
           sudo ln -sf /usr/bin/cinc-auditor /usr/bin/inspec
 
       # ──────────────────────────────────────────────────────────────────
-      # WINDOWS STEP 2: build the InSpec profile layout from files_2.zip.
-      # setup_win_profile.sh extracts:
-      #   window-default-cis/window-baseline/inspec.yml
-      #   window-default-cis/window-baseline/controls/section_*.rb
-      #   window-default-cis/window-baseline/Invoke-CISRemediation.ps1
-      #   window-default-cis/window-baseline/02_user_rights.ps1
-      # The zip is committed to the repo at window-default-cis/profile-source/
+      # WINDOWS STEP 2: validate the CIS WS2022 v5 single-file profile.
+      #
+      # Profile layout (committed directly to repo — no zip/extraction):
+      #   window-default-cis/
+      #   └── window-baseline/
+      #       ├── inspec.yml                               ← input defaults
+      #       ├── Invoke-CISRemediation-Combined.ps1       ← self-contained PS1
+      #       └── controls/
+      #           └── cis_ws2022_v5_0_0_benchmark.rb       ← 433 controls
+      #
+      # CHANGED FROM PRIOR VERSION:
+      #   Old: ran setup_win_profile.sh to extract from files_2.zip into
+      #        multi-file controls/section_*.rb layout (6 files).
+      #   New: single .rb file committed to repo. No extraction needed.
+      #        Invoke-CISRemediation-Combined.ps1 replaces the two-file
+      #        (Invoke-CISRemediation.ps1 + 02_user_rights.ps1) approach.
       # ──────────────────────────────────────────────────────────────────
-      - name: 🗂️ Build CIS WS2022 InSpec Profile (window-baseline layout)
+      - name: 🗂️ Validate CIS WS2022 v5 Single-File Profile
         if: matrix.os_target.os == 'Windows'
         run: |
-          chmod +x setup_win_profile.sh
-          ./setup_win_profile.sh window-default-cis/profile-source/files_2.zip
+          PROFILE_DIR="window-default-cis/window-baseline"
+          RB_FILE="${PROFILE_DIR}/controls/cis_ws2022_v5_0_0_benchmark.rb"
+          YML_FILE="${PROFILE_DIR}/inspec.yml"
+          PS1_FILE="${PROFILE_DIR}/Invoke-CISRemediation-Combined.ps1"
+
+          echo "🔍 Validating CIS WS2022 v5 profile files..."
+
+          FAIL=0
+          if [ ! -f "$YML_FILE" ]; then
+            echo "❌ Missing: $YML_FILE"
+            FAIL=1
+          else
+            echo "✅ Found:   $YML_FILE"
+          fi
+
+          if [ ! -f "$RB_FILE" ]; then
+            echo "❌ Missing: $RB_FILE"
+            FAIL=1
+          else
+            CTRL_COUNT=$(grep -c "^control " "$RB_FILE" || true)
+            L1_COUNT=$(grep -c "tag level: \['L1'\]" "$RB_FILE" || true)
+            L2_COUNT=$(grep -c "tag level: \['L2'\]" "$RB_FILE" || true)
+            echo "✅ Found:   $RB_FILE (${CTRL_COUNT} controls: L1=${L1_COUNT}, L2=${L2_COUNT})"
+          fi
+
+          if [ ! -f "$PS1_FILE" ]; then
+            echo "⚠️  Missing: $PS1_FILE (PS1 fallback remediation unavailable)"
+          else
+            echo "✅ Found:   $PS1_FILE"
+          fi
+
+          if [ $FAIL -eq 1 ]; then
+            echo ""
+            echo "❌ Profile validation failed. Ensure these files are committed to the repo:"
+            echo "   $YML_FILE"
+            echo "   $RB_FILE"
+            echo "   $PS1_FILE"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ CIS WS2022 v5 profile ready (single-file layout, no extraction needed)."
+          echo "   server_role will be set to: ${{ vars.WIN_SERVER_ROLE || 'member_server' }}"
 
       # ──────────────────────────────────────────────────────────────────
       # WINDOWS STEP 3: install ansible-lockdown CIS roles for remediation.
       # Primary path for CIS remediation is Ansible (cis_remediate_2022.yml).
-      # PowerShell (Invoke-CISRemediation.ps1) is the fallback.
+      # Fallback: Invoke-CISRemediation-Combined.ps1 (run_win_ps1_remediation).
       # ──────────────────────────────────────────────────────────────────
       - name: 📦 Install Ansible CIS Roles for Windows Remediation
         if: matrix.os_target.os == 'Windows'
@@ -292,7 +342,11 @@ jobs:
 
       # ──────────────────────────────────────────────────────────────────
       # MAIN: run the orchestrator script in headless CI/CD mode.
+      #
       # WIN_SERVER_ROLE controls DC-only vs member-server CIS controls.
+      #
+      # Windows scan:      cinc-auditor uses single-file profile (Step 2).
+      # Windows remediate: Ansible (primary) → PS1 combined script (fallback).
       # ──────────────────────────────────────────────────────────────────
       - name: 🚀 Execute Fleet Commander
         env:
