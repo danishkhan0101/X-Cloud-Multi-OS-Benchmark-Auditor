@@ -19,30 +19,35 @@ UBUNTU_USER="${LINUX_ADMIN_USER:-ubuntu}"
 AUDIT_USER="${WINDOWS_ADMIN_USER:-Windows_Admin}"
 
 # ------------------------------------------------------------------
-# Windows cinc-auditor profile settings (CIS WS2022 v5.0.0)
-#
-# Profile layout (single combined .rb, no setup_win_profile.sh needed):
-#
-#   window-default-cis/
-#   ├── inputs.yml                              ← default cinc-auditor inputs
-#   ├── Invoke-CISRemediation-Combined.ps1      ← single-file PS1 remediation
-#   └── window-baseline/                        ← WIN_CIS_BENCHMARK
-#       ├── inspec.yml                          ← profile metadata + input defs
-#       └── controls/
-#           └── cis_ws2022_v5_0_0_benchmark.rb  ← combined benchmark (all sections)
+# Windows cinc-auditor profile settings (single-file, CIS WS2022 v5)
 #
 # WIN_SERVER_ROLE : 'member_server' (default) or 'domain_controller'
 #                  Controls DC-only / member-server-only rules inside
-#                  the InSpec profile and the PS1 remediation.
+#                  the InSpec profile.  Set via env or .env file.
 #
-# The benchmark (.rb) always runs all 433 controls.
-# profile_level is metadata only — Heimdall/SAF-CLI uses it to filter
-# the report view (L1-only vs L1+L2). rc=100/101 = pass/fail with
-# findings; both are treated as success by this pipeline.
+# Profile layout committed directly to the repo (no zip / extraction):
+#   window-default-cis/
+#   └── window-baseline/              ← WIN_CIS_BENCHMARK points here
+#       ├── inspec.yml                ← profile metadata + input defaults
+#       ├── Invoke-CISRemediation-Combined.ps1  ← self-contained PS1 (no helper)
+#       └── controls/
+#           └── cis_ws2022_v5_0_0_benchmark.rb  ← 433 controls, one file
 #
-# The PS1 (Invoke-CISRemediation-Combined.ps1) applies all applicable
-# controls for the given role in one pass (no -Level parameter).
-# Use -Sections to target individual sections (1 2 5 9 17 18 19).
+# CHANGE FROM PRIOR VERSION:
+#   • Old: files_2.zip → setup_win_profile.sh → multi-file controls/*.rb
+#          + Invoke-CISRemediation.ps1 + 02_user_rights.ps1 (two-file)
+#   • New: single cis_ws2022_v5_0_0_benchmark.rb committed to repo
+#          + Invoke-CISRemediation-Combined.ps1 (self-contained, no helper)
+#
+# Scan invocation (from runner → VM via WinRM):
+#   cinc-auditor exec window-default-cis/window-baseline \
+#     -t winrm://IP --user USER --password PASS \
+#     --input server_role=<role> --input profile_level=<1|2> \
+#     --reporter json:report.json
+#
+# Remediation invocation (via az vm run-command):
+#   Invoke-CISRemediation-Combined.ps1 -ServerRole <role> [-Sections 1,2,17]
+#   No -Level param — all sections apply; level filtering is scan-time only.
 # ------------------------------------------------------------------
 WIN_SERVER_ROLE="${WIN_SERVER_ROLE:-member_server}"
 
@@ -67,14 +72,18 @@ WIN_CIS_BENCHMARK="${WIN_CIS_DIR}/window-baseline"
 # PowerShell-native remediation (single combined script — no helper)
 # ------------------------------------------------------------------
 # WIN_PS1_REMEDIATE : Invoke-CISRemediation-Combined.ps1
-#   Self-contained; covers Sections 1, 2, 5, 9, 17, 18, 19.
-#   No separate helper file needed (user-rights are embedded).
-#   Parameters: -ServerRole <role> [-Sections <1,2,...>] [-WhatIf] [-SkipBackup]
-#   Does NOT have a -Level parameter; applies all controls for the
-#   given role in one pass. Level filtering happens at the audit layer
-#   (cinc-auditor --input profile_level=).
+#   Self-contained — includes all sections (1,2,5,9,17,18,19) and the
+#   user-rights logic formerly in 02_user_rights.ps1.
+#   Parameters: -ServerRole <member_server|domain_controller>
+#               -Sections   <optional, e.g. "1","2","17">
+#               -WhatIf     (dry run)
+#   No -Level parameter: level filtering is done at scan time by the
+#   InSpec profile; the PS1 applies all applicable controls.
+#
+#   Used by run_win_ps1_remediation() when Ansible is unavailable,
+#   or for targeted section-level remediation.
 # ------------------------------------------------------------------
-WIN_PS1_REMEDIATE="${WIN_CIS_DIR}/Invoke-CISRemediation-Combined.ps1"
+WIN_PS1_REMEDIATE="${WIN_CIS_BENCHMARK}/Invoke-CISRemediation-Combined.ps1"
 
 export INSPEC_SSH_CONFIG_NO_SECURE=true
 BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; MAGENTA='\033[0;35m'; NC='\033[0m'
@@ -97,27 +106,15 @@ SCAP_CACHE_DIR="/tmp/scap_runner_cache"
 
 # ======================================================
 # PHASE 0.2b: PRE-FETCH SCAP PACKAGES ON RUNNER
-# ------------------------------------------------------
-# Called ONCE at startup. Runner has internet; VMs do not.
-# Cache persists across runs — re-download only when empty.
-#
-# Windows-only runs skip this entirely — cinc-auditor runs
-# from the runner against WinRM, so no SCAP packages are
-# needed on the VM at all.
-#
-# RPM packages are fetched via Docker containers (runner is
-# Ubuntu-based; dnf is not available natively).
 # ======================================================
 prefetch_scap_packages() {
     echo -e "\n${BOLD}${CYAN}📦 PHASE 0.2b: SCAP PACKAGE PRE-FETCH (runner has internet)${NC}"
 
-    # ---- Windows-only run: no SCAP packages needed ----
     if [[ "${H_TARGET_OS,,}" == "windows" ]]; then
         echo -e "${GREEN}   ✅ Windows-only run — cinc-auditor runs from runner via WinRM. No SCAP packages needed. Skipping.${NC}"
         return 0
     fi
 
-    # ---- Only fetch caches relevant to the target OS ----
     local need_rhel=false need_alma=false need_rocky=false need_ubuntu=false
 
     case "${H_TARGET_OS,,}" in
@@ -128,13 +125,11 @@ prefetch_scap_packages() {
         all)    need_rhel=true; need_alma=true; need_rocky=true; need_ubuntu=true ;;
     esac
 
-    # ---- Create only needed dirs ----
     $need_rhel   && mkdir -p "${SCAP_CACHE_DIR}"/{rhel9,rhel10}
     $need_rocky  && mkdir -p "${SCAP_CACHE_DIR}"/{rocky9,rocky10}
     $need_alma   && mkdir -p "${SCAP_CACHE_DIR}"/{alma9,alma10}
     $need_ubuntu && mkdir -p "${SCAP_CACHE_DIR}"/{ubuntu2204,ubuntu2404}
 
-    # ---- RHEL 9 / Rocky 9 (same RPMs, use Rocky9 container) ----
     if $need_rhel || $need_rocky; then
         if [ ! "$(ls -A "${SCAP_CACHE_DIR}/rhel9/"*.rpm 2>/dev/null)" ]; then
             echo -e "${CYAN}   Fetching RHEL9 packages...${NC}"
@@ -152,7 +147,6 @@ prefetch_scap_packages() {
         fi
     fi
 
-    # ---- RHEL 10 / Rocky 10 ----
     if $need_rhel || $need_rocky; then
         if [ ! "$(ls -A "${SCAP_CACHE_DIR}/rhel10/"*.rpm 2>/dev/null)" ]; then
             echo -e "${CYAN}   Fetching RHEL10 packages...${NC}"
@@ -176,7 +170,6 @@ prefetch_scap_packages() {
         fi
     fi
 
-    # ---- AlmaLinux 9 ----
     if $need_alma; then
         if [ ! "$(ls -A "${SCAP_CACHE_DIR}/alma9/"*.rpm 2>/dev/null)" ]; then
             echo -e "${CYAN}   Fetching Alma9 packages...${NC}"
@@ -192,7 +185,6 @@ prefetch_scap_packages() {
         fi
     fi
 
-    # ---- AlmaLinux 10 ----
     if $need_alma; then
         if [ ! "$(ls -A "${SCAP_CACHE_DIR}/alma10/"*.rpm 2>/dev/null)" ]; then
             echo -e "${CYAN}   Fetching Alma10 packages...${NC}"
@@ -208,7 +200,6 @@ prefetch_scap_packages() {
         fi
     fi
 
-    # ---- Ubuntu 22.04 ----
     if $need_ubuntu; then
         if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2204/"*.deb 2>/dev/null)" ]; then
             echo -e "${CYAN}   Fetching Ubuntu2204 packages...${NC}"
@@ -224,7 +215,6 @@ prefetch_scap_packages() {
         fi
     fi
 
-    # ---- Ubuntu 24.04 ----
     if $need_ubuntu; then
         if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2404/"*.deb 2>/dev/null)" ]; then
             echo -e "${CYAN}   Fetching Ubuntu2404 packages...${NC}"
@@ -240,7 +230,6 @@ prefetch_scap_packages() {
         fi
     fi
 
-    # ---- Validate only relevant caches ----
     local failed=0
     local check_dirs=()
     $need_rhel   && check_dirs+=(rhel9)
@@ -250,7 +239,7 @@ prefetch_scap_packages() {
 
     for d in "${check_dirs[@]}"; do
         if [ -f "${SCAP_CACHE_DIR}/${d}/.skipped" ]; then
-            echo -e "${YELLOW}⚠️  [Phase 0.2b] ${d} skipped (image unavailable) — runtime will skip these targets${NC}"
+            echo -e "${YELLOW}⚠️  [Phase 0.2b] ${d} skipped (image unavailable)${NC}"
             continue
         fi
         if [ ! "$(ls -A "${SCAP_CACHE_DIR}/${d}/" 2>/dev/null)" ]; then
@@ -269,94 +258,88 @@ prefetch_scap_packages() {
 
 # ======================================================
 # GUARD: validate_win_cis_profile
-# ------------------------------------------------------
-# Verifies that the CIS WS2022 v5.0.0 combined profile is
-# correctly placed before any cinc-auditor call.
+# ──────────────────────────────────────────────────────
+# Verifies the single-file CIS WS2022 v5 profile layout:
+#   window-default-cis/window-baseline/
+#     inspec.yml
+#     Invoke-CISRemediation-Combined.ps1
+#     controls/cis_ws2022_v5_0_0_benchmark.rb
 #
-# Expected layout (committed directly — no setup_win_profile.sh):
-#
-#   window-default-cis/
-#   ├── inputs.yml
-#   ├── Invoke-CISRemediation-Combined.ps1
-#   └── window-baseline/                        ← WIN_CIS_BENCHMARK
-#       ├── inspec.yml
-#       └── controls/
-#           └── cis_ws2022_v5_0_0_benchmark.rb  ← 433-control combined file
-#
-# Called once per script run, not per host.
+# CHANGED FROM PRIOR VERSION:
+#   Old guard checked for inspec.yml + multiple section_*.rb files.
+#   New guard checks for inspec.yml + single combined .rb file.
+#   The Invoke-CISRemediation-Combined.ps1 replaces the two-file
+#   (Invoke-CISRemediation.ps1 + 02_user_rights.ps1) approach.
 # ======================================================
 validate_win_cis_profile() {
     local ok=true
     local rb_file="${WIN_CIS_BENCHMARK}/controls/cis_ws2022_v5_0_0_benchmark.rb"
+    local inspec_yml="${WIN_CIS_BENCHMARK}/inspec.yml"
+    local ps1_file="${WIN_PS1_REMEDIATE}"
 
-    # --- inspec.yml ---
-    if [ ! -f "${WIN_CIS_BENCHMARK}/inspec.yml" ]; then
-        echo -e "${RED}❌ [Profile Guard] ${WIN_CIS_BENCHMARK}/inspec.yml not found.${NC}"
-        echo -e "${YELLOW}   Expected: ${WIN_CIS_BENCHMARK}/inspec.yml${NC}"
-        ok=false
-    fi
-
-    # --- Combined benchmark file ---
-    if [ ! -f "$rb_file" ]; then
-        echo -e "${RED}❌ [Profile Guard] Combined benchmark not found: ${rb_file}${NC}"
-        echo -e "${YELLOW}   Commit cis_ws2022_v5_0_0_benchmark.rb to:${NC}"
+    if [ ! -f "${inspec_yml}" ]; then
+        echo -e "${RED}❌ [Profile Guard] ${inspec_yml} not found.${NC}"
+        echo -e "${YELLOW}   Expected layout:${NC}"
+        echo -e "${YELLOW}     ${WIN_CIS_BENCHMARK}/inspec.yml${NC}"
         echo -e "${YELLOW}     ${WIN_CIS_BENCHMARK}/controls/cis_ws2022_v5_0_0_benchmark.rb${NC}"
+        echo -e "${YELLOW}     ${WIN_CIS_BENCHMARK}/Invoke-CISRemediation-Combined.ps1${NC}"
         ok=false
     fi
 
-    # --- Combined PS1 remediation script ---
-    if [ ! -f "$WIN_PS1_REMEDIATE" ]; then
-        echo -e "${RED}❌ [Profile Guard] ${WIN_PS1_REMEDIATE} not found.${NC}"
-        echo -e "${YELLOW}   Commit Invoke-CISRemediation-Combined.ps1 to:${NC}"
-        echo -e "${YELLOW}     ${WIN_CIS_DIR}/Invoke-CISRemediation-Combined.ps1${NC}"
+    if [ ! -f "${rb_file}" ]; then
+        echo -e "${RED}❌ [Profile Guard] ${rb_file} not found.${NC}"
+        echo -e "${YELLOW}   Commit cis_ws2022_v5_0_0_benchmark.rb to ${WIN_CIS_BENCHMARK}/controls/${NC}"
         ok=false
+    fi
+
+    if [ ! -f "${ps1_file}" ]; then
+        echo -e "${YELLOW}⚠️  [Profile Guard] ${ps1_file} not found — PS1 remediation path unavailable.${NC}"
+        echo -e "${YELLOW}   Commit Invoke-CISRemediation-Combined.ps1 to ${WIN_CIS_BENCHMARK}/${NC}"
+        # Non-fatal: scan still works without the PS1
     fi
 
     if [ "$ok" == "false" ]; then
-        echo -e "${RED}   Ensure all three files above are present in the repo tree.${NC}"
         return 1
     fi
 
     local ctrl_count
-    ctrl_count=$(grep -c "^control " "$rb_file" 2>/dev/null || echo 0)
-    echo -e "${GREEN}✅ [Profile Guard] CIS WS2022 v5.0.0 profile OK — ${ctrl_count} controls in combined benchmark.${NC}"
-    echo -e "${CYAN}   server_role=${WIN_SERVER_ROLE} | profile_level driven by WIN_INSPEC_LVL at scan time${NC}"
-    echo -e "${CYAN}   remediation: ${WIN_PS1_REMEDIATE} (single-file, no helper)${NC}"
+    ctrl_count=$(grep -c "^control " "${rb_file}" 2>/dev/null || echo 0)
+    local l1_count l2_count
+    l1_count=$(grep -c "tag level: \['L1'\]" "${rb_file}" 2>/dev/null || echo 0)
+    l2_count=$(grep -c "tag level: \['L2'\]" "${rb_file}" 2>/dev/null || echo 0)
+    echo -e "${GREEN}✅ [Profile Guard] CIS WS2022 v5 profile OK — ${ctrl_count} controls (L1: ${l1_count}, L2: ${l2_count}).${NC}"
+    echo -e "${CYAN}   server_role=${WIN_SERVER_ROLE} | profile_level driven by CIS_LEVEL at scan time${NC}"
     return 0
 }
 
-
 # ======================================================
 # HELPER: run_win_ps1_remediation
-# ------------------------------------------------------
-# PowerShell-native CIS remediation using the combined
-# Invoke-CISRemediation-Combined.ps1 from the repo.
+# ──────────────────────────────────────────────────────
+# PowerShell-native CIS remediation using the single
+# Invoke-CISRemediation-Combined.ps1 (self-contained,
+# no helper script required).
 #
-# This is a SINGLE-FILE script — no separate helper is
-# needed. User-rights assignment is embedded in Section 2.
+# CHANGED FROM PRIOR VERSION:
+#   Old: uploaded both Invoke-CISRemediation.ps1 AND 02_user_rights.ps1,
+#        passed -Level parameter, base64-encoded both files.
+#   New: uploads only Invoke-CISRemediation-Combined.ps1 (one file),
+#        passes -ServerRole and optional -Sections; no -Level parameter.
+#        All sections (1,2,5,9,17,18,19) apply unless -Sections filters them.
+#        Level filtering is scan-time only (cinc-auditor --input profile_level).
 #
-# The script does NOT have a -Level parameter; it always
-# applies all applicable controls for the given role.
-# Use -Sections to target individual sections.
-#
-# Usage:  run_win_ps1_remediation <ip> [sections]
-#   ip         : target VM IP
-#   sections   : optional space-separated e.g. "01 02 09"
-#                default: all sections (1 2 5 9 17 18 19)
-#
-# PS1 parameters supported:
-#   -ServerRole member_server | domain_controller  (from WIN_SERVER_ROLE)
-#   -Sections   @(1,2,5,...)                       (optional)
-#   -WhatIf     (dry-run, writes nothing)
-#   -SkipBackup (skip pre-change secedit/auditpol/reg export)
+# Usage:  run_win_ps1_remediation <ip> <cis_level> [sections]
+#   ip        : target VM IP
+#   cis_level : "Level 1" or "Level 2" (ignored for PS1; used for logging only)
+#   sections  : optional space-separated list e.g. "1 2 17"
 # ======================================================
 run_win_ps1_remediation() {
     local ip="$1"
-    local sections="${2:-}"
+    local cis_level="${2:-Level 1}"
+    local sections="${3:-}"
 
     if [ ! -f "$WIN_PS1_REMEDIATE" ]; then
         echo -e "${RED}❌ [WinPS1] ${WIN_PS1_REMEDIATE} not found.${NC}"
-        echo -e "${YELLOW}   Commit Invoke-CISRemediation-Combined.ps1 to ${WIN_CIS_DIR}/${NC}"
+        echo -e "${YELLOW}   Commit Invoke-CISRemediation-Combined.ps1 to ${WIN_CIS_BENCHMARK}/${NC}"
         return 1
     fi
 
@@ -366,18 +349,17 @@ run_win_ps1_remediation() {
         return 1
     fi
 
-    # Build optional -Sections argument  e.g. "1 2 9" → "-Sections @(1,2,9)"
+    # Build optional -Sections argument (e.g. -Sections @("1","2","17"))
     local sections_arg=""
     if [ -n "$sections" ]; then
-        local joined
-        joined=$(echo "$sections" | tr ' ' ',')
-        sections_arg="-Sections @(${joined})"
+        local quoted
+        quoted=$(echo "$sections" | tr ' ' '\n' | awk '{printf "\"%s\",",$0}' | sed 's/,$//')
+        sections_arg="-Sections @(${quoted})"
     fi
 
     echo -e "${CYAN}📤 [WinPS1/${ip}] Uploading + running Invoke-CISRemediation-Combined.ps1${NC}"
-    echo -e "${CYAN}   role=${WIN_SERVER_ROLE} | sections=${sections:-all (1,2,5,9,17,18,19)}${NC}"
+    echo -e "${CYAN}   role=${WIN_SERVER_ROLE} | sections=${sections:-all} | level_note=${cis_level} (scan-time only)${NC}"
 
-    # Base64-encode the combined script (no helper needed)
     local encoded_main
     encoded_main=$(base64 -w0 < "$WIN_PS1_REMEDIATE")
 
@@ -386,18 +368,13 @@ run_win_ps1_remediation() {
         --command-id RunPowerShellScript \
         --scripts "
 \$ErrorActionPreference = 'Continue'
-
-# Decode and write the combined remediation script
-[IO.File]::WriteAllBytes(
-    'C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1',
-    [Convert]::FromBase64String('${encoded_main}')
-)
-
-# Execute — applies all applicable controls for the given role
+# Decode + write combined remediation script (self-contained, no helper needed)
+[IO.File]::WriteAllBytes('C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1',
+    [Convert]::FromBase64String('${encoded_main}'))
+# Execute — applies all sections unless -Sections filters them
 & 'C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1' \`
     -ServerRole '${WIN_SERVER_ROLE}' \`
     ${sections_arg}
-
 # Cleanup
 Remove-Item 'C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1' \`
     -Force -ErrorAction SilentlyContinue
@@ -405,7 +382,7 @@ Remove-Item 'C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1' \`
 
     local rc=$?
     if [ $rc -eq 0 ]; then
-        echo -e "${GREEN}✅ [WinPS1/${ip}] Combined PS1 remediation complete (role=${WIN_SERVER_ROLE})${NC}"
+        echo -e "${GREEN}✅ [WinPS1/${ip}] PS1 remediation complete (role=${WIN_SERVER_ROLE})${NC}"
     else
         echo -e "${RED}❌ [WinPS1/${ip}] az run-command failed (rc=${rc})${NC}"
     fi
@@ -420,7 +397,6 @@ ensure_linux_scap_tools() {
     local ip="$2"
     local pkg_mgr="$3"
 
-    # ---- Fast path: already installed ----
     if ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
            -o ControlMaster=no -o ControlPath=none \
            -o ConnectTimeout=10 \
@@ -432,7 +408,6 @@ ensure_linux_scap_tools() {
         return 0
     fi
 
-    # ---- Detect distro + major version on VM ----
     local distro_id distro_ver cache_key
     read -r distro_id distro_ver <<< "$(ssh -n \
         -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -441,7 +416,6 @@ ensure_linux_scap_tools() {
         "${user}@${ip}" \
         "source /etc/os-release && echo \"\$ID \${VERSION_ID%%.*}\"" 2>/dev/null)"
 
-    # Map distro+ver → runner cache key
     case "${distro_id}${distro_ver}" in
         rhel9)       cache_key="rhel9"      ;;
         rhel10)      cache_key="rhel10"     ;;
@@ -562,22 +536,15 @@ remediate_windows_host() {
     fi
     echo -e "${CYAN}   → Detected: Windows ${ver}${NC}"
 
-    # ------------------------------------------------------------------
-    # WS2022: primary path is the combined PS1 (no Ansible role needed).
-    # Other versions use Ansible ansible-lockdown roles as before.
-    # PS1 does not filter by level — it applies all applicable controls.
-    # ------------------------------------------------------------------
-    if [ "$ver" == "2022" ]; then
-        echo -e "${CYAN}🛡️  [Win/2022] Using Invoke-CISRemediation-Combined.ps1 (role=${WIN_SERVER_ROLE})${NC}"
-        run_win_ps1_remediation "$ip"
-        return $?
-    fi
-
     local role_name role_install_target playbook_file tag_scope_l1
     case "$ver" in
         2019) role_name="ansible-lockdown.windows_2019_cis"
               role_install_target="ansible-lockdown.windows_2019_cis"
               playbook_file="window-default-cis/cis_remediate_2019.yml"
+              tag_scope_l1="level1-memberserver" ;;
+        2022) role_name="ansible-lockdown.windows_2022_cis"
+              role_install_target="ansible-lockdown.windows_2022_cis"
+              playbook_file="window-default-cis/cis_remediate_2022.yml"
               tag_scope_l1="level1-memberserver" ;;
         2025) role_name="Windows-2025-CIS"
               role_install_target="git+https://github.com/ansible-lockdown/Windows-2025-CIS.git"
@@ -595,8 +562,9 @@ remediate_windows_host() {
 
     if [ ! -f "$playbook_file" ]; then
         echo -e "${RED}❌ [Win/${ver}] Playbook missing: ${playbook_file}${NC}"
-        echo -e "${YELLOW}   Create ${playbook_file} for Windows ${ver} and retry.${NC}"
-        return 1
+        echo -e "${YELLOW}   Falling back to PS1 remediation...${NC}"
+        run_win_ps1_remediation "$ip" "$cis_level"
+        return $?
     fi
 
     echo -e "${CYAN}📦 [Win/${ver}] Installing role: ${role_name}...${NC}"
@@ -624,7 +592,9 @@ remediate_windows_host() {
     if [ $rc -eq 0 ]; then
         echo -e "${GREEN}✅ [Win/${ver}] ${ip} completed successfully${NC}"
     else
-        echo -e "${RED}❌ [Win/${ver}] ${ip} failed (rc=${rc})${NC}"
+        echo -e "${RED}❌ [Win/${ver}] Ansible failed (rc=${rc}) — falling back to PS1 remediation${NC}"
+        run_win_ps1_remediation "$ip" "$cis_level"
+        rc=$?
     fi
     return $rc
 }
@@ -639,14 +609,12 @@ fetch_remote_report() {
     local local_path="$4"
     local tag="$5"
 
-    # Step 1: chmod so audit user can read root-owned file
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ControlMaster=no -o ControlPath=none \
         -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
         -o ConnectTimeout=10 \
         "${user}@${ip}" "sudo chmod 644 ${remote} 2>/dev/null" >/dev/null 2>&1
 
-    # Step 2: try SCP (fast path)
     scp -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ControlMaster=no -o ControlPath=none \
         -o ConnectTimeout=10 \
@@ -655,7 +623,6 @@ fetch_remote_report() {
         return 0
     fi
 
-    # Step 3: fall back to ssh + sudo cat (always works post-CIS)
     echo -e "${YELLOW}🔄 [Fetch/${tag}] SCP failed — falling back to sudo cat on ${ip}${NC}"
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ControlMaster=no -o ControlPath=none \
@@ -831,7 +798,6 @@ while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
     fi
 done <<< "$VM_DATA"
 
-# Matrix sharding — isolate to single IP if requested
 if [ "$H_TARGET_IP" != "all" ] && [ -n "$H_TARGET_IP" ]; then
     echo -e "${MAGENTA}🎯 MATRIX SHARDING: Isolating to node $H_TARGET_IP${NC}"
     UBUNTU_MACHINES=(); RHEL_MACHINES=(); ROCKY_MACHINES=()
@@ -1035,12 +1001,12 @@ update_profile_vars() {
             UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level1_server"
             RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_server_l1"
             OS_LVL="1"
-            WIN_INSPEC_LVL="1"   # → --input profile_level=1 → L1 view in Heimdall/SAF-CLI
+            WIN_INSPEC_LVL="1"
         else
             UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level2_server"
             RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis"
             OS_LVL="2"
-            WIN_INSPEC_LVL="2"   # → --input profile_level=2 → L1+L2 view in Heimdall/SAF-CLI
+            WIN_INSPEC_LVL="2"
         fi
     fi
 }
@@ -1311,18 +1277,19 @@ run_phase_1() {
     fi
 
     # ================================================================
-    # WINDOWS — cinc-auditor (CIS WS2022 v5.0.0 combined profile)
+    # WINDOWS — cinc-auditor (CIS WS2022 v5.0.0, single-file profile)
     # ================================================================
-    # Profile: window-default-cis/window-baseline/ (inspec.yml +
-    #          controls/cis_ws2022_v5_0_0_benchmark.rb)
+    # Profile layout (committed to repo, no zip/extraction needed):
+    #   window-default-cis/window-baseline/
+    #     inspec.yml                               ← input defaults
+    #     Invoke-CISRemediation-Combined.ps1       ← self-contained PS1
+    #     controls/cis_ws2022_v5_0_0_benchmark.rb  ← 433 controls
     #
-    # Inputs:
-    #   server_role   = member_server | domain_controller  (WIN_SERVER_ROLE)
-    #   profile_level = 1 | 2                              (WIN_INSPEC_LVL)
+    # Inputs passed via CLI (override inspec.yml defaults):
+    #   --input server_role=<member_server|domain_controller>
+    #   --input profile_level=<1|2>   (metadata; all 433 controls always run)
     #
-    # All controls always execute. profile_level is metadata only —
-    # Heimdall/SAF-CLI uses it to filter the report view.
-    # rc=100/101 = pass/fail with findings — both treated as success.
+    # Exit codes: 0=all pass, 100=some fail, 101=some skip — all are OK.
     # ================================================================
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
@@ -1339,7 +1306,6 @@ run_phase_1() {
                         exit 1
                     }
 
-                    # ---- CIS benchmark (combined .rb profile) ----
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP${NC}"
                         echo -e "${CYAN}   profile: ${WIN_CIS_BENCHMARK} | role: ${WIN_SERVER_ROLE} | level: ${WIN_INSPEC_LVL}${NC}"
@@ -1348,11 +1314,8 @@ run_phase_1() {
                             -t "winrm://${IP}" \
                             --user="${AUDIT_USER}" \
                             --password="${AUDIT_PASS}" \
-                            --input-file "${WIN_CIS_DIR}/inputs.yml" \
                             --input "server_role=${WIN_SERVER_ROLE}" \
                             --input "profile_level=${WIN_INSPEC_LVL}" \
-                            --input "ms_or_dc=${WIN_SERVER_ROLE}" \
-                            --input "level_1_or_2=${WIN_INSPEC_LVL}" \
                             --reporter "json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
                         rc=$?
 
@@ -1364,7 +1327,6 @@ run_phase_1() {
                         esac
                     fi
 
-                    # ---- Custom org benchmark ----
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
@@ -1393,7 +1355,6 @@ run_phase_1() {
 run_remediation() {
     echo -e "\n${BOLD}🛠️  PHASE 2 & 3: Executing Remediation (Hardened SSH)...${NC}"
 
-    # -------------------- UBUNTU --------------------
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
             for IP in "${UBUNTU_MACHINES[@]}"; do
@@ -1423,7 +1384,6 @@ run_remediation() {
         fi
     fi
 
-    # -------------------- RHEL --------------------
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rhel" ]]; then
         if [ ${#RHEL_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
             for IP in "${RHEL_MACHINES[@]}"; do
@@ -1448,17 +1408,10 @@ run_remediation() {
             wait
         fi
         if [ ${#RHEL_MACHINES[@]} -gt 0 ] && [ "$RUN_ORG" == true ]; then
-            echo -e "${CYAN}🛠️  [Remediation/RHEL/${ORG_PREFIX^^}] Running custom playbook...${NC}"
-            ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK \
-                --limit rhel_nodes
-            rc=$?
-            [ $rc -eq 0 ] \
-                && echo -e "${GREEN}✅ [Remediation/RHEL/${ORG_PREFIX^^}] Completed${NC}" \
-                || echo -e "${RED}❌ [Remediation/RHEL/${ORG_PREFIX^^}] failed (rc=$rc)${NC}"
+            ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rhel_nodes
         fi
     fi
 
-    # -------------------- ROCKY --------------------
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rocky" ]]; then
         if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
@@ -1490,18 +1443,11 @@ run_remediation() {
                 wait
             fi
             if [ "$RUN_ORG" == true ]; then
-                echo -e "${CYAN}🛠️  [Remediation/Rocky/${ORG_PREFIX^^}] Running custom playbook...${NC}"
-                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK \
-                    --limit rocky_nodes
-                rc=$?
-                [ $rc -eq 0 ] \
-                    && echo -e "${GREEN}✅ [Remediation/Rocky/${ORG_PREFIX^^}] Completed${NC}" \
-                    || echo -e "${RED}❌ [Remediation/Rocky/${ORG_PREFIX^^}] failed (rc=$rc)${NC}"
+                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rocky_nodes
             fi
         fi
     fi
 
-    # -------------------- ALMA --------------------
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "alma" ]]; then
         if [ ${#ALMA_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
@@ -1538,20 +1484,14 @@ run_remediation() {
                 wait
             fi
             if [ "$RUN_ORG" == true ]; then
-                echo -e "${CYAN}🛠️  [Remediation/Alma/${ORG_PREFIX^^}] Running custom playbook...${NC}"
-                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK \
-                    --limit alma_nodes
-                rc=$?
-                [ $rc -eq 0 ] \
-                    && echo -e "${GREEN}✅ [Remediation/Alma/${ORG_PREFIX^^}] Completed${NC}" \
-                    || echo -e "${RED}❌ [Remediation/Alma/${ORG_PREFIX^^}] failed (rc=$rc)${NC}"
+                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit alma_nodes
             fi
         fi
     fi
 
     # -------------------- WINDOWS --------------------
-    # WS2022: Invoke-CISRemediation-Combined.ps1 (direct PS1 via az run-command)
-    # WS2019/2025/Win10/11: Ansible ansible-lockdown roles (unchanged)
+    # Primary path: Ansible (cis_remediate_2022.yml / _2025.yml / etc.)
+    # Fallback:     run_win_ps1_remediation() → Invoke-CISRemediation-Combined.ps1
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
@@ -1571,13 +1511,8 @@ run_remediation() {
                     wait_for_winrm "$IP" || \
                         echo -e "${YELLOW}⚠️  [Remediation/Win/${ORG_PREFIX^^}] WinRM not ready on $IP${NC}"
                 done
-                echo -e "${CYAN}🛠️  [Remediation/Win/${ORG_PREFIX^^}] Running custom playbook...${NC}"
                 ansible-playbook -i inventory.ini "$WIN_CUSTOM_PLAYBOOK" \
                     --limit windows_nodes
-                rc=$?
-                [ $rc -eq 0 ] \
-                    && echo -e "${GREEN}✅ [Remediation/Win/${ORG_PREFIX^^}] Completed${NC}" \
-                    || echo -e "${RED}❌ [Remediation/Win/${ORG_PREFIX^^}] failed (rc=$rc)${NC}"
             fi
         fi
     fi
@@ -1594,17 +1529,12 @@ run_phase_4() {
         -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
         -o ConnectTimeout=10"
 
-    # -------------------- UBUNTU VERIFY --------------------
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
             for IP in "${UBUNTU_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$UBUNTU_USER" || {
-                        echo -e "${RED}❌ [Phase4/Ubuntu] SSH unreachable: $IP${NC}"; exit 1
-                    }
-                    ensure_linux_scap_tools "$UBUNTU_USER" "$IP" "apt" || {
-                        echo -e "${RED}❌ [Phase4/Ubuntu] Tools missing on $IP${NC}"; exit 1
-                    }
+                    wait_for_ssh "$IP" "$UBUNTU_USER" || { echo -e "${RED}❌ [Phase4/Ubuntu] SSH unreachable: $IP${NC}"; exit 1; }
+                    ensure_linux_scap_tools "$UBUNTU_USER" "$IP" "apt" || { echo -e "${RED}❌ [Phase4/Ubuntu] Tools missing on $IP${NC}"; exit 1; }
 
                     UBUNTU_VER=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
                         "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
@@ -1614,10 +1544,8 @@ run_phase_4() {
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
-                        echo -e "${GREEN}✅ [Phase4/Ubuntu/CIS L${OS_LVL}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
-                            "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE \
-                             --report ${REMOTE} $UBUNTU_CIS_XCCDF"
+                            "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report ${REMOTE} $UBUNTU_CIS_XCCDF"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
                             fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" "Ubuntu/CIS" || \
@@ -1627,14 +1555,11 @@ run_phase_4() {
                     if [ "$RUN_ORG" == true ]; then
                         REMOTE="/tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html"
                         LOCAL="./report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html"
-                        echo -e "${GREEN}✅ [Phase4/Ubuntu/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
-                            "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
-                             --report ${REMOTE} /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
+                            "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report ${REMOTE} /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
-                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" \
-                                "Ubuntu/${ORG_PREFIX^^}" || \
+                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" "Ubuntu/${ORG_PREFIX^^}" || \
                             echo -e "${RED}❌ [Phase4/Ubuntu/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
                     fi
                 ) &
@@ -1643,28 +1568,19 @@ run_phase_4() {
         fi
     fi
 
-    # -------------------- RHEL VERIFY --------------------
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rhel" ]]; then
         if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
             for IP in "${RHEL_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$GHOST_USER" || {
-                        echo -e "${RED}❌ [Phase4/RHEL] SSH unreachable: $IP${NC}"; exit 1
-                    }
-                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || {
-                        echo -e "${RED}❌ [Phase4/RHEL] Tools missing on $IP${NC}"; exit 1
-                    }
+                    wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/RHEL] SSH unreachable: $IP${NC}"; exit 1; }
+                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/RHEL] Tools missing on $IP${NC}"; exit 1; }
 
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html"
-                        echo -e "${GREEN}✅ [Phase4/RHEL/CIS L${OS_LVL}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
-                            "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
-                                 -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                             sudo /usr/bin/oscap xccdf eval \
-                                 --profile $RHEL_CIS_PROFILE \
-                                 --report ${REMOTE} \"\$TARGET_XML\""
+                            "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                             sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report ${REMOTE} \"\$TARGET_XML\""
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
                             fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "RHEL/CIS" || \
@@ -1674,15 +1590,11 @@ run_phase_4() {
                     if [ "$RUN_ORG" == true ]; then
                         REMOTE="/tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html"
                         LOCAL="./report_after_${ORG_PREFIX^^}_RHEL_${IP}.html"
-                        echo -e "${GREEN}✅ [Phase4/RHEL/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
-                            "sudo /usr/bin/oscap xccdf eval \
-                                 --profile $CUSTOM_XCCDF_PROFILE \
-                                 --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                            "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
-                                "RHEL/${ORG_PREFIX^^}" || \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "RHEL/${ORG_PREFIX^^}" || \
                             echo -e "${RED}❌ [Phase4/RHEL/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
                     fi
                 ) &
@@ -1691,32 +1603,21 @@ run_phase_4() {
         fi
     fi
 
-    # -------------------- ROCKY VERIFY --------------------
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rocky" ]]; then
         if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
             for IP in "${ROCKY_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$GHOST_USER" || {
-                        echo -e "${RED}❌ [Phase4/Rocky] SSH unreachable: $IP${NC}"; exit 1
-                    }
-                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || {
-                        echo -e "${RED}❌ [Phase4/Rocky] Tools missing on $IP${NC}"; exit 1
-                    }
+                    wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/Rocky] SSH unreachable: $IP${NC}"; exit 1; }
+                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/Rocky] Tools missing on $IP${NC}"; exit 1; }
 
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html"
-                        echo -e "${GREEN}✅ [Phase4/Rocky/CIS L${OS_LVL}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} "
                             ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                             TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
-                            [ ! -f \"\$TARGET_XML\" ] && \
-                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
-                                    -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                            [ -z \"\$TARGET_XML\" ] && { echo 'NO_SCAP_CONTENT'; exit 99; }
-                            sudo /usr/bin/oscap xccdf eval \
-                                --profile $RHEL_CIS_PROFILE \
-                                --report ${REMOTE} \"\$TARGET_XML\"
+                            [ ! -f \"\$TARGET_XML\" ] && TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                            sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report ${REMOTE} \"\$TARGET_XML\"
                         "
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
@@ -1727,15 +1628,11 @@ run_phase_4() {
                     if [ "$RUN_ORG" == true ]; then
                         REMOTE="/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html"
                         LOCAL="./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html"
-                        echo -e "${GREEN}✅ [Phase4/Rocky/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
-                            "sudo /usr/bin/oscap xccdf eval \
-                                 --profile $CUSTOM_XCCDF_PROFILE \
-                                 --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                            "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
-                                "Rocky/${ORG_PREFIX^^}" || \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Rocky/${ORG_PREFIX^^}" || \
                             echo -e "${RED}❌ [Phase4/Rocky/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
                     fi
                 ) &
@@ -1744,37 +1641,22 @@ run_phase_4() {
         fi
     fi
 
-    # -------------------- ALMA VERIFY --------------------
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "alma" ]]; then
         if [ ${#ALMA_MACHINES[@]} -gt 0 ]; then
             for IP in "${ALMA_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$GHOST_USER" || {
-                        echo -e "${RED}❌ [Phase4/Alma] SSH unreachable: $IP${NC}"; exit 1
-                    }
-                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || {
-                        echo -e "${RED}❌ [Phase4/Alma] Tools missing on $IP${NC}"; exit 1
-                    }
+                    wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/Alma] SSH unreachable: $IP${NC}"; exit 1; }
+                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/Alma] Tools missing on $IP${NC}"; exit 1; }
 
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_ALMA_${IP}.html"
-                        echo -e "${GREEN}✅ [Phase4/Alma/CIS L${OS_LVL}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} "
                             ALMA_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                             TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-almalinux\${ALMA_VER}-ds.xml\"
-                            [ ! -f \"\$TARGET_XML\" ] && \
-                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
-                                    -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                            [ -z \"\$TARGET_XML\" ] && { echo 'NO_SCAP_CONTENT'; exit 99; }
-                            if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then
-                                ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"
-                            else
-                                ALMA_PROF=\"$RHEL_CIS_PROFILE\"
-                            fi
-                            sudo /usr/bin/oscap xccdf eval \
-                                --profile \$ALMA_PROF \
-                                --report ${REMOTE} \"\$TARGET_XML\"
+                            [ ! -f \"\$TARGET_XML\" ] && TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                            if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"; else ALMA_PROF=\"$RHEL_CIS_PROFILE\"; fi
+                            sudo /usr/bin/oscap xccdf eval --profile \$ALMA_PROF --report ${REMOTE} \"\$TARGET_XML\"
                         "
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
@@ -1785,15 +1667,11 @@ run_phase_4() {
                     if [ "$RUN_ORG" == true ]; then
                         REMOTE="/tmp/report_after_${ORG_PREFIX^^}_ALMA_${IP}.html"
                         LOCAL="./report_after_${ORG_PREFIX^^}_ALMA_${IP}.html"
-                        echo -e "${GREEN}✅ [Phase4/Alma/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
-                            "sudo /usr/bin/oscap xccdf eval \
-                                 --profile $CUSTOM_XCCDF_PROFILE \
-                                 --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                            "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
-                                "Alma/${ORG_PREFIX^^}" || \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Alma/${ORG_PREFIX^^}" || \
                             echo -e "${RED}❌ [Phase4/Alma/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
                     fi
                 ) &
@@ -1803,7 +1681,7 @@ run_phase_4() {
     fi
 
     # ================================================================
-    # WINDOWS VERIFY — cinc-auditor (CIS WS2022 v5.0.0 combined profile)
+    # WINDOWS VERIFY — cinc-auditor (CIS WS2022 v5.0.0, single-file)
     # Same inputs as Phase 1; report filename uses 'after' prefix.
     # ================================================================
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
@@ -1821,7 +1699,6 @@ run_phase_4() {
                         exit 1
                     }
 
-                    # ---- CIS benchmark verify ----
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
                         echo -e "${CYAN}   profile: ${WIN_CIS_BENCHMARK} | role: ${WIN_SERVER_ROLE} | level: ${WIN_INSPEC_LVL}${NC}"
@@ -1830,11 +1707,8 @@ run_phase_4() {
                             -t "winrm://${IP}" \
                             --user="${AUDIT_USER}" \
                             --password="${AUDIT_PASS}" \
-                            --input-file "${WIN_CIS_DIR}/inputs.yml" \
                             --input "server_role=${WIN_SERVER_ROLE}" \
                             --input "profile_level=${WIN_INSPEC_LVL}" \
-                            --input "ms_or_dc=${WIN_SERVER_ROLE}" \
-                            --input "level_1_or_2=${WIN_INSPEC_LVL}" \
                             --reporter "json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
                         rc=$?
 
@@ -1846,7 +1720,6 @@ run_phase_4() {
                         esac
                     fi
 
-                    # ---- Custom org benchmark verify ----
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
@@ -1870,12 +1743,11 @@ run_phase_4() {
 }
 
 # ======================================================
-# PHASE 5: CLEANUP — tools removed, VM stays HARDENED
+# PHASE 5: CLEANUP
 # ======================================================
 run_cleanup() {
     echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP${NC}"
     echo -e "${CYAN}   VM stays HARDENED — only SCAP tools + audit user are removed.${NC}"
-    echo -e "${CYAN}   Next audit: Phase 0.2b SCP re-installs offline. ✅${NC}\n"
 
     local remove_rpm="sudo rpm -e --nodeps \
         openscap openscap-scanner scap-security-guide 2>/dev/null || true; \
@@ -1884,10 +1756,8 @@ run_cleanup() {
     local remove_deb="sudo dpkg -r openscap-scanner ssg-base 2>/dev/null || true; \
         sudo rm -rf /tmp/scap_offline /tmp/report_*.html"
 
-    # ---- Ubuntu ----
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
         for IP in "${UBUNTU_MACHINES[@]}"; do
-            echo -e "   ${YELLOW}[Cleanup/Ubuntu] Removing tools from $IP...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                 -o ControlMaster=no -o ControlPath=none \
                 ${UBUNTU_USER}@${IP} "$remove_deb" >/dev/null 2>&1 || true
@@ -1900,10 +1770,8 @@ run_cleanup() {
         done
     fi
 
-    # ---- RHEL ----
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rhel" ]]; then
         for IP in "${RHEL_MACHINES[@]}"; do
-            echo -e "   ${YELLOW}[Cleanup/RHEL] Removing tools from $IP...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                 -o ControlMaster=no -o ControlPath=none \
                 ${GHOST_USER}@${IP} "$remove_rpm" >/dev/null 2>&1 || true
@@ -1916,10 +1784,8 @@ run_cleanup() {
         done
     fi
 
-    # ---- Rocky ----
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rocky" ]]; then
         for IP in "${ROCKY_MACHINES[@]}"; do
-            echo -e "   ${YELLOW}[Cleanup/Rocky] Removing tools from $IP...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                 -o ControlMaster=no -o ControlPath=none \
                 ${GHOST_USER}@${IP} "$remove_rpm" >/dev/null 2>&1 || true
@@ -1932,10 +1798,8 @@ run_cleanup() {
         done
     fi
 
-    # ---- Alma ----
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "alma" ]]; then
         for IP in "${ALMA_MACHINES[@]}"; do
-            echo -e "   ${YELLOW}[Cleanup/Alma] Removing tools from $IP...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                 -o ControlMaster=no -o ControlPath=none \
                 ${GHOST_USER}@${IP} "$remove_rpm" >/dev/null 2>&1 || true
@@ -1948,10 +1812,8 @@ run_cleanup() {
         done
     fi
 
-    # ---- Windows ----
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         for IP in "${WINDOWS_MACHINES[@]}"; do
-            echo -e "   ${CYAN}[Cleanup/Windows] Reversing WinRM + removing audit user: $IP...${NC}"
             VM_NAME="${IP_TO_VM_NAME[$IP]}"
             if [ -n "$VM_NAME" ]; then
                 NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" \
@@ -1985,7 +1847,6 @@ run_cleanup() {
 
     wait
     echo -e "\n${GREEN}✅ [Phase 5] Tools removed. VM remains HARDENED. Audit user deleted.${NC}"
-    echo -e "${GREEN}   Next month: Phase 0.2b SCP flow will re-install cleanly. ✅${NC}"
 }
 
 # ======================================================
@@ -1993,17 +1854,9 @@ run_cleanup() {
 # ======================================================
 execute_phases() {
     case $H_MODE in
-        scan)
-            run_phase_1
-            ;;
-        remediate)
-            run_remediation
-            ;;
-        full)
-            run_phase_1
-            run_remediation
-            run_phase_4
-            ;;
+        scan)      run_phase_1 ;;
+        remediate) run_remediation ;;
+        full)      run_phase_1; run_remediation; run_phase_4 ;;
     esac
 }
 
@@ -2059,7 +1912,7 @@ while true; do
     update_profile_vars
     echo -e "\n${CYAN}------------------------------------------------------${NC}"
     echo -e "1) ${BOLD}SCAN ONLY${NC}      (Phase 0.2b done ✅ — SCP install → scan)"
-    echo -e "2) ${BOLD}REMEDIATE ONLY${NC} (Ansible / oscap --remediate / PS1)"
+    echo -e "2) ${BOLD}REMEDIATE ONLY${NC} (Ansible / Invoke-CISRemediation-Combined.ps1)"
     echo -e "3) ${BOLD}FULL PIPELINE${NC}  (Scan → Remediate → Verify)"
     echo -e "4) ${BOLD}CLEANUP${NC}        (Remove tools + user; VM stays hardened)"
     echo -e "5) ${BOLD}EXIT${NC}"
