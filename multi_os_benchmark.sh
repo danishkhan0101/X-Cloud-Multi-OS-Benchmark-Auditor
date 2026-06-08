@@ -18,6 +18,27 @@ SECRET_NAME="${AZURE_KV_SECRET:-AuditPassword}"
 UBUNTU_USER="${LINUX_ADMIN_USER:-ubuntu}"
 AUDIT_USER="${WINDOWS_ADMIN_USER:-Windows_Admin}"
 
+# ------------------------------------------------------------------
+# Windows cinc-auditor profile settings (files_2.zip / CIS WS2022 v5)
+#
+# WIN_SERVER_ROLE : 'member_server' (default) or 'domain_controller'
+#                  Controls DC-only / member-server-only rules inside
+#                  the InSpec profile.  Set via env or .env file.
+#
+# WIN_CIS_BENCHMARK folder layout expected on the runner:
+#   window-default-cis/
+#   └── window-baseline/          ← WIN_CIS_BENCHMARK points here
+#       ├── inspec.yml            ← from files_2.zip (root)
+#       └── controls/
+#           ├── section_01_account_policies.rb
+#           ├── section_02_local_policies.rb
+#           ├── section_09_windows_firewall.rb
+#           ├── section_17_advanced_audit_policy.rb
+#           ├── section_18_admin_templates_computer.rb
+#           └── section_19_admin_templates_user.rb
+# ------------------------------------------------------------------
+WIN_SERVER_ROLE="${WIN_SERVER_ROLE:-member_server}"
+
 UBUNTU_CUSTOM_DIR="ubuntu-custom"
 UBUNTU_CUSTOM_XCCDF="${UBUNTU_CUSTOM_DIR}/${ORG_PREFIX}_xccdf.xml"
 UBUNTU_CUSTOM_OVAL="${UBUNTU_CUSTOM_DIR}/${ORG_PREFIX}_ubuntu_rules.xml"
@@ -36,6 +57,20 @@ WIN_CIS_DIR="window-default-cis"
 WIN_CIS_BENCHMARK="${WIN_CIS_DIR}/window-baseline"
 # NOTE: WIN_CIS_PLAYBOOK is no longer used directly — remediate_windows_host()
 # selects the per-version playbook (cis_remediate_2022.yml / _2025.yml / etc).
+
+# ------------------------------------------------------------------
+# PowerShell-native remediation (files_2.zip — no Ansible needed)
+# ------------------------------------------------------------------
+# WIN_PS1_REMEDIATE : Invoke-CISRemediation.ps1 (main orchestrator)
+# WIN_PS1_HELPER    : 02_user_rights.ps1 (user-rights helper, auto-loaded)
+#
+# These are uploaded to the target VM via az run-command and executed
+# by run_win_ps1_remediation() — used when Ansible is unavailable or
+# for WS2022 hosts only.  The Ansible path (cis_remediate_2022.yml)
+# remains the primary path; PS1 is the fallback / standalone option.
+# ------------------------------------------------------------------
+WIN_PS1_REMEDIATE="${WIN_CIS_BENCHMARK}/Invoke-CISRemediation.ps1"
+WIN_PS1_HELPER="${WIN_CIS_BENCHMARK}/02_user_rights.ps1"
 
 export INSPEC_SSH_CONFIG_NO_SECURE=true
 BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; MAGENTA='\033[0;35m'; NC='\033[0m'
@@ -63,7 +98,8 @@ SCAP_CACHE_DIR="/tmp/scap_runner_cache"
 # Cache persists across runs — re-download only when empty.
 #
 # Windows-only runs skip this entirely — cinc-auditor runs
-# from the runner, so no SCAP packages are needed on the VM.
+# from the runner against WinRM, so no SCAP packages are
+# needed on the VM at all.
 #
 # RPM packages are fetched via Docker containers (runner is
 # Ubuntu-based; dnf is not available natively).
@@ -73,7 +109,7 @@ prefetch_scap_packages() {
 
     # ---- Windows-only run: no SCAP packages needed ----
     if [[ "${H_TARGET_OS,,}" == "windows" ]]; then
-        echo -e "${GREEN}   ✅ Windows-only run — cinc-auditor runs from runner. No SCAP packages needed. Skipping.${NC}"
+        echo -e "${GREEN}   ✅ Windows-only run — cinc-auditor runs from runner via WinRM. No SCAP packages needed. Skipping.${NC}"
         return 0
     fi
 
@@ -228,6 +264,122 @@ prefetch_scap_packages() {
 }
 
 # ======================================================
+# GUARD: validate_win_cis_profile
+# ------------------------------------------------------
+# Verifies that window-default-cis/window-baseline/
+# contains inspec.yml (from files_2.zip) and at least one
+# controls/*.rb file before any cinc-auditor call.
+# Called once per script run, not per host.
+# ======================================================
+validate_win_cis_profile() {
+    local ok=true
+
+    if [ ! -f "${WIN_CIS_BENCHMARK}/inspec.yml" ]; then
+        echo -e "${RED}❌ [Profile Guard] ${WIN_CIS_BENCHMARK}/inspec.yml not found.${NC}"
+        echo -e "${YELLOW}   Expected layout (from files_2.zip):${NC}"
+        echo -e "${YELLOW}     ${WIN_CIS_BENCHMARK}/inspec.yml${NC}"
+        echo -e "${YELLOW}     ${WIN_CIS_BENCHMARK}/controls/section_01_account_policies.rb${NC}"
+        echo -e "${YELLOW}     ${WIN_CIS_BENCHMARK}/controls/section_02_local_policies.rb   ... etc${NC}"
+        ok=false
+    fi
+
+    if [ ! "$(ls -A "${WIN_CIS_BENCHMARK}/controls/"*.rb 2>/dev/null)" ]; then
+        echo -e "${RED}❌ [Profile Guard] No .rb control files found in ${WIN_CIS_BENCHMARK}/controls/${NC}"
+        ok=false
+    fi
+
+    if [ "$ok" == "false" ]; then
+        echo -e "${RED}   Place inspec.yml in ${WIN_CIS_DIR}/window-baseline/ and .rb files in controls/ subfolder.${NC}"
+        return 1
+    fi
+
+    local ctrl_count
+    ctrl_count=$(grep -rl "^control " "${WIN_CIS_BENCHMARK}/controls/" 2>/dev/null | xargs grep -c "^control " 2>/dev/null | awk -F: '{s+=$2} END {print s}')
+    echo -e "${GREEN}✅ [Profile Guard] CIS WS2022 v5 profile OK — ${ctrl_count} controls found (L1+L2).${NC}"
+    echo -e "${CYAN}   server_role=${WIN_SERVER_ROLE} | profile_level driven by CIS_LEVEL at scan time${NC}"
+    return 0
+}
+
+
+# ======================================================
+# HELPER: run_win_ps1_remediation
+# ------------------------------------------------------
+# PowerShell-native CIS remediation using Invoke-CISRemediation.ps1
+# from files_2.zip.  Fallback / standalone path when Ansible is
+# unavailable, or for targeted section-level remediation.
+#
+# Usage:  run_win_ps1_remediation <ip> <cis_level> [sections]
+#   ip         : target VM IP
+#   cis_level  : "Level 1" or "Level 2"
+#   sections   : optional space-separated list e.g. "01 02 09"
+#                default: all sections
+#
+# Requires WIN_PS1_REMEDIATE to point at Invoke-CISRemediation.ps1
+# (auto-set by setup_win_profile.sh, lives inside window-baseline/).
+# ======================================================
+run_win_ps1_remediation() {
+    local ip="$1"
+    local cis_level="${2:-Level 1}"
+    local sections="${3:-}"
+
+    if [ ! -f "$WIN_PS1_REMEDIATE" ]; then
+        echo -e "${RED}❌ [WinPS1] ${WIN_PS1_REMEDIATE} not found.${NC}"
+        echo -e "${YELLOW}   Run: ./setup_win_profile.sh /path/to/files_2.zip${NC}"
+        return 1
+    fi
+
+    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
+    if [ -z "$vm_name" ]; then
+        echo -e "${RED}❌ [WinPS1] No VM name mapped for IP ${ip}${NC}"
+        return 1
+    fi
+
+    local level_num=1
+    [ "$cis_level" == "Level 2" ] && level_num=2
+
+    local sections_arg=""
+    [ -n "$sections" ] && sections_arg="-Sections @(${sections// /,})"
+
+    echo -e "${CYAN}📤 [WinPS1/${ip}] Uploading + running Invoke-CISRemediation.ps1 (L${level_num}, role=${WIN_SERVER_ROLE})...${NC}"
+
+    # Escape backticks and dollar signs in PS1 content for bash heredoc
+    local ps1_content helper_content encoded_main encoded_helper
+    encoded_main=$(base64 -w0 < "$WIN_PS1_REMEDIATE")
+    encoded_helper=""
+    [ -f "$WIN_PS1_HELPER" ] && encoded_helper=$(base64 -w0 < "$WIN_PS1_HELPER")
+
+    az vm run-command invoke \
+        -g "$RG_NAME" -n "$vm_name" \
+        --command-id RunPowerShellScript \
+        --scripts "
+\$ErrorActionPreference = 'Continue'
+# Decode + write helper
+if ('${encoded_helper}') {
+    [IO.File]::WriteAllBytes('C:\Windows\Temp\02_user_rights.ps1',
+        [Convert]::FromBase64String('${encoded_helper}'))
+}
+# Decode + write main script
+[IO.File]::WriteAllBytes('C:\Windows\Temp\Invoke-CISRemediation.ps1',
+    [Convert]::FromBase64String('${encoded_main}'))
+# Execute
+& 'C:\Windows\Temp\Invoke-CISRemediation.ps1' \`
+    -ServerRole '${WIN_SERVER_ROLE}' \`
+    -Level ${level_num} \`
+    ${sections_arg}
+# Cleanup
+Remove-Item 'C:\Windows\Temp\Invoke-CISRemediation.ps1','C:\Windows\Temp\02_user_rights.ps1' -Force -EA SilentlyContinue
+" -o tsv 2>/dev/null
+
+    local rc=$?
+    if [ $rc -eq 0 ]; then
+        echo -e "${GREEN}✅ [WinPS1/${ip}] PS1 remediation complete (L${level_num})${NC}"
+    else
+        echo -e "${RED}❌ [WinPS1/${ip}] az run-command failed (rc=${rc})${NC}"
+    fi
+    return $rc
+}
+
+# ======================================================
 # TOOL GUARD: ensure_linux_scap_tools (OFFLINE via SCP)
 # ======================================================
 ensure_linux_scap_tools() {
@@ -266,7 +418,6 @@ ensure_linux_scap_tools() {
         rocky10)     cache_key="rocky10"    ;;
         ubuntu22)    cache_key="ubuntu2204" ;;
         ubuntu24)    cache_key="ubuntu2404" ;;
-        # RHEL-family fallback — any unknown el9 variant uses rhel9 RPMs
         *9)
             echo -e "${YELLOW}⚠️  [Tool Guard] Unknown distro '${distro_id}${distro_ver}' — falling back to rhel9 cache${NC}"
             cache_key="rhel9"
@@ -283,7 +434,6 @@ ensure_linux_scap_tools() {
 
     local cache_dir="${SCAP_CACHE_DIR}/${cache_key}"
 
-    # ---- Validate cache exists ----
     if [ ! "$(ls -A "${cache_dir}" 2>/dev/null)" ]; then
         echo -e "${RED}❌ [Tool Guard] Cache empty: ${cache_dir}${NC}"
         echo -e "${YELLOW}   Re-run Phase 0.2b (prefetch_scap_packages) on the runner first.${NC}"
@@ -292,13 +442,11 @@ ensure_linux_scap_tools() {
 
     echo -e "${CYAN}📦 [Tool Guard] Pushing ${cache_key} packages → ${ip} (SCP/port 22)${NC}"
 
-    # ---- Create temp staging dir on VM ----
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ControlMaster=no -o ControlPath=none \
         "${user}@${ip}" \
         "sudo mkdir -p /tmp/scap_offline && sudo chmod 777 /tmp/scap_offline" 2>/dev/null
 
-    # ---- Push packages via SCP (port 22 — survives CIS hardening) ----
     scp -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ControlMaster=no -o ControlPath=none \
         -o ConnectTimeout=10 \
@@ -309,7 +457,6 @@ ensure_linux_scap_tools() {
         return 1
     fi
 
-    # ---- Install offline (zero outbound connections) ----
     local install_cmd
     if [ "$pkg_mgr" == "apt" ]; then
         install_cmd="sudo dpkg -i /tmp/scap_offline/*.deb 2>/dev/null || true; \
@@ -847,11 +994,13 @@ update_profile_vars() {
         if [ "$CIS_LEVEL" == "Level 1" ]; then
             UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level1_server"
             RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_server_l1"
-            OS_LVL="1"; WIN_INSPEC_LVL="1"
+            OS_LVL="1"
+            WIN_INSPEC_LVL="1"   # → --input profile_level=1 → L1-tagged controls in scope
         else
             UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level2_server"
             RHEL_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis"
-            OS_LVL="2"; WIN_INSPEC_LVL="2"
+            OS_LVL="2"
+            WIN_INSPEC_LVL="2"   # → --input profile_level=2 → L1 + L2 controls in scope
         fi
     fi
 }
@@ -1121,39 +1270,71 @@ run_phase_1() {
         fi
     fi
 
-    # -------------------- WINDOWS --------------------
+    # ================================================================
+    # WINDOWS — cinc-auditor (CIS WS2022 v5.0.0, files_2.zip profile)
+    # ================================================================
+    # Profile inputs (from inspec.yml in window-default-cis/window-baseline/):
+    #   server_role  = member_server | domain_controller  (WIN_SERVER_ROLE)
+    #   profile_level= 1 | 2                              (WIN_INSPEC_LVL)
+    #
+    # All 427 controls (352 L1 + 75 L2) always execute.
+    # The profile_level input is metadata: Heimdall / SAF CLI uses it to
+    # filter the report view (L1-only vs L1+L2).  rc=100/101 = pass/fail
+    # with findings — both are success for our purposes.
+    # ================================================================
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
+
+            # Validate profile structure once before forking
+            validate_win_cis_profile || {
+                echo -e "${RED}❌ [Phase1/Win] Profile validation failed — skipping all Windows hosts.${NC}"
+                return 1
+            }
+
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
                     wait_for_winrm "$IP" || {
                         echo -e "${RED}❌ [Phase1/Win] WinRM unreachable: $IP — skipping${NC}"
                         exit 1
                     }
+
+                    # ---- CIS benchmark (files_2.zip profile) ----
                     if [ "$RUN_CIS" == true ]; then
-                        echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP...${NC}"
-                        cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} \
-                            --user="${AUDIT_USER}" --password="${AUDIT_PASS}" \
-                            --input level_1_or_2=$WIN_INSPEC_LVL \
-                            --reporter json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
+                        echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP${NC}"
+                        echo -e "${CYAN}   profile: ${WIN_CIS_BENCHMARK} | role: ${WIN_SERVER_ROLE} | level: ${WIN_INSPEC_LVL}${NC}"
+
+                        cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
+                            -t "winrm://${IP}" \
+                            --user="${AUDIT_USER}" \
+                            --password="${AUDIT_PASS}" \
+                            --input "server_role=${WIN_SERVER_ROLE}" \
+                            --input "profile_level=${WIN_INSPEC_LVL}" \
+                            --reporter "json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
                         rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 100 ] || [ $rc -eq 101 ]; then
-                            echo -e "${GREEN}✅ [Phase1/Win/CIS] $IP scan complete (rc=$rc)${NC}"
-                        else
-                            echo -e "${RED}❌ [Phase1/Win/CIS] cinc-auditor failed on $IP (rc=$rc)${NC}"
-                        fi
+
+                        case $rc in
+                            0|100|101)
+                                echo -e "${GREEN}✅ [Phase1/Win/CIS L${WIN_INSPEC_LVL}] $IP scan complete (rc=$rc)${NC}" ;;
+                            *)
+                                echo -e "${RED}❌ [Phase1/Win/CIS L${WIN_INSPEC_LVL}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
+                        esac
                     fi
+
+                    # ---- Custom org benchmark ----
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/${ORG_PREFIX^^}] Scanning $IP...${NC}"
-                        cinc-auditor exec "$WIN_CUSTOM_BENCHMARK" -t winrm://${IP} \
-                            --user="${AUDIT_USER}" --password="${AUDIT_PASS}" \
-                            --reporter json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json
+                        cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
+                            -t "winrm://${IP}" \
+                            --user="${AUDIT_USER}" \
+                            --password="${AUDIT_PASS}" \
+                            --reporter "json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json"
                         rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 100 ] || [ $rc -eq 101 ]; then
-                            echo -e "${GREEN}✅ [Phase1/Win/${ORG_PREFIX^^}] $IP scan complete (rc=$rc)${NC}"
-                        else
-                            echo -e "${RED}❌ [Phase1/Win/${ORG_PREFIX^^}] cinc-auditor failed on $IP (rc=$rc)${NC}"
-                        fi
+                        case $rc in
+                            0|100|101)
+                                echo -e "${GREEN}✅ [Phase1/Win/${ORG_PREFIX^^}] $IP scan complete (rc=$rc)${NC}" ;;
+                            *)
+                                echo -e "${RED}❌ [Phase1/Win/${ORG_PREFIX^^}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
+                        esac
                     fi
                 ) &
             done
@@ -1575,39 +1756,62 @@ run_phase_4() {
         fi
     fi
 
-    # -------------------- WINDOWS VERIFY --------------------
+    # ================================================================
+    # WINDOWS VERIFY — cinc-auditor (CIS WS2022 v5.0.0, files_2.zip)
+    # Same inputs as Phase 1; report filename uses 'after' prefix.
+    # ================================================================
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
+
+            validate_win_cis_profile || {
+                echo -e "${RED}❌ [Phase4/Win] Profile validation failed — skipping all Windows hosts.${NC}"
+                return 1
+            }
+
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
                     wait_for_winrm "$IP" || {
                         echo -e "${RED}❌ [Phase4/Win] WinRM unreachable: $IP — skipping${NC}"
                         exit 1
                     }
+
+                    # ---- CIS benchmark verify ----
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
-                        cinc-auditor exec "$WIN_CIS_BENCHMARK" -t winrm://${IP} \
-                            --user="${AUDIT_USER}" --password="${AUDIT_PASS}" \
-                            --input level_1_or_2=$WIN_INSPEC_LVL \
-                            --reporter json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json
+                        echo -e "${CYAN}   profile: ${WIN_CIS_BENCHMARK} | role: ${WIN_SERVER_ROLE} | level: ${WIN_INSPEC_LVL}${NC}"
+
+                        cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
+                            -t "winrm://${IP}" \
+                            --user="${AUDIT_USER}" \
+                            --password="${AUDIT_PASS}" \
+                            --input "server_role=${WIN_SERVER_ROLE}" \
+                            --input "profile_level=${WIN_INSPEC_LVL}" \
+                            --reporter "json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
                         rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 100 ] || [ $rc -eq 101 ]; then
-                            echo -e "${GREEN}✅ [Phase4/Win/CIS] $IP verify complete (rc=$rc)${NC}"
-                        else
-                            echo -e "${RED}❌ [Phase4/Win/CIS] cinc-auditor failed on $IP (rc=$rc)${NC}"
-                        fi
+
+                        case $rc in
+                            0|100|101)
+                                echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] $IP verify complete (rc=$rc)${NC}" ;;
+                            *)
+                                echo -e "${RED}❌ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
+                        esac
                     fi
+
+                    # ---- Custom org benchmark verify ----
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] Verifying $IP...${NC}"
-                        cinc-auditor exec "$WIN_CUSTOM_BENCHMARK" -t winrm://${IP} \
-                            --user="${AUDIT_USER}" --password="${AUDIT_PASS}" \
-                            --reporter json:heimdall_after_${ORG_PREFIX^^}_WIN_${IP}.json
+                        cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
+                            -t "winrm://${IP}" \
+                            --user="${AUDIT_USER}" \
+                            --password="${AUDIT_PASS}" \
+                            --reporter "json:heimdall_after_${ORG_PREFIX^^}_WIN_${IP}.json"
                         rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 100 ] || [ $rc -eq 101 ]; then
-                            echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] $IP verify complete (rc=$rc)${NC}"
-                        else
-                            echo -e "${RED}❌ [Phase4/Win/${ORG_PREFIX^^}] cinc-auditor failed on $IP (rc=$rc)${NC}"
-                        fi
+                        case $rc in
+                            0|100|101)
+                                echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] $IP verify complete (rc=$rc)${NC}" ;;
+                            *)
+                                echo -e "${RED}❌ [Phase4/Win/${ORG_PREFIX^^}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
+                        esac
                     fi
                 ) &
             done
