@@ -41,6 +41,14 @@ echo -e "${CYAN}${BOLD}🗂️  Setting up CIS WS2022 v5.0.0 InSpec profile...${
 echo -e "${CYAN}   Source : ${ZIP_FILE}${NC}"
 echo -e "${CYAN}   Target : ${PROFILE_DIR}/${NC}"
 
+# ---- Wipe existing controls to prevent stale files from old profiles ----
+# The window-baseline/ directory may already contain .rb files from a previous
+# or different profile version. Remove them so only files_2.zip controls run.
+if [ -d "${CONTROLS_DIR}" ]; then
+    rm -f "${CONTROLS_DIR}"/*.rb
+    echo -e "${CYAN}   🧹 Cleared existing controls directory${NC}"
+fi
+
 # ---- Create directory structure ----
 mkdir -p "${CONTROLS_DIR}"
 
