@@ -1,0 +1,85 @@
+# =============================================================================
+# CIS Microsoft Windows Server 2022 Benchmark v5.0.0 — InSpec Inputs
+# =============================================================================
+# Passed to cinc-auditor via --input-file window-default-cis/inputs.yml
+#
+# Two naming conventions are covered — both sets of .rb controls are supported:
+#   server_role / profile_level  → section_*.rb files (files_2.zip)
+#   ms_or_dc   / level_1_or_2   → older profile controls
+#
+# Override any value via GitHub Actions Variable or .env:
+#   WIN_SERVER_ROLE=member_server  (or domain_controller)
+#   CIS_LEVEL=Level 1              (or Level 2)
+# =============================================================================
+
+# ── Role / Level (both naming conventions) ───────────────────────────────────
+server_role: "member_server"      # member_server | domain_controller
+profile_level: 1                  # 1 = L1 only, 2 = L1 + L2
+
+ms_or_dc: "member_server"         # mirrors server_role for older controls
+level_1_or_2: 1                   # mirrors profile_level for older controls
+
+# ── Password Policy ───────────────────────────────────────────────────────────
+# CIS 1.1.1 — Enforce password history (CIS: 24 or more)
+password_history_size: 24
+
+# CIS 1.1.2 — Maximum password age (CIS: 365 or fewer, but not 0)
+maximum_password_age: 365
+
+# ── User Rights Assignment (Section 2.2) ─────────────────────────────────────
+# Each input is the ALLOWED list for that privilege.
+# Empty list = no accounts should hold this right (most restrictive).
+# Add accounts your environment requires, e.g. ["BUILTIN\\Administrators"]
+
+se_network_logon_right:
+  - "BUILTIN\\Administrators"
+  - "BUILTIN\\Users"
+
+se_interactive_logon_right:
+  - "BUILTIN\\Administrators"
+  - "BUILTIN\\Users"
+
+se_remote_interactive_logon_right:
+  - "BUILTIN\\Administrators"
+  - "Remote Desktop Users"
+
+se_backup_privilege:
+  - "BUILTIN\\Administrators"
+
+se_systemtime_privilege:
+  - "BUILTIN\\Administrators"
+  - "LOCAL SERVICE"
+
+se_time_zone_privilege:
+  - "BUILTIN\\Administrators"
+  - "LOCAL SERVICE"
+
+se_create_symbolic_link_privilege:
+  - "BUILTIN\\Administrators"
+
+se_deny_network_logon_right:
+  - "Guest"
+
+se_deny_remote_interactive_logon_right:
+  - "Guest"
+
+se_enable_delegation_privilege: []
+
+se_impersonate_privilege:
+  - "BUILTIN\\Administrators"
+  - "LOCAL SERVICE"
+  - "NETWORK SERVICE"
+  - "SERVICE"
+
+se_load_driver_privilege:
+  - "BUILTIN\\Administrators"
+
+se_security_privilege:
+  - "BUILTIN\\Administrators"
+
+se_assign_primary_token_privilege:
+  - "LOCAL SERVICE"
+  - "NETWORK SERVICE"
+
+se_restore_privilege:
+  - "BUILTIN\\Administrators"
