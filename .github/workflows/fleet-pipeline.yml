@@ -317,28 +317,13 @@ jobs:
       # Primary path for CIS remediation is Ansible (cis_remediate_2022.yml).
       # Fallback: Invoke-CISRemediation-Combined.ps1 (run_win_ps1_remediation).
       # ──────────────────────────────────────────────────────────────────
-      - name: 📦 Install Ansible CIS Roles for Windows Remediation
+      - name: 📦 Install Ansible CIS Role for Windows
         if: matrix.os_target.os == 'Windows'
         run: |
-          # Pin explicit versions — Galaxy's version comparator breaks when a role
-          # mixes 'v1.x.x' and '1.x.x' tags. Pinning bypasses the comparison.
-          # Fall back to direct GitHub install if Galaxy still fails.
-
-          ansible-galaxy role install 'ansible-lockdown.windows_2019_cis,3.0.0' \
-            || ansible-galaxy role install \
-               git+https://github.com/ansible-lockdown/Windows-2019-CIS.git \
-            && echo "✅ WS2019 role ready"
-
-          ansible-galaxy role install 'ansible-lockdown.windows_2022_cis,3.0.0' \
+          ansible-galaxy role install -r requirements.yml \
             || ansible-galaxy role install \
                git+https://github.com/ansible-lockdown/Windows-2022-CIS.git \
             && echo "✅ WS2022 role ready"
-
-          # WS2025 — no Galaxy release yet, always pull from GitHub
-          ansible-galaxy role install \
-            git+https://github.com/ansible-lockdown/Windows-2025-CIS.git \
-            2>/dev/null && echo "✅ WS2025 role ready" \
-            || echo "⚠️  WS2025 role unavailable — skipped"
 
       # ──────────────────────────────────────────────────────────────────
       # MAIN: run the orchestrator script in headless CI/CD mode.
