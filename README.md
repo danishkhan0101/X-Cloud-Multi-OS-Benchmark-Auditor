@@ -1,5 +1,3 @@
-Untuk memudahkan anda memasukkan kandungan ini terus ke dalam pelayan atau repositori, anda boleh menggunakan arahan **bash** di bawah. Salin dan tampal kod ini ke dalam terminal anda, dan ia akan secara automatik mencipta atau menindih fail `README.md` dengan format Markdown yang betul.
-
 ```bash
 cat << 'EOF' > README.md
 <div align="center">
