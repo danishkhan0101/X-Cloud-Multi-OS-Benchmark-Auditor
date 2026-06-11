@@ -1,5 +1,3 @@
-```bash
-cat << 'EOF' > README.md
 <div align="center">
 
 # 🛡️ Fleet Commander
