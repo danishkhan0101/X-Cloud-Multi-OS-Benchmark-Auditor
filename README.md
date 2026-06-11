@@ -1,3 +1,7 @@
+Untuk memudahkan anda memasukkan kandungan ini terus ke dalam pelayan atau repositori, anda boleh menggunakan arahan **bash** di bawah. Salin dan tampal kod ini ke dalam terminal anda, dan ia akan secara automatik mencipta atau menindih fail `README.md` dengan format Markdown yang betul.
+
+```bash
+cat << 'EOF' > README.md
 <div align="center">
 
 # 🛡️ Fleet Commander
@@ -60,51 +64,63 @@ graph TD
     N --> O((Phase 5: The Ghost Method Cleanup))
     
     style O fill:#ff4d4d,stroke:#333,stroke-width:2px,color:#fff
+
 ```
-🚀 Quick Start Guide
+
+---
+
+## 🚀 Quick Start Guide
+
 Get Fleet Commander up and running in minutes.
 
-1️⃣ Prerequisites
+### 1️⃣ Prerequisites
+
 Ensure your runner (or local machine) is equipped with the following toolchain:
 
-☁️ az (Azure CLI) - Authenticated with your service principal.
+* ☁️ **`az` (Azure CLI)** - Authenticated with your service principal.
+* ⚙️ **`ansible`** - For routing remediation playbooks.
+* 🔍 **`cinc-auditor`** (or Chef InSpec) - For Windows compliance scanning.
+* 🐍 **`python3`** - For unpacking legacy SCAP packages dynamically.
 
-⚙️ ansible - For routing remediation playbooks.
-
-🔍 cinc-auditor (or Chef InSpec) - For Windows compliance scanning.
-
-🐍 python3 - For unpacking legacy SCAP packages dynamically.
-
-Bootstrap Ansible Dependencies:
+**Bootstrap Ansible Dependencies:**
 Before running the orchestrator, ensure third-party roles and collections are installed via the requirements file:
-
-Bash
+```bash
 ansible-galaxy collection install -r requirements.yml
 ansible-galaxy role install -r requirements.yml
-2️⃣ Configuration (.env)
-Fleet Commander is 100% dynamic. For local testing, copy the .env.example file to .env and inject your infrastructure variables.
+```
 
-⚠️ SECURITY WARNING: Never commit your .env file to version control. If using GitHub Actions, inject these via Repository Secrets & Variables.
+### 2️⃣ Configuration (`.env`)
 
-Code snippet
+Fleet Commander is **100% dynamic**. For local testing, copy the `.env.example` file to `.env` and inject your infrastructure variables.
+
+> ⚠️ **SECURITY WARNING:** Never commit your `.env` file to version control. If using GitHub Actions, inject these via **Repository Secrets & Variables**.
+
+```env
+
 # --- Azure Infrastructure ---
+
 AZURE_RG_NAME="YOUR_RESOURCE_GROUP"
 AZURE_KV_NAME="YOUR_KEYVAULT_NAME"
 AZURE_KV_SECRET="WindowsAdminPasswordSecretName"
 
 # --- Organization Customization ---
+
 ORG_NAME="TM"
 ORG_PREFIX="tm"
 GHOST_USER="audit_ghost"
 CUSTOM_XCCDF_PROFILE="xccdf_tm_profile_lsb"
 
 # --- Default Fallback Admins ---
+
 LINUX_ADMIN_USER="ubuntu"
 WINDOWS_ADMIN_USER="Windows_Admin"
-3️⃣ Directory Structure
+```
+
+### 3️⃣ Directory Structure
+
 The repository is structured to separate organizational rules from generic CIS baselines:
 
-Plaintext
+```text
 📦 Fleet-Commander
 ├── 📂 .github/workflows/           # CI/CD Pipeline (fleet-pipeline.yml)
 ├── 📂 rhel-custom/                 # Custom TM RHEL Rules & Playbooks
@@ -113,28 +129,43 @@ Plaintext
 ├── 📂 window-default-cis/          # Standard CIS Windows Rules & Playbooks
 ├── 📜 multi_os_benchmark.sh        # Core Bash Orchestrator
 └── 📜 requirements.yml             # Ansible Dependecy Definitions
-💻 Execution Methods
+```
+
+---
+
+## 💻 Execution Methods
+
 Whether you are testing locally or running a full DevSecOps pipeline, Fleet Commander adapts to your workflow.
 
-🕹️ Option A: Interactive Mode (Local)
-Run the script without arguments to launch the Interactive Terminal GUI. Perfect for localized testing and manual execution.
+### 🕹️ Option A: Interactive Mode (Local)
 
-Bash
+Run the script without arguments to launch the **Interactive Terminal GUI**. Perfect for localized testing and manual execution.
+
+```bash
 chmod +x multi_os_benchmark.sh
 ./multi_os_benchmark.sh
-🤖 Option B: Headless Mode (CI/CD Pipeline)
+```
+
+### 🤖 Option B: Headless Mode (CI/CD Pipeline)
+
 Pass parameters to completely automate the pipeline in GitHub Actions, GitLab CI, or Jenkins.
 
-Base Syntax:
-
-Bash
+**Base Syntax:**
+```bash
 ./multi_os_benchmark.sh --headless --profile <tm|cis|both> --mode <scan|remediate|full> --targets <Tag|all>
-🎯 Example 1: Full Audit on the 'Prod' Tag
+```
 
-Bash
+**🎯 Example 1: Full Audit on the 'Prod' Tag**
+```bash
 ./multi_os_benchmark.sh --headless --profile both --mode scan --targets Prod
-🎯 Example 2: CIS Level 1 Scan & Auto-Fix (With Zero-Trust Cleanup)
+```
 
-Bash
+**🎯 Example 2: CIS Level 1 Scan & Auto-Fix (With Zero-Trust Cleanup)**
+```bash
 export CIS_LEVEL="Level 1"
 ./multi_os_benchmark.sh --headless --profile cis --mode full --targets all --cleanup true
+```
+
+---
+
+Jika anda menyunting menggunakan UI GitHub atau editor seperti VSCode, anda boleh mencipta fail baharu bernama `README.md`, salin teks bermula daripada `<div align="center">` sehingga ke bahagian `</div>` yang terakhir, dan tampalkannya (paste). Ia akan dipaparkan (rendered) dengan sempurna sebagai dokumen Markdown.
