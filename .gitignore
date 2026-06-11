@@ -14,3 +14,5 @@ inventory.ini
 .env
 .env.local
 .env.*
+~/.ansible/
+.ansible/
