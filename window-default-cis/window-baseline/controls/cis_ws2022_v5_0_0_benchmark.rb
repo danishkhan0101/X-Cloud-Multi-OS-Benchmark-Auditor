@@ -1188,7 +1188,7 @@ control 'cis-2.3.7.9' do
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon') do
-    its('ScRemoveOption') { should be_in [1, 2, 3] }
+    its('ScRemoveOption') { should be_in ['1', '2', '3'] }
   end
 end
 
