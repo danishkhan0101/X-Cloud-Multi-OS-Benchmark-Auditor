@@ -171,7 +171,7 @@ function Set-CISSecurityOptions {
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'LimitBlankPasswordUse' -Type DWord -Value 1  # 2.3.1.2
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'SCENoApplyLegacyAuditPolicy' -Type DWord -Value 1  # 2.3.2.1
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'CrashOnAuditFail' -Type DWord -Value 0  # 2.3.2.2
-    Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Print\Providers\LanManServices\Servers' -Name 'AddPrinterDrivers' -Type DWord -Value 1  # 2.3.4.1
+    Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Print\Providers\LanMan Print Services\Servers' -Name 'AddPrinterDrivers' -Type DWord -Value 1  # 2.3.4.1
     if ($ServerRole -eq 'domain_controller') { Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'SubmitControl' -Type DWord -Value 0 }  # 2.3.5.1
     Remove-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters' -Name 'VulnerableChannelAllowList'  # 2.3.5.2
     if ($ServerRole -eq 'domain_controller') { Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\NTDS\Parameters' -Name 'LdapEnforceChannelBinding' -Type DWord -Value 2 }  # 2.3.5.3
@@ -186,9 +186,9 @@ function Set-CISSecurityOptions {
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'DisableCAD' -Type DWord -Value 0  # 2.3.7.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'DontDisplayLastUserName' -Type DWord -Value 1  # 2.3.7.2
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'InactivityTimeoutSecs' -Type DWord -Value 1  # 2.3.7.3
-    if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\WindowsNT\CurrentVersion\Winlogon' -Name 'CachedLogonsCount' -Type DWord -Value 0 }  # 2.3.7.6
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\WindowsNT\CurrentVersion\Winlogon' -Name 'PasswordExpiryWarning' -Type DWord -Value 5  # 2.3.7.7
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\WindowsNT\CurrentVersion\Winlogon' -Name 'ScRemoveOption' -Type DWord -Value 1  # 2.3.7.9
+    if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'CachedLogonsCount' -Type DWord -Value 0 }  # 2.3.7.6
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'PasswordExpiryWarning' -Type DWord -Value 5  # 2.3.7.7
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'ScRemoveOption' -Type DWord -Value 1  # 2.3.7.9
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters' -Name 'RequireSecuritySignature' -Type DWord -Value 1  # 2.3.8.1
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters' -Name 'EnablePlainTextPassword' -Type DWord -Value 0  # 2.3.8.2
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters' -Name 'AutoDisconnect' -Type DWord -Value 0  # 2.3.9.1
@@ -197,6 +197,7 @@ function Set-CISSecurityOptions {
     if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters' -Name 'SMBServerNameHardeningLevel' -Type DWord -Value 1 }  # 2.3.9.4
     if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'RestrictAnonymousSAM' -Type DWord -Value 1 }  # 2.3.10.2
     if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'RestrictAnonymous' -Type DWord -Value 1 }  # 2.3.10.3
+    if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'restrictremotesam' -Type String -Value 'O:BAG:BAD:(A;;RC;;;BA)' }  # 2.3.10.11
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'DisableDomainCreds' -Type DWord -Value 1  # 2.3.10.4
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'EveryoneIncludesAnonymous' -Type DWord -Value 0  # 2.3.10.5
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters' -Name 'NullSessionPipes' -Type MultiString -Value @('LSARPC','NETLOGON','SAMR')  # 2.3.10.6
@@ -215,7 +216,7 @@ function Set-CISSecurityOptions {
     if ($ServerRole -eq 'domain_controller') { Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters' -Name 'AuditNTLMInDomain' -Type DWord -Value 7 }  # 2.3.11.12
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0' -Name 'RestrictSendingNTLMTraffic' -Type DWord -Value 1  # 2.3.11.13
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'ShutdownWithoutLogon' -Type DWord -Value 0  # 2.3.13.1
-    Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SessionManager\Kernel' -Name 'ObCaseInsensitive' -Type DWord -Value 1  # 2.3.15.1
+    Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Kernel' -Name 'ObCaseInsensitive' -Type DWord -Value 1  # 2.3.15.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'FilterAdministratorToken' -Type DWord -Value 1  # 2.3.17.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'ConsentPromptBehaviorAdmin' -Type DWord -Value 1  # 2.3.17.2
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'ConsentPromptBehaviorUser' -Type DWord -Value 0  # 2.3.17.3
@@ -445,7 +446,7 @@ function Set-CISAdminTemplatesComputer {
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\mrxsmb10' -Name 'Start' -Type DWord -Value 4  # 18.4.2
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' -Name 'SMB1' -Type DWord -Value 0  # 18.4.3
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Cryptography\Wintrust\Config' -Name 'EnableCertPaddingCheck' -Type DWord -Value 1  # 18.4.4
-    Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SessionManager\kernel' -Name 'DisableExceptionChainValidation' -Type DWord -Value 0  # 18.4.5
+    Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' -Name 'DisableExceptionChainValidation' -Type DWord -Value 0  # 18.4.5
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters' -Name 'NodeType' -Type DWord -Value 2  # 18.4.6
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters' -Name 'DisableIPSourceRouting' -Type DWord -Value 2  # 18.5.2
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' -Name 'DisableIPSourceRouting' -Type DWord -Value 2  # 18.5.3
@@ -456,7 +457,7 @@ function Set-CISAdminTemplatesComputer {
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters' -Name 'TcpMaxDataRetransmissions' -Type DWord -Value 3  # 18.5.9
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' -Name 'TcpMaxDataRetransmissions' -Type DWord -Value 3  # 18.5.10
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Eventlog\Security' -Name 'WarningLevel' -Type DWord -Value 90  # 18.5.11
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsNT\DNSClient' -Name 'DisableIPv6DefaultDnsServers' -Type DWord -Value 1  # 18.6.4.3
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Name 'DisableIPv6DefaultDnsServers' -Type DWord -Value 1  # 18.6.4.3
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' -Name 'EnableFontProviders' -Type DWord -Value 0  # 18.6.5.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\LanmanServer' -Name 'MinSmb2Dialect' -Type DWord -Value 785  # 18.6.7.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\LanmanWorkstation' -Name 'AllowInsecureGuestAuth' -Type DWord -Value 0  # 18.6.8.1
@@ -472,13 +473,13 @@ function Set-CISAdminTemplatesComputer {
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\UI' -Name 'DisableWcnUi' -Type DWord -Value 1  # 18.6.20.2
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WcmSvc\GroupPolicy' -Name 'fMinimizeConnections' -Type DWord -Value 3  # 18.6.21.1
     if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WcmSvc\GroupPolicy' -Name 'fBlockNonDomain' -Type DWord -Value 1 }  # 18.6.21.2
-    Set-CISRegValue -Path 'HKLM:\Software\Policies\Microsoft\WindowsNT\Printers' -Name 'RegisterSpoolerRemoteRpcEndPoint' -Type DWord -Value 2  # 18.7.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsNT\Printers\RPC' -Name 'RpcUseNamedPipeProtocol' -Type DWord -Value 0  # 18.7.3
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsNT\Printers\RPC' -Name 'RpcProtocols' -Type DWord -Value 5  # 18.7.5
+    Set-CISRegValue -Path 'HKLM:\Software\Policies\Microsoft\Windows NT\Printers' -Name 'RegisterSpoolerRemoteRpcEndPoint' -Type DWord -Value 2  # 18.7.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers\RPC' -Name 'RpcUseNamedPipeProtocol' -Type DWord -Value 0  # 18.7.3
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers\RPC' -Name 'RpcProtocols' -Type DWord -Value 5  # 18.7.5
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Print' -Name 'RpcAuthnLevelPrivacyEnabled' -Type DWord -Value 1  # 18.7.8
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsNT\Printers\PointAndPrint' -Name 'RestrictDriverInstallationToAdministrators' -Type DWord -Value 1  # 18.7.9
-    Set-CISRegValue -Path 'HKLM:\Software\Policies\Microsoft\WindowsNT\Printers\PointAndPrint' -Name 'NoWarningNoElevationOnInstall' -Type DWord -Value 0  # 18.7.11
-    Set-CISRegValue -Path 'HKLM:\Software\Policies\Microsoft\WindowsNT\Printers\PointAndPrint' -Name 'UpdatePromptSettings' -Type DWord -Value 0  # 18.7.12
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers\PointAndPrint' -Name 'RestrictDriverInstallationToAdministrators' -Type DWord -Value 1  # 18.7.9
+    Set-CISRegValue -Path 'HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint' -Name 'NoWarningNoElevationOnInstall' -Type DWord -Value 0  # 18.7.11
+    Set-CISRegValue -Path 'HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint' -Name 'UpdatePromptSettings' -Type DWord -Value 0  # 18.7.12
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PushNotifications' -Name 'NoCloudApplicationNotification' -Type DWord -Value 1  # 18.8.1.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit' -Name 'ProcessCreationIncludeCmdLine_Enabled' -Type DWord -Value 1  # 18.9.3.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters' -Name 'AllowEncryptionOracle' -Type DWord -Value 0  # 18.9.4.1
@@ -493,8 +494,8 @@ function Set-CISAdminTemplatesComputer {
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceMetadata' -Name 'PreventDeviceMetadataFromNetwork' -Type DWord -Value 1  # 18.9.7.2
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Policies\EarlyLaunch' -Name 'DriverLoadPolicy' -Type DWord -Value 3  # 18.9.13.1
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Policies' -Name 'ClfsAuthenticationChecking' -Type DWord -Value 1  # 18.9.17.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\GroupA4EA-00C04F79F83A}' -Name 'NoBackgroundPolicy' -Type DWord -Value 0  # 18.9.19.2
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\GroupA4EA-00C04F79F83A}' -Name 'NoGPOListChanges' -Type DWord -Value 0  # 18.9.19.3
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Group Policy\{827D319E-6EAC-11D2-A4EA-00C04F79F83A}' -Name 'NoBackgroundPolicy' -Type DWord -Value 0  # 18.9.19.2
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Group Policy\{827D319E-6EAC-11D2-A4EA-00C04F79F83A}' -Name 'NoGPOListChanges' -Type DWord -Value 0  # 18.9.19.3
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' -Name 'EnableCdp' -Type DWord -Value 0  # 18.9.19.4
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'DisableBkGndGroupPolicy' -Type DWord -Value 0  # 18.9.19.5
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\TabletPC' -Name 'PreventHandwritingDataSharing' -Type DWord -Value 1  # 18.9.20.1.2
@@ -507,7 +508,7 @@ function Set-CISAdminTemplatesComputer {
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Name 'NoPublishingWizard' -Type DWord -Value 1  # 18.9.20.1.10
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Messenger\Client' -Name 'CEIP' -Type DWord -Value 2  # 18.9.20.1.11
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\SQMClient\Windows' -Name 'CEIPEnable' -Type DWord -Value 0  # 18.9.20.1.12
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\KernelProtection' -Name 'DeviceEnumerationPolicy' -Type DWord -Value 0  # 18.9.24.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Kernel DMA Protection' -Name 'DeviceEnumerationPolicy' -Type DWord -Value 0  # 18.9.24.1
     if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS' -Name 'BackupDirectory' -Type DWord -Value 1 }  # 18.9.26.1
     if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS' -Name 'PasswordExpirationProtectionEnabled' -Type DWord -Value 1 }  # 18.9.26.2
     if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS' -Name 'ADPasswordEncryptionEnabled' -Type DWord -Value 1 }  # 18.9.26.3
@@ -531,7 +532,7 @@ function Set-CISAdminTemplatesComputer {
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\f15576e8-98b7-4186-b944-eafa664402d9' -Name 'ACSettingIndex' -Type DWord -Value 0  # 18.9.35.6.2
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51' -Name 'DCSettingIndex' -Type DWord -Value 1  # 18.9.35.6.3
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51' -Name 'ACSettingIndex' -Type DWord -Value 1  # 18.9.35.6.4
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'fAllowUnsolicited' -Type DWord -Value 0  # 18.9.37.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'fAllowUnsolicited' -Type DWord -Value 0  # 18.9.37.1
     if ($ServerRole -eq 'domain_controller') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\SAM' -Name 'SamNGCKeyROCAValidation' -Type DWord -Value 2 }  # 18.9.41.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\ScriptedDiagnosticsProvider\Policy' -Name 'DisableQueryRemoteServer' -Type DWord -Value 0  # 18.9.49.5.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WDI\{9c5a40da-b965-4fc3-8781-88dd50a6299d}' -Name 'ScenarioExecutionEnabled' -Type DWord -Value 0  # 18.9.49.11.1
@@ -578,42 +579,43 @@ function Set-CISAdminTemplatesComputer {
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors' -Name 'DisableLocation' -Type DWord -Value 1  # 18.10.36.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Messaging' -Name 'AllowMessageSync' -Type DWord -Value 0  # 18.10.40.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\MicrosoftAccount' -Name 'DisableUserAuth' -Type DWord -Value 1  # 18.10.41.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsDefender\Spynet' -Name 'LocalSettingOverrideSpynetReporting' -Type DWord -Value 0  # 18.10.42.5.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsGuard\ASR' -Name 'ExploitGuard_ASR_Rules' -Type DWord -Value 1  # 18.10.42.6.1.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsDefender\MpEngine' -Name 'EnableFileHashComputation' -Type DWord -Value 1  # 18.10.42.7.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsDefender\NIS' -Name 'EnableConvertWarnToBlock' -Type DWord -Value 1  # 18.10.42.8.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsProtection' -Name 'OobeEnableRtpAndSigUpdate' -Type DWord -Value 1  # 18.10.42.10.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsProtection' -Name 'DisableIOAVProtection' -Type DWord -Value 0  # 18.10.42.10.2
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsProtection' -Name 'DisableRealtimeMonitoring' -Type DWord -Value 0  # 18.10.42.10.3
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsProtection' -Name 'DisableBehaviorMonitoring' -Type DWord -Value 0  # 18.10.42.10.4
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsProtection' -Name 'DisableScriptScanning' -Type DWord -Value 0  # 18.10.42.10.5
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet' -Name 'LocalSettingOverrideSpynetReporting' -Type DWord -Value 0  # 18.10.42.5.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR' -Name 'ExploitGuard_ASR_Rules' -Type DWord -Value 1  # 18.10.42.6.1.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\MpEngine' -Name 'EnableFileHashComputation' -Type DWord -Value 1  # 18.10.42.7.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\NIS' -Name 'EnableConvertWarnToBlock' -Type DWord -Value 1  # 18.10.42.8.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'OobeEnableRtpAndSigUpdate' -Type DWord -Value 1  # 18.10.42.10.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'DisableIOAVProtection' -Type DWord -Value 0  # 18.10.42.10.2
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'DisableRealtimeMonitoring' -Type DWord -Value 0  # 18.10.42.10.3
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'DisableBehaviorMonitoring' -Type DWord -Value 0  # 18.10.42.10.4
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'DisableScriptScanning' -Type DWord -Value 0  # 18.10.42.10.5
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Remediation\Behavioral Network Blocks\Brute Force Protection' -Name 'BruteForceProtectionAggressiveness' -Type DWord -Value 1  # 18.10.42.11.1.1.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Remediation\Behavioral Network Blocks\Brute Force Protection' -Name 'BruteForceProtectionConfiguredState' -Type DWord -Value 1  # 18.10.42.11.1.1.2
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Remediation\Behavioral Network Blocks\Remote Encryption Protection' -Name 'RemoteEncryptionProtectionAggressiveness' -Type DWord -Value 1  # 18.10.42.11.1.2.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsDefender\Reporting' -Name 'DisableGenericRePorts' -Type DWord -Value 1  # 18.10.42.12.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsDefender\Scan' -Name 'QuickScanIncludeExclusions' -Type DWord -Value 1  # 18.10.42.13.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsDefender\Scan' -Name 'DisablePackedExeScanning' -Type DWord -Value 0  # 18.10.42.13.2
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsDefender\Scan' -Name 'DisableRemovableDriveScanning' -Type DWord -Value 0  # 18.10.42.13.3
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsDefender\Scan' -Name 'DaysUntilAggressiveCatchupQuickScan' -Type DWord -Value 7  # 18.10.42.13.4
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsDefender' -Name 'HideExclusionsFromLocalUsers' -Type DWord -Value 1  # 18.10.42.17
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Reporting' -Name 'DisableGenericRePorts' -Type DWord -Value 1  # 18.10.42.12.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Scan' -Name 'QuickScanIncludeExclusions' -Type DWord -Value 1  # 18.10.42.13.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Scan' -Name 'DisablePackedExeScanning' -Type DWord -Value 0  # 18.10.42.13.2
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Scan' -Name 'DisableRemovableDriveScanning' -Type DWord -Value 0  # 18.10.42.13.3
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Scan' -Name 'DaysUntilAggressiveCatchupQuickScan' -Type DWord -Value 7  # 18.10.42.13.4
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender' -Name 'HideExclusionsFromLocalUsers' -Type DWord -Value 1  # 18.10.42.17
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\PushToInstall' -Name 'DisablePushToInstall' -Type DWord -Value 1  # 18.10.56.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'DisablePasswordSaving' -Type DWord -Value 1  # 18.10.57.2.2
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'fSingleSessionPerUser' -Type DWord -Value 1  # 18.10.57.3.2.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'EnableUiaRedirection' -Type DWord -Value 0  # 18.10.57.3.3.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'fDisableLocationRedir' -Type DWord -Value 1  # 18.10.57.3.3.4
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'fDisablePNPRedir' -Type DWord -Value 1  # 18.10.57.3.3.6
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'fDisableWebAuthn' -Type DWord -Value 1  # 18.10.57.3.3.7
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'fPromptForPassword' -Type DWord -Value 1  # 18.10.57.3.9.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'fEncryptRPCTraffic' -Type DWord -Value 1  # 18.10.57.3.9.2
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'UserAuthentication' -Type DWord -Value 1  # 18.10.57.3.9.4
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'MinEncryptionLevel' -Type DWord -Value 3  # 18.10.57.3.9.5
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'MaxIdleTime' -Type DWord -Value 1  # 18.10.57.3.10.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'MaxDisconnectionTime' -Type DWord -Value 60000  # 18.10.57.3.10.2
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'DeleteTempDirsOnExit' -Type DWord -Value 1  # 18.10.57.3.11.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsServices' -Name 'PerSessionTempDir' -Type DWord -Value 1  # 18.10.57.3.11.2
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\InternetExplorer\Feeds' -Name 'DisableEnclosureDownload' -Type DWord -Value 1  # 18.10.58.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsSearch' -Name 'AllowIndexingEncryptedStoresOrItems' -Type DWord -Value 0  # 18.10.59.3
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsSearch' -Name 'EnableDynamicContentInWSB' -Type DWord -Value 0  # 18.10.59.4
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'DisablePasswordSaving' -Type DWord -Value 1  # 18.10.57.2.2
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'fSingleSessionPerUser' -Type DWord -Value 1  # 18.10.57.3.2.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'EnableUiaRedirection' -Type DWord -Value 0  # 18.10.57.3.3.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'fDisableLocationRedir' -Type DWord -Value 1  # 18.10.57.3.3.4
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'fDisablePNPRedir' -Type DWord -Value 1  # 18.10.57.3.3.6
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'fDisableWebAuthn' -Type DWord -Value 1  # 18.10.57.3.3.7
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'fPromptForPassword' -Type DWord -Value 1  # 18.10.57.3.9.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'fEncryptRPCTraffic' -Type DWord -Value 1  # 18.10.57.3.9.2
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'UserAuthentication' -Type DWord -Value 1  # 18.10.57.3.9.4
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'MinEncryptionLevel' -Type DWord -Value 3  # 18.10.57.3.9.5
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'MaxIdleTime' -Type DWord -Value 1  # 18.10.57.3.10.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'MaxDisconnectionTime' -Type DWord -Value 60000  # 18.10.57.3.10.2
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'DeleteTempDirsOnExit' -Type DWord -Value 1  # 18.10.57.3.11.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'PerSessionTempDir' -Type DWord -Value 1  # 18.10.57.3.11.2
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Internet Explorer\Feeds' -Name 'DisableEnclosureDownload' -Type DWord -Value 1  # 18.10.58.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Internet Explorer\Feeds' -Name 'AllowBasicAuthInClear' -Type DWord -Value 0  # 18.10.58.2
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search' -Name 'AllowIndexingEncryptedStoresOrItems' -Type DWord -Value 0  # 18.10.59.3
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search' -Name 'EnableDynamicContentInWSB' -Type DWord -Value 0  # 18.10.59.4
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsInkWorkspace' -Name 'AllowSuggestedAppsInWindowsInkWorkspace' -Type DWord -Value 0  # 18.10.81.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsInkWorkspace' -Name 'AllowWindowsInkWorkspace' -Type DWord -Value 0  # 18.10.81.2
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer' -Name 'EnableUserControl' -Type DWord -Value 0  # 18.10.82.1
@@ -635,8 +637,8 @@ function Set-CISAdminTemplatesComputer {
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name 'NoAutoUpdate' -Type DWord -Value 0  # 18.10.94.2.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name 'ScheduledInstallDay' -Type DWord -Value 0  # 18.10.94.2.2
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' -Name 'ManagePreviewBuildsPolicyValue' -Type DWord -Value 1  # 18.10.94.4.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\InternetSettings\WinHttp' -Name 'DisableWpad' -Type DWord -Value 1  # 18.11.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\InternetSettings' -Name 'DisableProxyAuthenticationSchemes' -Type DWord -Value 256  # 18.11.2
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp' -Name 'DisableWpad' -Type DWord -Value 1  # 18.11.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings' -Name 'DisableProxyAuthenticationSchemes' -Type DWord -Value 256  # 18.11.2
 }
 
 # ===========================================================================
