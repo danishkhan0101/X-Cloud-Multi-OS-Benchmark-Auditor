@@ -1,10 +1,35 @@
 name: 🛡️ Fleet Commander Pipeline
 
+# ┌────────────────────────────────────────────────────────────────────────┐
+# │  MULTI-CLOUD: azure | huaweicloud                                      │
+# │                                                                        │
+# │  NEW SECRETS (Huawei Cloud):                                           │
+# │    HW_ACCESS_KEY     IAM AK (Console → My Credentials → Access Keys)  │
+# │    HW_SECRET_KEY     IAM SK                                            │
+# │    AUDIT_PASS        Windows audit-user password (direct fallback)     │
+# │                                                                        │
+# │  NEW VARIABLES (Huawei Cloud):                                         │
+# │    HW_REGION         e.g. ap-southeast-1 (HK)  cn-north-4 (Beijing)   │
+# │    HW_PROJECT_ID     Console → My Credentials → Projects               │
+# │    HW_CSMS_SECRET    CSMS secret name holding the audit password       │
+# │    HW_ECS_TAG_KEY    (optional) tag key to filter ECS instances        │
+# │    HW_ECS_TAG_VAL    (optional) tag value to match                     │
+# │    HW_VPC_ID         VPC ID to scope security-group queries            │
+# └────────────────────────────────────────────────────────────────────────┘
+
 on:
   workflow_dispatch:
     inputs:
+      cloud_provider:
+        description: '☁️  STEP 0: Cloud Provider'
+        required: true
+        default: 'azure'
+        type: choice
+        options:
+          - azure
+          - huaweicloud
       profile:
-        description: '🛡️ STEP 1: Select Security Profile (Choose "all" for full audit)'
+        description: '🛡️ STEP 1: Select Security Profile'
         required: true
         default: 'tm'
         type: choice
@@ -13,7 +38,7 @@ on:
           - cis
           - all
       cis_level:
-        description: '📊 STEP 2: CIS Strictness (Only matters for "cis" profile)'
+        description: '📊 STEP 2: CIS Strictness'
         required: true
         type: choice
         default: 'Level 1'
@@ -21,7 +46,7 @@ on:
           - 'Level 1'
           - 'Level 2'
       mode:
-        description: '🚀 STEP 3: Action Mode (Scan = Read-Only | Remediate = Fix)'
+        description: '🚀 STEP 3: Action Mode'
         required: true
         default: 'scan'
         type: choice
@@ -30,7 +55,7 @@ on:
           - remediate
           - full
       environment_tag:
-        description: '🎯 STEP 4: Target Environment (Blast Radius)'
+        description: '🎯 STEP 4: Target Environment'
         required: true
         default: 'all'
         type: choice
@@ -40,7 +65,7 @@ on:
           - Prod
           - all
       execution_strategy:
-        description: '🏗️ STEP 5: Runner Architecture (Grouped vs 1-Runner-Per-IP)'
+        description: '🏗️ STEP 5: Runner Architecture'
         required: true
         default: 'os-grouped'
         type: choice
@@ -52,12 +77,12 @@ on:
         required: false
         type: string
       debug_mode:
-        description: '🐞 Troubleshooting: Enable Verbose Logs'
+        description: '🐞 Enable Verbose Logs'
         required: false
         default: false
         type: boolean
       cleanup_mode:
-        description: '🧹 Post-Scan: Delete tools from target servers'
+        description: '🧹 Delete tools from target servers after scan'
         required: false
         default: false
         type: boolean
@@ -68,99 +93,171 @@ on:
 permissions:
   contents: write
 
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 1 — MATRIX FACTORY
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
-  # ─────────────────────────────────────────────────────────────────────────
-  # JOB 1: THE MATRIX FACTORY — builds the JSON queue of OS targets
-  # ─────────────────────────────────────────────────────────────────────────
   prepare-queue:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.build-matrix.outputs.matrix }}
+      matrix:    ${{ steps.build-matrix.outputs.matrix }}
       safe_mode: ${{ steps.safety-gate.outputs.safe_mode }}
       os_matrix: ${{ steps.discover-vms.outputs.os_matrix }}
+      cloud:     ${{ steps.set-cloud.outputs.cloud }}
 
     steps:
-      - name: '🛡️ Safety Gate: Blast Radius Control'
+      - name: '☁️  Resolve Cloud Provider'
+        id: set-cloud
+        run: |
+          CLOUD="${{ github.event.inputs.cloud_provider || 'azure' }}"
+          echo "cloud=${CLOUD,,}" >> $GITHUB_OUTPUT
+          echo "☁️  Cloud provider: ${CLOUD,,}"
+
+      - name: '🛡️ Safety Gate'
         id: safety-gate
         run: |
           PROFILE="${{ github.event.inputs.profile }}"
           MODE="${{ github.event.inputs.mode }}"
-
           if [[ "$PROFILE" == *"all"* ]] && [ "$MODE" != "scan" ]; then
-            echo "⚠️ SAFETY WARNING: Mass remediation on 'all' profiles is blocked."
+            echo "⚠️ Mass remediation on 'all' is blocked — forcing scan"
             echo "safe_mode=scan" >> $GITHUB_OUTPUT
           else
             echo "safe_mode=$MODE" >> $GITHUB_OUTPUT
           fi
 
-      - name: '🚦 Build Dynamic Profile Matrix JSON'
+      - name: '🚦 Build Profile Matrix'
         id: build-matrix
         run: |
           PROFILE_RAW="${{ github.event.inputs.profile }}"
           LEVEL="${{ github.event.inputs.cis_level }}"
-
           if [[ "$PROFILE_RAW" == *"all"* ]]; then
             echo 'matrix=[{"profile":"all","level":"all","name":"Full-Fleet-Audit"}]' >> $GITHUB_OUTPUT
           elif [[ "$PROFILE_RAW" == *"cis"* ]]; then
-            FORMATTED_LEVEL=$(echo "$LEVEL" | tr ' ' '-')
-            echo "matrix=[{\"profile\":\"cis\",\"level\":\"$LEVEL\",\"name\":\"CIS-$FORMATTED_LEVEL\"}]" >> $GITHUB_OUTPUT
+            FMT=$(echo "$LEVEL" | tr ' ' '-')
+            echo "matrix=[{\"profile\":\"cis\",\"level\":\"$LEVEL\",\"name\":\"CIS-$FMT\"}]" >> $GITHUB_OUTPUT
           else
             echo 'matrix=[{"profile":"tm","level":"Standard","name":"TM-Baseline"}]' >> $GITHUB_OUTPUT
           fi
 
-      - name: 🔐 Login to Azure CLI for OS Discovery
+      # ── Azure auth ──────────────────────────────────────────────────────
+      - name: '🔐 [Azure] Login'
+        if: steps.set-cloud.outputs.cloud == 'azure'
         uses: azure/login@v2
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          creds: >-
+            {"clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+             "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+             "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+             "tenantId":"${{ secrets.AZURE_TENANT_ID }}"}
 
-      - name: '📡 Discover Online Azure VMs (Dynamic OS Matrix)'
-        id: discover-vms
+      # ── Huawei Cloud auth ───────────────────────────────────────────────
+      - name: '🔐 [HuaweiCloud] Install & Configure hcloud CLI'
+        if: steps.set-cloud.outputs.cloud == 'huaweicloud'
+        env:
+          HUAWEICLOUD_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
+          HUAWEICLOUD_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
+          HW_REGION:              ${{ vars.HW_REGION || 'ap-southeast-1' }}
         run: |
-          TARGET_ENV="${{ github.event.inputs.environment_tag || 'all' }}"
-          STRATEGY="${{ github.event.inputs.execution_strategy }}"
-          RG_NAME="${{ vars.AZURE_RG_NAME }}"
+          # KooCLI binary — https://support.huaweicloud.com/intl/en-us/qs-hcli/hcli_02_002.html
+          curl -sSL \
+            "https://ap-southeast-1-hwcloudcdn.obs.myhuaweicloud.com/KooCLI/release/latest/hcloud_linux_amd64" \
+            -o /usr/local/bin/hcloud && chmod +x /usr/local/bin/hcloud \
+            || { echo "⚠️  Binary download failed"; exit 1; }
+          hcloud configure set \
+            --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
+            --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
+            --cli-region="$HW_REGION" 2>/dev/null || true
+          hcloud ECS ListServersDetails --cli-region="$HW_REGION" --cli-output json >/dev/null 2>&1 \
+            && echo "✅ hcloud auth OK (region: $HW_REGION)" \
+            || { echo "❌ hcloud auth failed — check HW_ACCESS_KEY / HW_SECRET_KEY"; exit 1; }
 
-          echo "📡 Querying Azure for online VMs in [$RG_NAME]..."
-
-          if [ "$TARGET_ENV" == "all" ]; then
-            VM_DATA=$(az vm list -d -g "$RG_NAME" \
-              --query "[?powerState=='VM running'].[storageProfile.osDisk.osType, storageProfile.imageReference.offer, name, publicIps]" \
-              -o tsv)
-          else
-            VM_DATA=$(az vm list -d -g "$RG_NAME" \
-              --query "[?tags.Environment=='$TARGET_ENV' && powerState=='VM running'].[storageProfile.osDisk.osType, storageProfile.imageReference.offer, name, publicIps]" \
-              -o tsv)
-          fi
-
-          HAS_UBUNTU=false; HAS_RHEL=false; HAS_ROCKY=false; HAS_ALMA=false; HAS_WINDOWS=false
+      # ── VM Discovery ────────────────────────────────────────────────────
+      - name: '📡 Discover Online VMs'
+        id: discover-vms
+        env:
+          CLOUD:          ${{ steps.set-cloud.outputs.cloud }}
+          TARGET_ENV:     ${{ github.event.inputs.environment_tag || 'all' }}
+          STRATEGY:       ${{ github.event.inputs.execution_strategy || 'os-grouped' }}
+          RG_NAME:        ${{ vars.AZURE_RG_NAME }}
+          HW_REGION:      ${{ vars.HW_REGION || 'ap-southeast-1' }}
+          HW_ECS_TAG_KEY: ${{ vars.HW_ECS_TAG_KEY || 'Environment' }}
+          HW_ECS_TAG_VAL: ${{ github.event.inputs.environment_tag || '' }}
+        run: |
+          HAS_UBUNTU=false; HAS_RHEL=false; HAS_ROCKY=false
+          HAS_ALMA=false;   HAS_WINDOWS=false
           MATRIX_JSON="["
 
-          while IFS=$'\t' read -r os offer name raw_ip; do
-            ip=$(echo "$raw_ip" | tr -d '\r' | xargs)
-            if [ -z "$ip" ] || [ "$ip" == "None" ]; then continue; fi
-
-            offer_lower="${offer,,}"
-            name_lower="${name,,}"
-
-            if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
-              if   [[ "$offer_lower" == *"rocky"* ]] || [[ "$name_lower" == *"rocky"* ]]; then
+          classify_vm() {
+            local os="$1" offer="${2,,}" name="${3}" ip="$4"
+            ip=$(echo "$ip" | tr -d '\r' | xargs)
+            [ -z "$ip" ] || [ "$ip" == "None" ] && return
+            local name_lower="${name,,}" NODE_OS=""
+            if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]] || [[ "$os" == *"linux"* ]]; then
+              if   [[ "$offer" == *"rocky"* ]] || [[ "$name_lower" == *"rocky"* ]]; then
                 HAS_ROCKY=true; NODE_OS="Rocky"
-              elif [[ "$offer_lower" == *"alma"*  ]] || [[ "$name_lower" == *"alma"*  ]]; then
+              elif [[ "$offer" == *"alma"*  ]] || [[ "$name_lower" == *"alma"*  ]]; then
                 HAS_ALMA=true;  NODE_OS="Alma"
-              elif [[ "$offer_lower" == *"rhel"*  ]] || [[ "$name_lower" == *"rhel"*  ]]; then
+              elif [[ "$offer" == *"rhel"*  ]] || [[ "$name_lower" == *"rhel"*  ]]; then
                 HAS_RHEL=true;  NODE_OS="RHEL"
               else
                 HAS_UBUNTU=true; NODE_OS="Ubuntu"
               fi
-            elif [[ "$os" == *"Windows"* ]]; then
+            elif [[ "$os" == *"Windows"* ]] || [[ "$os" == *"windows"* ]]; then
               HAS_WINDOWS=true; NODE_OS="Windows"
             fi
-
-            if [ "$STRATEGY" == "per-node" ]; then
-              MATRIX_JSON+="{\"os\":\"$NODE_OS\", \"ip\":\"$ip\"},"
+            if [ "$STRATEGY" == "per-node" ] && [ -n "$NODE_OS" ]; then
+              MATRIX_JSON+="{\"os\":\"$NODE_OS\",\"ip\":\"$ip\"},"
             fi
-          done <<< "$VM_DATA"
+          }
 
+          # ── Azure ──────────────────────────────────────────────────────
+          if [ "$CLOUD" == "azure" ]; then
+            echo "📡 [Azure] Querying VMs in [$RG_NAME]..."
+            if [ "$TARGET_ENV" == "all" ]; then
+              VM_DATA=$(az vm list -d -g "$RG_NAME" \
+                --query "[?powerState=='VM running'].[storageProfile.osDisk.osType,storageProfile.imageReference.offer,name,publicIps]" \
+                -o tsv)
+            else
+              VM_DATA=$(az vm list -d -g "$RG_NAME" \
+                --query "[?tags.Environment=='$TARGET_ENV' && powerState=='VM running'].[storageProfile.osDisk.osType,storageProfile.imageReference.offer,name,publicIps]" \
+                -o tsv)
+            fi
+            while IFS=$'\t' read -r os offer name raw_ip; do
+              classify_vm "$os" "$offer" "$name" "$raw_ip"
+            done <<< "$VM_DATA"
+          fi
+
+          # ── Huawei Cloud — jq parses the ECS JSON (no inline Python) ──
+          if [ "$CLOUD" == "huaweicloud" ]; then
+            echo "📡 [HuaweiCloud] Querying ECS in [$HW_REGION]..."
+            HW_RAW=$(hcloud ECS ListServersDetails \
+              --cli-region "$HW_REGION" --cli-output json 2>/dev/null)
+            [ -z "$HW_RAW" ] && { echo "❌ No ECS data returned"; exit 1; }
+            while IFS=$'\t' read -r os offer name ip; do
+              classify_vm "$os" "$offer" "$name" "$ip"
+            done < <(echo "$HW_RAW" | jq -r \
+              --arg tk "$HW_ECS_TAG_KEY" \
+              --arg tv "$HW_ECS_TAG_VAL" '
+              .servers[]
+              | select(.status == "ACTIVE")
+              | select(
+                  ($tk == "" or $tv == "") or
+                  (.tags // [] | any(.key == $tk and .value == $tv))
+                )
+              | . as $s
+              | [.addresses | to_entries[].value[]
+                 | select(."OS-EXT-IPS:type" == "floating") | .addr][0] as $ip
+              | select($ip != null)
+              | [
+                  ($s.metadata.os_type // "Linux"),
+                  ($s.image.name // "" | ascii_downcase),
+                  $s.name,
+                  $ip
+                ] | @tsv
+              ' 2>/dev/null)
+          fi
+
+          # ── Build grouped matrix ───────────────────────────────────────
           if [ "$STRATEGY" == "os-grouped" ]; then
             [ "$HAS_UBUNTU"  == true ] && MATRIX_JSON+="{\"os\":\"Ubuntu\",  \"ip\":\"all\"},"
             [ "$HAS_RHEL"    == true ] && MATRIX_JSON+="{\"os\":\"RHEL\",    \"ip\":\"all\"},"
@@ -168,16 +265,15 @@ jobs:
             [ "$HAS_ALMA"    == true ] && MATRIX_JSON+="{\"os\":\"Alma\",    \"ip\":\"all\"},"
             [ "$HAS_WINDOWS" == true ] && MATRIX_JSON+="{\"os\":\"Windows\", \"ip\":\"all\"},"
           fi
-
           MATRIX_JSON="${MATRIX_JSON%,}]"
-          if [ "$MATRIX_JSON" == "]" ]; then MATRIX_JSON="[]"; fi
-
-          echo "✅ Active Execution Matrix: $MATRIX_JSON"
+          [ "$MATRIX_JSON" == "]" ] && MATRIX_JSON="[]"
+          echo "✅ Active Matrix: $MATRIX_JSON"
           echo "os_matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # JOB 2: THE 2D EXECUTION ENGINE — Profiles × Operating Systems
-  # ─────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 2 — EXECUTION ENGINE
+# ─────────────────────────────────────────────────────────────────────────────
   run-audit:
     needs: prepare-queue
     if: ${{ needs.prepare-queue.outputs.os_matrix != '[]' }}
@@ -190,40 +286,87 @@ jobs:
         os_target: ${{ fromJSON(needs.prepare-queue.outputs.os_matrix) }}
 
     env:
-      TARGET_ENV:  ${{ github.event.inputs.environment_tag || 'Prod' }}
-      MODE:        ${{ needs.prepare-queue.outputs.safe_mode }}
-      PROFILE:     ${{ matrix.target.profile }}
-      CIS_LEVEL:   ${{ matrix.target.level }}
-      MATRIX_NAME: ${{ matrix.target.name }}
-      TARGET_OS:   ${{ matrix.os_target.os }}
-      TARGET_IP:   ${{ matrix.os_target.ip }}
+      # ── Pipeline context ───────────────────────────────────────────────
+      CLOUD_PROVIDER: ${{ needs.prepare-queue.outputs.cloud }}
+      TARGET_ENV:     ${{ github.event.inputs.environment_tag || 'Prod' }}
+      MODE:           ${{ needs.prepare-queue.outputs.safe_mode }}
+      PROFILE:        ${{ matrix.target.profile }}
+      CIS_LEVEL:      ${{ matrix.target.level }}
+      MATRIX_NAME:    ${{ matrix.target.name }}
+      TARGET_OS:      ${{ matrix.os_target.os }}
+      TARGET_IP:      ${{ matrix.os_target.ip }}
+      # ── Azure ──────────────────────────────────────────────────────────
+      AZURE_RG_NAME:  ${{ vars.AZURE_RG_NAME }}
+      AZURE_KV_NAME:  ${{ vars.AZURE_KV_NAME }}
+      AZURE_KV_SECRET: ${{ vars.AZURE_KV_SECRET }}
+      # ── Huawei Cloud ───────────────────────────────────────────────────
+      HW_REGION:              ${{ vars.HW_REGION || 'ap-southeast-1' }}
+      HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
+      HW_CSMS_SECRET:         ${{ vars.HW_CSMS_SECRET || 'AuditPassword' }}
+      HW_ECS_TAG_KEY:         ${{ vars.HW_ECS_TAG_KEY || 'Environment' }}
+      HW_ECS_TAG_VAL:         ${{ github.event.inputs.environment_tag || '' }}
+      HW_VPC_ID:              ${{ vars.HW_VPC_ID }}
+      HUAWEICLOUD_ACCESS_KEY:  ${{ secrets.HW_ACCESS_KEY }}
+      HUAWEICLOUD_SECRET_KEY:  ${{ secrets.HW_SECRET_KEY }}
+      HUAWEICLOUD_REGION:     ${{ vars.HW_REGION || 'ap-southeast-1' }}
+      # ── Shared ─────────────────────────────────────────────────────────
+      LINUX_ADMIN_USER:     ${{ vars.LINUX_ADMIN_USER }}
+      WINDOWS_ADMIN_USER:   ${{ vars.WINDOWS_ADMIN_USER }}
+      WIN_SERVER_ROLE:      ${{ vars.WIN_SERVER_ROLE || 'member_server' }}
+      ORG_NAME:             ${{ vars.ORG_NAME }}
+      ORG_PREFIX:           ${{ vars.ORG_PREFIX }}
+      GHOST_USER:           ${{ vars.GHOST_USER }}
+      CUSTOM_XCCDF_PROFILE: ${{ vars.CUSTOM_XCCDF_PROFILE }}
+      # Set AUDIT_PASS as a repo secret to bypass KeyVault / CSMS entirely
+      AUDIT_PASS:           ${{ secrets.AUDIT_PASS }}
+      TICKET_ID:            ${{ github.event.inputs.ticket_id }}
+      DEBUG_MODE:           ${{ github.event.inputs.debug_mode }}
+      CLEANUP:              ${{ github.event.inputs.cleanup_mode }}
 
     steps:
-      - name: 📥 Pull Repository Code
+      - name: '📥 Checkout'
         uses: actions/checkout@v4
 
-      - name: 🔐 Login to Azure CLI
+      # ── Azure auth ──────────────────────────────────────────────────────
+      - name: '🔐 [Azure] Login'
+        if: needs.prepare-queue.outputs.cloud == 'azure'
         uses: azure/login@v2
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          creds: >-
+            {"clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+             "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+             "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+             "tenantId":"${{ secrets.AZURE_TENANT_ID }}"}
 
-      - name: 🔑 Setup SSH Key for Linux Targets
+      # ── Huawei Cloud auth ───────────────────────────────────────────────
+      - name: '🔐 [HuaweiCloud] Install & Configure hcloud CLI'
+        if: needs.prepare-queue.outputs.cloud == 'huaweicloud'
+        run: |
+          curl -sSL \
+            "https://ap-southeast-1-hwcloudcdn.obs.myhuaweicloud.com/KooCLI/release/latest/hcloud_linux_amd64" \
+            -o /usr/local/bin/hcloud && chmod +x /usr/local/bin/hcloud \
+            || { echo "❌ hcloud download failed"; exit 1; }
+          hcloud configure set \
+            --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
+            --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
+            --cli-region="$HW_REGION" 2>/dev/null || true
+          echo "✅ hcloud configured (region: $HW_REGION)"
+
+      # ── SSH (Linux only) ────────────────────────────────────────────────
+      - name: '🔑 Setup SSH Key'
         if: matrix.os_target.os != 'Windows'
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
 
-      - name: 🔓 Extract Public Key for Auto-Healing
+      - name: '🔓 Extract Public Key'
         if: matrix.os_target.os != 'Windows'
         run: |
           mkdir -p ~/.ssh
           ssh-add -L > ~/.ssh/id_rsa.pub
 
-      # ──────────────────────────────────────────────────────────────────
-      # LINUX: install Ansible only. oscap/SCAP content is pushed to each
-      # VM on-demand by ensure_linux_scap_tools() inside the script.
-      # ──────────────────────────────────────────────────────────────────
-      - name: 🛠️ Install Runner Orchestration Tools (Linux)
+      # ── Linux toolchain ─────────────────────────────────────────────────
+      - name: '🛠️ Install Linux Tools (Ansible)'
         if: matrix.os_target.os != 'Windows'
         run: |
           sudo apt-get update -qq
@@ -232,13 +375,9 @@ jobs:
           python3 -m pip install --user 'ansible>=10.0.0,<11.0.0'
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           sudo sh -c 'printf "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null\n" >> /etc/ssh/ssh_config'
-          export ANSIBLE_HOST_KEY_CHECKING=False
 
-      # ──────────────────────────────────────────────────────────────────
-      # WINDOWS STEP 1: install Cinc Auditor (scanner) + Ansible + pywinrm
-      # Cinc Auditor runs from the runner against the VM via WinRM.
-      # ──────────────────────────────────────────────────────────────────
-      - name: 🛠️ Install Windows Tools (Cinc Auditor + Ansible + pywinrm)
+      # ── Windows toolchain ───────────────────────────────────────────────
+      - name: '🛠️ Install Windows Tools (Cinc Auditor + Ansible + pywinrm)'
         if: matrix.os_target.os == 'Windows'
         run: |
           python3 -m pip install --user --upgrade pip
@@ -247,233 +386,165 @@ jobs:
           curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-auditor
           sudo ln -sf /usr/bin/cinc-auditor /usr/bin/inspec
 
-      # ──────────────────────────────────────────────────────────────────
-      # WINDOWS STEP 2: validate the CIS WS2022 v5 single-file profile.
-      #
-      # Profile layout (committed directly to repo — no zip/extraction):
-      #   window-default-cis/
-      #   └── window-baseline/
-      #       ├── inspec.yml                               ← input defaults
-      #       ├── Invoke-CISRemediation-Combined.ps1       ← self-contained PS1
-      #       └── controls/
-      #           └── cis_ws2022_v5_0_0_benchmark.rb       ← 433 controls
-      #
-      # CHANGED FROM PRIOR VERSION:
-      #   Old: ran setup_win_profile.sh to extract from files_2.zip into
-      #        multi-file controls/section_*.rb layout (6 files).
-      #   New: single .rb file committed to repo. No extraction needed.
-      #        Invoke-CISRemediation-Combined.ps1 replaces the two-file
-      #        (Invoke-CISRemediation.ps1 + 02_user_rights.ps1) approach.
-      # ──────────────────────────────────────────────────────────────────
-      - name: 🗂️ Validate CIS WS2022 v5 Single-File Profile
+      # ── CIS WS2022 v5 profile validation ───────────────────────────────
+      - name: '🗂️ Validate CIS WS2022 v5 Profile'
         if: matrix.os_target.os == 'Windows'
         run: |
           PROFILE_DIR="window-default-cis/window-baseline"
           RB_FILE="${PROFILE_DIR}/controls/cis_ws2022_v5_0_0_benchmark.rb"
           YML_FILE="${PROFILE_DIR}/inspec.yml"
           PS1_FILE="${PROFILE_DIR}/Invoke-CISRemediation-Combined.ps1"
-
-          echo "🔍 Validating CIS WS2022 v5 profile files..."
-
           FAIL=0
-          if [ ! -f "$YML_FILE" ]; then
-            echo "❌ Missing: $YML_FILE"
-            FAIL=1
-          else
-            echo "✅ Found:   $YML_FILE"
-          fi
 
+          [ ! -f "$YML_FILE" ] && { echo "❌ Missing: $YML_FILE"; FAIL=1; } || echo "✅ $YML_FILE"
           if [ ! -f "$RB_FILE" ]; then
-            echo "❌ Missing: $RB_FILE"
-            FAIL=1
+            echo "❌ Missing: $RB_FILE"; FAIL=1
           else
-            CTRL_COUNT=$(grep -c "^control " "$RB_FILE" || true)
-            L1_COUNT=$(grep -c "tag level: \['L1'\]" "$RB_FILE" || true)
-            L2_COUNT=$(grep -c "tag level: \['L2'\]" "$RB_FILE" || true)
-            echo "✅ Found:   $RB_FILE (${CTRL_COUNT} controls: L1=${L1_COUNT}, L2=${L2_COUNT})"
+            CTRL=$(grep -c "^control " "$RB_FILE" || true)
+            L1=$(grep -c "tag level: \['L1'\]" "$RB_FILE" || true)
+            L2=$(grep -c "tag level: \['L2'\]" "$RB_FILE" || true)
+            echo "✅ $RB_FILE (${CTRL} controls: L1=${L1}, L2=${L2})"
           fi
+          [ ! -f "$PS1_FILE" ] \
+            && echo "⚠️  Missing: $PS1_FILE (PS1 fallback unavailable)" \
+            || echo "✅ $PS1_FILE"
 
-          if [ ! -f "$PS1_FILE" ]; then
-            echo "⚠️  Missing: $PS1_FILE (PS1 fallback remediation unavailable)"
-          else
-            echo "✅ Found:   $PS1_FILE"
-          fi
-
-          if [ $FAIL -eq 1 ]; then
+          if [ "$CLOUD_PROVIDER" == "huaweicloud" ]; then
             echo ""
-            echo "❌ Profile validation failed. Ensure these files are committed to the repo:"
-            echo "   $YML_FILE"
-            echo "   $RB_FILE"
-            echo "   $PS1_FILE"
-            exit 1
+            echo "ℹ️  Huawei Cloud notes:"
+            echo "   • PS1 remediation via agent channel NOT available"
+            echo "   • Remediation runs via Ansible playbook only"
+            echo "   • Set WIN_REBOOT_AFTER_REMEDIATION=false in .env / repo vars"
           fi
 
-          echo ""
-          echo "✅ CIS WS2022 v5 profile ready (single-file layout, no extraction needed)."
-          echo "   server_role will be set to: ${{ vars.WIN_SERVER_ROLE || 'member_server' }}"
+          [ $FAIL -eq 1 ] && exit 1
+          echo "✅ Profile ready | server_role=$WIN_SERVER_ROLE"
 
-      # ──────────────────────────────────────────────────────────────────
-      # WINDOWS STEP 3: install ansible-lockdown CIS roles for remediation.
-      # Primary path for CIS remediation is Ansible (cis_remediate_2022.yml).
-      # Fallback: Invoke-CISRemediation-Combined.ps1 (run_win_ps1_remediation).
-      # ──────────────────────────────────────────────────────────────────
-      - name: 📦 Install Ansible CIS Role for Windows
+      # ── Ansible CIS role ────────────────────────────────────────────────
+      - name: '📦 Install Ansible CIS Role (Windows)'
         if: matrix.os_target.os == 'Windows'
         run: |
           ansible-galaxy role install -r requirements.yml \
             || ansible-galaxy role install \
-               git+https://github.com/ansible-lockdown/Windows-2022-CIS.git \
+                 git+https://github.com/ansible-lockdown/Windows-2022-CIS.git \
             && echo "✅ WS2022 role ready"
 
-      # ──────────────────────────────────────────────────────────────────
-      # MAIN: run the orchestrator script in headless CI/CD mode.
-      #
-      # WIN_SERVER_ROLE controls DC-only vs member-server CIS controls.
-      #
-      # Windows scan:      cinc-auditor uses single-file profile (Step 2).
-      # Windows remediate: Ansible (primary) → PS1 combined script (fallback).
-      # ──────────────────────────────────────────────────────────────────
-      - name: 🚀 Execute Fleet Commander
-        env:
-          AZURE_RG_NAME:        ${{ vars.AZURE_RG_NAME }}
-          AZURE_KV_NAME:        ${{ vars.AZURE_KV_NAME }}
-          AZURE_KV_SECRET:      ${{ vars.AZURE_KV_SECRET }}
-          LINUX_ADMIN_USER:     ${{ vars.LINUX_ADMIN_USER }}
-          WINDOWS_ADMIN_USER:   ${{ vars.WINDOWS_ADMIN_USER }}
-          ORG_NAME:             ${{ vars.ORG_NAME }}
-          ORG_PREFIX:           ${{ vars.ORG_PREFIX }}
-          GHOST_USER:           ${{ vars.GHOST_USER }}
-          CUSTOM_XCCDF_PROFILE: ${{ vars.CUSTOM_XCCDF_PROFILE }}
-          # WIN_SERVER_ROLE: 'member_server' (default) or 'domain_controller'
-          # Set this in repo → Settings → Variables → Actions
-          WIN_SERVER_ROLE:      ${{ vars.WIN_SERVER_ROLE || 'member_server' }}
-          TICKET_ID:            ${{ github.event.inputs.ticket_id }}
-          DEBUG_MODE:           ${{ github.event.inputs.debug_mode }}
-          CLEANUP:              ${{ github.event.inputs.cleanup_mode }}
+      # ── MAIN EXECUTION ──────────────────────────────────────────────────
+      - name: '🚀 Execute Fleet Commander'
         run: |
+          echo "☁️  Cloud Provider        : $CLOUD_PROVIDER"
           echo "🎯 Targeting Environment : $TARGET_ENV"
           echo "🖥️  Assigned OS Runner   : $TARGET_OS ($TARGET_IP)"
           echo "🛡️  WIN_SERVER_ROLE      : $WIN_SERVER_ROLE"
+          echo "📋 Running Profile       : $PROFILE"
           chmod +x multi_os_benchmark.sh
 
+          BASE_ARGS=(
+            --headless
+            --cloud     "$CLOUD_PROVIDER"
+            --mode      "$MODE"
+            --targets   "$TARGET_ENV"
+            --ticket    "${TICKET_ID:-None}"
+            --debug     "${DEBUG_MODE:-false}"
+            --cleanup   "${CLEANUP:-false}"
+            --target-os "$TARGET_OS"
+            --target-ip "$TARGET_IP"
+          )
+
           if [ "$PROFILE" == "all" ]; then
-            echo "🚀 FULL AUDIT MODE — running comprehensive scan loop..."
-            ./multi_os_benchmark.sh \
-              --headless \
-              --profile "all" \
-              --mode    "$MODE" \
-              --targets "$TARGET_ENV" \
-              --ticket  "$TICKET_ID" \
-              --debug   "$DEBUG_MODE" \
-              --cleanup "$CLEANUP" \
-              --target-os "$TARGET_OS" \
-              --target-ip "$TARGET_IP"
+            echo "🚀 FULL AUDIT MODE"
+            ./multi_os_benchmark.sh "${BASE_ARGS[@]}" --profile "all"
           else
-            echo "📋 Running Single Profile: $PROFILE"
-            ./multi_os_benchmark.sh \
-              --headless \
-              --profile "$PROFILE" \
-              --mode    "$MODE" \
-              --targets "$TARGET_ENV" \
-              --ticket  "$TICKET_ID" \
-              --debug   "$DEBUG_MODE" \
-              --cleanup "$CLEANUP" \
-              --target-os "$TARGET_OS" \
-              --target-ip "$TARGET_IP"
+            ./multi_os_benchmark.sh "${BASE_ARGS[@]}" --profile "$PROFILE"
           fi
 
-      - name: 🔎 Verify Report Generation
+      # ── Artifacts ───────────────────────────────────────────────────────
+      - name: '🔎 Verify Report Generation'
         id: check_reports
         run: |
-          REPORT_COUNT=$(find . -maxdepth 1 -type f \( -name "*.html" -o -name "*.json" \) | wc -l)
-          echo "📊 Reports found: $REPORT_COUNT"
-          if [ "$REPORT_COUNT" -gt 0 ]; then
-            echo "has_reports=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_reports=false" >> $GITHUB_OUTPUT
-          fi
+          COUNT=$(find . -maxdepth 1 -type f \( -name "*.html" -o -name "*.json" \) | wc -l)
+          echo "📊 Reports found: $COUNT"
+          echo "has_reports=$( [ "$COUNT" -gt 0 ] && echo true || echo false )" >> $GITHUB_OUTPUT
 
-      - name: 💾 Save Reports as Temporary Artifacts
+      - name: '💾 Save Reports'
         if: steps.check_reports.outputs.has_reports == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: temp-reports-${{ matrix.os_target.os }}-${{ matrix.os_target.ip }}-${{ env.MATRIX_NAME }}
+          name: >-
+            temp-reports-${{ matrix.os_target.os }}-${{ matrix.os_target.ip }}-${{ env.MATRIX_NAME }}-${{ needs.prepare-queue.outputs.cloud }}
           path: |
             *.html
             *.json
           if-no-files-found: warn
           retention-days: 1
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # JOB 3: THE FAN-IN — gathers all matrix data into one zip & release
-  # ─────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 3 — FAN-IN: aggregate all matrix artifacts into one release
+# ─────────────────────────────────────────────────────────────────────────────
   publish-release:
     needs: run-audit
     if: always() && needs.run-audit.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🕒 Set Up Release Variables
+      - name: '🕒 Set Release Variables'
         run: |
           echo "DATE_TAG=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
-
           PROFILE_RAW="${{ github.event.inputs.profile }}"
           LEVEL="${{ github.event.inputs.cis_level }}"
-
+          CLOUD="${{ github.event.inputs.cloud_provider || 'azure' }}"
           if [[ "$PROFILE_RAW" == *"all"* ]]; then
-            echo "DISPLAY_PROFILE=Full Audit (CIS L1, CIS L2 & TM)" >> $GITHUB_ENV
+            echo "DISPLAY_PROFILE=Full Audit (CIS L1 + CIS L2 + TM)" >> $GITHUB_ENV
           elif [[ "$PROFILE_RAW" == *"cis"* ]]; then
             echo "DISPLAY_PROFILE=CIS Benchmark ($LEVEL)" >> $GITHUB_ENV
           else
             echo "DISPLAY_PROFILE=TM Custom Baseline" >> $GITHUB_ENV
           fi
+          echo "DISPLAY_CLOUD=${CLOUD^^}" >> $GITHUB_ENV
 
-      - name: 📥 Download All Matrix Artifacts
+      - name: '📥 Download All Artifacts'
         uses: actions/download-artifact@v4
         with:
           pattern: temp-reports-*
           path: consolidated-evidence
 
-      - name: 🗂️ Organize Folders by Machine IP
+      - name: '🗂️ Organize by Machine IP'
         run: |
           cd consolidated-evidence
-
-          find . -maxdepth 2 -type f \( -name "*.html" -o -name "*.json" \) | while read file; do
+          find . -maxdepth 2 -type f \( -name "*.html" -o -name "*.json" \) | while read -r file; do
             BASENAME=$(basename "$file")
-            IP_ADDR=$(echo "$BASENAME" | grep -oE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
-            [ -z "$IP_ADDR" ] && IP_ADDR="unknown-node"
-
-            if   [[ "$BASENAME" == *"CIS_L1"* ]]; then PROFILE_DIR="CIS Level 1"
-            elif [[ "$BASENAME" == *"CIS_L2"* ]]; then PROFILE_DIR="CIS Level 2"
-            else                                        PROFILE_DIR="TM Baseline"
+            IP=$(echo "$BASENAME" | grep -oE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
+            [ -z "$IP" ] && IP="unknown-node"
+            if   [[ "$BASENAME" == *"CIS_L1"* ]]; then PDIR="CIS Level 1"
+            elif [[ "$BASENAME" == *"CIS_L2"* ]]; then PDIR="CIS Level 2"
+            else                                        PDIR="TM Baseline"
             fi
-
-            mkdir -p "$IP_ADDR/$PROFILE_DIR"
-            mv "$file" "$IP_ADDR/$PROFILE_DIR/"
+            mkdir -p "$IP/$PDIR"
+            mv "$file" "$IP/$PDIR/"
           done
-
           find . -maxdepth 1 -type d -name "temp-reports-*" -exec rm -rf {} +
 
-      - name: 📦 Zip the Evidence Package
+      - name: '📦 Zip Evidence Package'
         run: |
           cd consolidated-evidence
           zip -r ../Fleet_Compliance_Evidence_${{ env.DATE_TAG }}.zip .
 
-      - name: 📢 Publish Unified GitHub Release
+      - name: '📢 Publish GitHub Release'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: Audit-Run-${{ github.run_number }}
-          name: "🛡️ Fleet Compliance Audit: ${{ env.DISPLAY_PROFILE }} (#${{ github.run_number }})"
+          name: "🛡️ Fleet Audit: ${{ env.DISPLAY_PROFILE }} [${{ env.DISPLAY_CLOUD }}] (#${{ github.run_number }})"
           body: |
             ## 📊 Fleet-Wide Security Audit
-            **Date:** `${{ env.DATE_TAG }}`
-            **Ticket ID:** `${{ github.event.inputs.ticket_id || 'N/A' }}`
+            **Date:**               `${{ env.DATE_TAG }}`
+            **Cloud Provider:**     `${{ env.DISPLAY_CLOUD }}`
+            **Ticket ID:**          `${{ github.event.inputs.ticket_id || 'N/A' }}`
             **Target Environment:** `${{ github.event.inputs.environment_tag }}`
-            **Execution Mode:** `${{ github.event.inputs.mode }}`
-            **Execution Strategy:** `${{ github.event.inputs.execution_strategy }}`
-            **Compliance Profile:** `${{ env.DISPLAY_PROFILE }}`
+            **Execution Mode:**     `${{ github.event.inputs.mode }}`
+            **Strategy:**           `${{ github.event.inputs.execution_strategy }}`
+            **Profile:**            `${{ env.DISPLAY_PROFILE }}`
 
-            All matrix execution reports have been successfully aggregated and categorized by Machine IP.
-
-            📥 **Download the ZIP below to access the HTML and JSON reports.**
+            All matrix reports aggregated and categorized by Machine IP.
+            📥 **Download the ZIP below for HTML and JSON reports.**
           files: Fleet_Compliance_Evidence_*.zip
