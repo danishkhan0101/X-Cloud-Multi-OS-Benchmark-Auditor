@@ -18,6 +18,27 @@ SECRET_NAME="${AZURE_KV_SECRET:-AuditPassword}"
 UBUNTU_USER="${LINUX_ADMIN_USER:-ubuntu}"
 AUDIT_USER="${WINDOWS_ADMIN_USER:-Windows_Admin}"
 
+# ── CLOUD PROVIDER SELECTION ──────────────────────────────────────────
+# Set via --cloud flag at runtime: azure | huaweicloud
+# All provider-specific operations dispatch through cloud_* wrapper functions.
+CLOUD_PROVIDER="${CLOUD_PROVIDER:-azure}"
+
+# ── HUAWEI CLOUD ─────────────────────────────────────────────────────
+# HW_REGION      : hcloud region, e.g. ap-southeast-1 (HK), cn-north-4 (Beijing)
+# HW_PROJECT_ID  : IAM project ID (Console → My Credentials)
+# HW_ECS_TAG_KEY : tag key to filter ECS instances (like Azure H_TARGETS env tag)
+# HW_ECS_TAG_VAL : tag value to match
+# HW_CSMS_SECRET : CSMS secret name for the Windows audit password
+# HW_VPC_ID      : VPC ID to scope security-group queries
+# AK/SK picked up from: hcloud profile OR env vars
+#   HUAWEICLOUD_ACCESS_KEY / HUAWEICLOUD_SECRET_KEY / HUAWEICLOUD_REGION
+HW_REGION="${HW_REGION:-ap-southeast-1}"
+HW_PROJECT_ID="${HW_PROJECT_ID:-}"
+HW_ECS_TAG_KEY="${HW_ECS_TAG_KEY:-Environment}"
+HW_ECS_TAG_VAL="${HW_ECS_TAG_VAL:-}"
+HW_CSMS_SECRET="${HW_CSMS_SECRET:-AuditPassword}"
+HW_VPC_ID="${HW_VPC_ID:-}"
+
 # ------------------------------------------------------------------
 # Windows cinc-auditor profile settings (single-file, CIS WS2022 v5)
 #
@@ -324,28 +345,27 @@ run_win_ps1_remediation() {
     local encoded_main
     encoded_main=$(base64 -w0 < "$WIN_PS1_REMEDIATE")
 
-    az vm run-command invoke \
-        -g "$RG_NAME" -n "$vm_name" \
-        --command-id RunPowerShellScript \
-        --scripts "
+    # cloud_vm_run_powershell dispatches to az run-command (Azure) or
+    # returns 1 (Huawei Cloud — no agent channel).
+    cloud_vm_run_powershell "$ip" "
 \$ErrorActionPreference = 'Continue'
-# Decode + write combined remediation script (self-contained, no helper needed)
 [IO.File]::WriteAllBytes('C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1',
     [Convert]::FromBase64String('${encoded_main}'))
-# Execute — applies all sections unless -Sections filters them
 & 'C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1' \`
     -ServerRole '${WIN_SERVER_ROLE}' \`
     ${sections_arg}
-# Cleanup
 Remove-Item 'C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1' \`
     -Force -ErrorAction SilentlyContinue
-" -o tsv 2>/dev/null
+" 2>/dev/null
 
     local rc=$?
     if [ $rc -eq 0 ]; then
         echo -e "${GREEN}✅ [WinPS1/${ip}] PS1 remediation complete (role=${WIN_SERVER_ROLE})${NC}"
+    elif [ $rc -eq 1 ] && [ "${CLOUD_PROVIDER}" == "huaweicloud" ]; then
+        echo -e "${RED}❌ [WinPS1/${ip}] PS1 remediation via agent channel not available on Huawei Cloud.${NC}"
+        echo -e "${YELLOW}   Remediation must be run manually or via WinRM-accessible Ansible playbook.${NC}"
     else
-        echo -e "${RED}❌ [WinPS1/${ip}] az run-command failed (rc=${rc})${NC}"
+        echo -e "${RED}❌ [WinPS1/${ip}] run-command failed (rc=${rc})${NC}"
     fi
     return $rc
 }
@@ -479,13 +499,10 @@ detect_windows_version() {
         -a '(Get-CimInstance Win32_OperatingSystem).Caption' \
         2>/dev/null | grep -oE 'Windows (Server (2019|2022|2025)|1[01])' | head -1)
 
-    # Fallback: az vm run-command — no Ansible/WinRM dependency
+    # Fallback: cloud agent channel (Azure only — returns empty on Huawei Cloud)
     if [ -z "$caption" ] && [ -n "$vm_name" ]; then
-        caption=$(az vm run-command invoke \
-            -g "$RG_NAME" -n "$vm_name" \
-            --command-id RunPowerShellScript \
-            --scripts '(Get-CimInstance Win32_OperatingSystem).Caption' \
-            --query 'value[0].message' -o tsv 2>/dev/null \
+        caption=$(cloud_vm_run_powershell "$ip" \
+            '(Get-CimInstance Win32_OperatingSystem).Caption' 2>/dev/null \
             | grep -oE 'Windows (Server (2019|2022|2025)|1[01])' | head -1)
     fi
 
@@ -533,21 +550,12 @@ WINRM_REOPEN_BASIC="${WINRM_REOPEN_BASIC:-true}"
 # ======================================================
 check_windows_agent_alive() {
     local ip="$1"
-    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
-    [ -z "$vm_name" ] && return 1
-
+    # cloud_vm_run_powershell returns 1 on Huawei Cloud (no agent channel)
+    # → always report "not available" so callers skip agent-dependent logic
     local out
-    out=$(timeout "${WIN_AGENT_PROBE_SEC}" az vm run-command invoke \
-        -g "$RG_NAME" -n "$vm_name" \
-        --command-id RunPowerShellScript \
-        --scripts 'Write-Output "AGENT_ALIVE"' \
-        --query 'value[0].message' -o tsv 2>/dev/null)
+    out=$(cloud_vm_run_powershell "$ip" 'Write-Output "AGENT_ALIVE"' 2>/dev/null)
     local rc=$?
-
-    if [ $rc -eq 124 ]; then
-        # timeout killed it -> guest agent never answered
-        return 1
-    fi
+    [ $rc -ne 0 ] && return 1
     [[ "$out" == *"AGENT_ALIVE"* ]] && return 0 || return 1
 }
 
@@ -573,17 +581,14 @@ winrm set winrm/config/service      '@{AllowUnencrypted=\"true\"}' 2>&1 | Out-Nu
     fi
 
     echo -e "${CYAN}🩺 [WinRM-Heal/${ip}] Re-registering PowerShell provider + restoring shell limits...${NC}"
-    # >>> ANTI-HANG: timeout-wrapped so a wedged guest agent can't hang the runner
-    timeout "${WIN_AGENT_PROBE_SEC}" az vm run-command invoke -g "$RG_NAME" -n "$vm_name" \
-        --command-id RunPowerShellScript \
-        --scripts "
+    # >>> ANTI-HANG + CLOUD-ABSTRACTED: dispatches to az or huaweicloud agent channel
+    cloud_vm_run_powershell "$ip" "
 \$ErrorActionPreference = 'Continue'
 Set-Service WinRM -StartupType Automatic -ErrorAction SilentlyContinue
 Start-Service WinRM -ErrorAction SilentlyContinue
 winrm quickconfig -quiet -force 2>&1 | Out-Null
 try { Register-PSSessionConfiguration -Name 'Microsoft.PowerShell' -Force -ErrorAction Stop | Out-Null }
 catch { Enable-PSRemoting -SkipNetworkProfileCheck -Force -ErrorAction SilentlyContinue | Out-Null }
-# restore shell limits that a partial hardening can zero out
 winrm set winrm/config/winrs '@{MaxShellsPerUser=\"30\"}'    2>&1 | Out-Null
 winrm set winrm/config/winrs '@{MaxConcurrentUsers=\"10\"}'  2>&1 | Out-Null
 winrm set winrm/config/winrs '@{MaxMemoryPerShellMB=\"1024\"}' 2>&1 | Out-Null
@@ -591,7 +596,7 @@ ${reopen_block}
 Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' -Enabled True -Profile Any -ErrorAction SilentlyContinue
 Restart-Service WinRM -Force -ErrorAction SilentlyContinue
 Write-Output 'WinRM PowerShell provider re-initialized'
-" -o none >/dev/null 2>&1
+" >/dev/null 2>&1
 
     local rc=$?
     if [ $rc -eq 0 ]; then
@@ -631,9 +636,9 @@ reboot_windows_host() {
     echo -e "${CYAN}🔧 [Reboot/${ip}] Re-opening WinRM via agent before reboot...${NC}"
     ensure_winrm_powershell "$ip"
 
-    echo -e "${CYAN}🔁 [Reboot/${ip}] Restarting ${vm_name} (--no-wait)...${NC}"
-    # 2. --no-wait + timeout: the restart call itself can hang on a sick fabric
-    timeout 120 az vm restart -g "$RG_NAME" -n "$vm_name" --no-wait -o none 2>/dev/null || true
+    echo -e "${CYAN}🔁 [Reboot/${ip}] Restarting ${vm_name} (non-blocking)...${NC}"
+    # Dispatches to az vm restart --no-wait or hcloud ECS RebootServer
+    cloud_vm_restart "$ip"
 
     # give the guest time to begin shutting down before polling
     sleep 20
@@ -643,10 +648,8 @@ reboot_windows_host() {
     echo -e "${CYAN}⏳ [Reboot/${ip}] Waiting for VM to return to running state...${NC}"
     while [ $SECONDS -lt $deadline ]; do
         local ps
-        ps=$(timeout 30 az vm get-instance-view -g "$RG_NAME" -n "$vm_name" \
-            --query "instanceView.statuses[?starts_with(code,'PowerState')].displayStatus" \
-            -o tsv 2>/dev/null | tr -d '\r')
-        if [[ "$ps" == *"running"* ]]; then
+        ps=$(cloud_vm_get_power_state "$ip")
+        if [[ "$ps" == "running" ]]; then
             echo -e "${GREEN}✅ [Reboot/${ip}] VM back to 'running' (fabric level)${NC}"
             break
         fi
@@ -846,6 +849,218 @@ wait_for_winrm() {
 }
 
 # ======================================================
+# CLOUD PROVIDER ABSTRACTION LAYER
+# ──────────────────────────────────────────────────────
+# All provider-specific operations go through these wrappers.
+# Add a new cloud by implementing the case branches below.
+#
+# Functions:
+#   cloud_add_port_rule  ip port       — open ingress from runner IP
+#   cloud_vm_run_powershell  ip script — run PS on VM via agent (Windows)
+#   cloud_vm_run_shell   ip script     — run shell on VM via agent (Linux)
+#   cloud_vm_restart     ip            — restart VM (non-blocking)
+#   cloud_vm_get_power_state ip        — returns "running"|"stopped"|other
+#   cloud_hcloud_check                 — validate hcloud CLI is ready
+#
+# NOTE on Huawei Cloud Windows agent channel:
+#   Huawei Cloud ECS does NOT expose a CLI-level equivalent of
+#   `az vm run-command invoke` for PowerShell. The cloud_vm_run_powershell
+#   function returns 1 (unavailable) for huaweicloud, and all callers
+#   degrade gracefully to WinRM-only mode. This means the Windows
+#   boot-hang recovery (check_windows_agent_alive + ensure_winrm_powershell
+#   fallback) is unavailable on Huawei Cloud — WinRM must be up for the
+#   scanner to connect. Keep WIN_REBOOT_AFTER_REMEDIATION=false on HW Cloud
+#   until you have a bastion/VPN-based recovery path.
+# ======================================================
+
+# ── cloud_hcloud_check ────────────────────────────────────────────────
+cloud_hcloud_check() {
+    if ! command -v hcloud >/dev/null 2>&1; then
+        echo -e "${RED}❌ [HuaweiCloud] hcloud CLI not found.${NC}"
+        echo -e "${YELLOW}   Install: https://support.huaweicloud.com/intl/en-us/devg-apisign/api-sign-provide.html${NC}"
+        echo -e "${YELLOW}   Or:  pip3 install huaweicloudsdkcore huaweicloudsdkecs huaweicloudsdkvpc${NC}"
+        echo -e "${YELLOW}   Auth: export HUAWEICLOUD_ACCESS_KEY=... HUAWEICLOUD_SECRET_KEY=... HUAWEICLOUD_REGION=${HW_REGION}${NC}"
+        echo -e "${YELLOW}   Then: hcloud configure set --cli-region=${HW_REGION}${NC}"
+        return 1
+    fi
+    # Quick connectivity test
+    if ! timeout 20 hcloud ECS ListServersDetails \
+        --cli-region "${HW_REGION}" \
+        --cli-output json >/dev/null 2>&1; then
+        echo -e "${RED}❌ [HuaweiCloud] hcloud auth/connectivity check failed.${NC}"
+        echo -e "${YELLOW}   Verify: hcloud configure list  |  hcloud ECS ListServersDetails --cli-region ${HW_REGION}${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✅ [HuaweiCloud] hcloud CLI authenticated (region: ${HW_REGION})${NC}"
+    return 0
+}
+
+# ── cloud_add_port_rule ───────────────────────────────────────────────
+# Usage: cloud_add_port_rule <ip> <port> [rule_name]
+cloud_add_port_rule() {
+    local ip="$1" port="$2" rule_name="${3:-Allow_Port_${2}_Runner}"
+    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
+    local vm_id="${IP_TO_VM_ID[$ip]:-}"
+    local runner_ip
+    runner_ip="${RUNNER_IP:-$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null)}"
+
+    case "${CLOUD_PROVIDER}" in
+    azure)
+        [ -z "$vm_name" ] && return 1
+        local nic_id nsg_id nsg_name
+        nic_id=$(az vm show -g "$RG_NAME" -n "$vm_name" \
+            --query "networkProfile.networkInterfaces[0].id" -o tsv 2>/dev/null)
+        nsg_id=$(az network nic show --ids "$nic_id" \
+            --query "networkSecurityGroup.id" -o tsv 2>/dev/null)
+        [ -z "$nsg_id" ] && return 0
+        nsg_name=$(basename "$nsg_id")
+        az network nsg rule create -g "$RG_NAME" --nsg-name "$nsg_name" \
+            --name "$rule_name" --priority 998 \
+            --destination-port-ranges "$port" \
+            --source-address-prefixes "$runner_ip" \
+            --access Allow --protocol Tcp -o none >/dev/null 2>&1 || true
+        ;;
+    huaweicloud)
+        # Get the security group ID attached to this ECS instance
+        [ -z "$vm_id" ] && { echo -e "${YELLOW}⚠️  [HW] No ECS ID for ${ip}${NC}"; return 1; }
+        local sg_id
+        sg_id=$(timeout 30 hcloud ECS ShowServer \
+            --server-id "$vm_id" \
+            --cli-region "${HW_REGION}" \
+            --cli-output json 2>/dev/null \
+            | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+sgs=d.get('server',{}).get('security_groups',[])
+print(sgs[0].get('id','') if sgs else '')
+" 2>/dev/null)
+        [ -z "$sg_id" ] && { echo -e "${YELLOW}⚠️  [HW] Could not find SG for ${ip}${NC}"; return 1; }
+        timeout 30 hcloud VPC CreateSecurityGroupRule \
+            --cli-region "${HW_REGION}" \
+            --security-group-id "$sg_id" \
+            --security-group-rule.direction "ingress" \
+            --security-group-rule.protocol "tcp" \
+            --security-group-rule.port-range-min "$port" \
+            --security-group-rule.port-range-max "$port" \
+            --security-group-rule.remote-ip-prefix "${runner_ip}/32" \
+            --cli-output json >/dev/null 2>&1 || true
+        ;;
+    esac
+}
+
+# ── cloud_vm_run_powershell ───────────────────────────────────────────
+# Run a PowerShell script on a Windows VM via the cloud agent channel.
+# Returns 0+output on success, 1 if the cloud doesn't support this.
+cloud_vm_run_powershell() {
+    local ip="$1"
+    local script="$2"
+    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
+    local vm_id="${IP_TO_VM_ID[$ip]:-}"
+
+    case "${CLOUD_PROVIDER}" in
+    azure)
+        [ -z "$vm_name" ] && return 1
+        timeout "${WIN_AGENT_PROBE_SEC}" az vm run-command invoke \
+            -g "$RG_NAME" -n "$vm_name" \
+            --command-id RunPowerShellScript \
+            --scripts "$script" \
+            --query 'value[0].message' -o tsv 2>/dev/null
+        return $?
+        ;;
+    huaweicloud)
+        # Huawei Cloud ECS has no CLI-level agent-channel PowerShell exec.
+        # Callers must fall back to WinRM-only operations.
+        echo -e "${YELLOW}⚠️  [HW] Agent-channel PowerShell not available on Huawei Cloud.${NC}" >&2
+        echo -e "${YELLOW}   WinRM must be reachable for Windows operations.${NC}" >&2
+        return 1
+        ;;
+    esac
+}
+
+# ── cloud_vm_run_shell ────────────────────────────────────────────────
+# Run a shell script on a Linux VM via the cloud agent channel.
+# Used for bootstrap ops that don't require SSH.
+cloud_vm_run_shell() {
+    local ip="$1"
+    local script="$2"
+    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
+    local vm_id="${IP_TO_VM_ID[$ip]:-}"
+
+    case "${CLOUD_PROVIDER}" in
+    azure)
+        [ -z "$vm_name" ] && return 1
+        timeout "${WIN_AGENT_PROBE_SEC}" az vm run-command invoke \
+            -g "$RG_NAME" -n "$vm_name" \
+            --command-id RunShellScript \
+            --scripts "$script" \
+            -o none >/dev/null 2>&1
+        return $?
+        ;;
+    huaweicloud)
+        # Similar limitation to PowerShell — no hcloud CLI agent-channel for Linux.
+        # Linux bootstrap is SSH-only on Huawei Cloud.
+        return 1
+        ;;
+    esac
+}
+
+# ── cloud_vm_restart ──────────────────────────────────────────────────
+cloud_vm_restart() {
+    local ip="$1"
+    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
+    local vm_id="${IP_TO_VM_ID[$ip]:-}"
+
+    case "${CLOUD_PROVIDER}" in
+    azure)
+        [ -z "$vm_name" ] && return 1
+        timeout 120 az vm restart -g "$RG_NAME" -n "$vm_name" --no-wait -o none 2>/dev/null || true
+        ;;
+    huaweicloud)
+        [ -z "$vm_id" ] && return 1
+        # HARD reboot = like pressing the reset button; SOFT = graceful
+        timeout 120 hcloud ECS RebootServer \
+            --server-id "$vm_id" \
+            --type.type "HARD" \
+            --cli-region "${HW_REGION}" \
+            --cli-output json >/dev/null 2>&1 || true
+        ;;
+    esac
+}
+
+# ── cloud_vm_get_power_state ──────────────────────────────────────────
+# Returns a normalised string: "running" | "stopped" | "other"
+cloud_vm_get_power_state() {
+    local ip="$1"
+    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
+    local vm_id="${IP_TO_VM_ID[$ip]:-}"
+    local raw=""
+
+    case "${CLOUD_PROVIDER}" in
+    azure)
+        [ -z "$vm_name" ] && { echo "unknown"; return; }
+        raw=$(timeout 30 az vm get-instance-view -g "$RG_NAME" -n "$vm_name" \
+            --query "instanceView.statuses[?starts_with(code,'PowerState')].displayStatus" \
+            -o tsv 2>/dev/null | tr -d '\r')
+        ;;
+    huaweicloud)
+        [ -z "$vm_id" ] && { echo "unknown"; return; }
+        raw=$(timeout 30 hcloud ECS ShowServer \
+            --server-id "$vm_id" \
+            --cli-region "${HW_REGION}" \
+            --cli-output json 2>/dev/null \
+            | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+st=d.get('server',{}).get('status','')
+print('running' if st=='ACTIVE' else st.lower())
+" 2>/dev/null)
+        ;;
+    esac
+
+    [[ "$raw" == *"running"* || "$raw" == "running" ]] && echo "running" || echo "${raw:-unknown}"
+}
+
+# ======================================================
 # HEADLESS MODE PARSER
 # ======================================================
 HEADLESS=false
@@ -857,6 +1072,7 @@ DEBUG_MODE=false
 H_CLEANUP=false
 H_TARGET_OS="all"
 H_TARGET_IP="all"
+H_CLOUD=""          # override CLOUD_PROVIDER via CLI
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -869,10 +1085,19 @@ while [[ "$#" -gt 0 ]]; do
         --cleanup)    H_CLEANUP="$2";    shift ;;
         --target-os)  H_TARGET_OS="$2";  shift ;;
         --target-ip)  H_TARGET_IP="$2";  shift ;;
+        --cloud)      H_CLOUD="$2";      shift ;;
         *) echo -e "${RED}Unknown parameter: $1${NC}"; exit 1 ;;
     esac
     shift
 done
+
+# CLI --cloud flag overrides env/default
+[ -n "$H_CLOUD" ] && CLOUD_PROVIDER="${H_CLOUD,,}"
+# Validate
+case "${CLOUD_PROVIDER}" in
+    azure|huaweicloud) ;;
+    *) echo -e "${RED}❌ Unknown --cloud value '${CLOUD_PROVIDER}'. Use: azure | huaweicloud${NC}"; exit 1 ;;
+esac
 
 CIS_LEVEL="${CIS_LEVEL:-Level 1}"
 
@@ -881,6 +1106,7 @@ CIS_LEVEL="${CIS_LEVEL:-Level 1}"
 # ======================================================
 if [ "$HEADLESS" == true ]; then
     echo -e "${CYAN}${BOLD}🤖 HEADLESS CI/CD MODE ACTIVATED${NC}"
+    echo -e "${CYAN}   Cloud provider: ${BOLD}${CLOUD_PROVIDER}${NC}"
     if [ -n "$H_TICKET" ] && [ "$H_TICKET" != "None" ]; then
         echo -e "${GREEN}🎫 AUDIT AUTHORIZATION: Ticket ID: ${BOLD}$H_TICKET${NC}"
     fi
@@ -888,12 +1114,33 @@ if [ "$HEADLESS" == true ]; then
 fi
 
 if [ -z "$AUDIT_PASS" ]; then
-    echo -e "${YELLOW}🔐 Fetching Credentials from Azure KeyVault...${NC}"
-    az login --identity --allow-no-subscriptions > /dev/null 2>&1 || true
-    AUDIT_PASS=$(az keyvault secret show \
-        --name "$SECRET_NAME" \
-        --vault-name "$KV_NAME" \
-        --query value -o tsv 2>/dev/null | tr -d '\r\n')
+    case "${CLOUD_PROVIDER}" in
+        azure)
+            echo -e "${YELLOW}🔐 [Azure] Fetching credentials from KeyVault (${KV_NAME})...${NC}"
+            az login --identity --allow-no-subscriptions > /dev/null 2>&1 || true
+            AUDIT_PASS=$(az keyvault secret show \
+                --name "$SECRET_NAME" \
+                --vault-name "$KV_NAME" \
+                --query value -o tsv 2>/dev/null | tr -d '\r\n')
+            ;;
+        huaweicloud)
+            echo -e "${YELLOW}🔐 [HuaweiCloud] Fetching credentials from CSMS (${HW_CSMS_SECRET})...${NC}"
+            AUDIT_PASS=$(hcloud CSMS ShowSecretVersion \
+                --secret-name "${HW_CSMS_SECRET}" \
+                --version-id "latest" \
+                --cli-region "${HW_REGION}" \
+                --cli-output json 2>/dev/null \
+                | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print(d.get('version',{}).get('secret_string',''))
+" | tr -d '\r\n')
+            # Fallback: accept AUDIT_PASS directly from env / GitHub secret
+            if [ -z "$AUDIT_PASS" ]; then
+                echo -e "${YELLOW}   CSMS fetch returned empty — expecting AUDIT_PASS env var${NC}"
+            fi
+            ;;
+    esac
 fi
 
 if [ -z "$AUDIT_PASS" ]; then
@@ -920,50 +1167,148 @@ chmod 600 ~/.ssh/config
 
 # ======================================================
 # PHASE 0.1: ZERO-TRUST DISCOVERY
+# Populates the OS machine arrays and IP_TO_VM_NAME map.
+# Dispatches to the active cloud provider.
 # ======================================================
-echo -e "${CYAN}📡 Querying Azure for VMs in [${RG_NAME}]...${NC}"
-
-if [ "$H_TARGETS" == "all" ] || [ -z "$H_TARGETS" ]; then
-    VM_DATA=$(az vm list -d -g "$RG_NAME" \
-        --query "[].[name, publicIps, storageProfile.osDisk.osType, powerState, storageProfile.imageReference.offer]" \
-        -o tsv)
-else
-    VM_DATA=$(az vm list -d -g "$RG_NAME" \
-        --query "[?tags.Environment=='$H_TARGETS'].[name, publicIps, storageProfile.osDisk.osType, powerState, storageProfile.imageReference.offer]" \
-        -o tsv)
-fi
-
 UBUNTU_MACHINES=()
 RHEL_MACHINES=()
 ROCKY_MACHINES=()
 ALMA_MACHINES=()
 WINDOWS_MACHINES=()
 declare -A IP_TO_VM_NAME
+declare -A IP_TO_VM_ID      # cloud-native instance ID (ECS UUID for HW, same as name for Azure)
 
-while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
-    vm_name=$(echo "$raw_name"  | tr -d '\r' | xargs)
-    ip=$(echo "$raw_ip"         | tr -d '\r' | xargs)
-    os=$(echo "$raw_os"         | tr -d '\r' | xargs)
-    power=$(echo "$raw_power"   | tr -d '\r' | xargs)
-    offer=$(echo "$raw_offer"   | tr -d '\r' | tr '[:upper:]' '[:lower:]' | xargs)
-
-    if [ -z "$ip" ] || [ "$ip" == "None" ] || [[ "$power" != *"VM running"* ]]; then continue; fi
+_map_vm() {
+    # args: vm_name ip os_type power_state offer
+    local vm_name="$1" ip="$2" os="$3" power="$4" offer="$5"
+    ip=$(echo "$ip" | tr -d '\r' | xargs)
+    [ -z "$ip" ] || [ "$ip" == "None" ] || [[ "$power" != *"running"* ]] && return
     IP_TO_VM_NAME["$ip"]="$vm_name"
-
-    if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]]; then
-        if   [[ "${offer}" == *"rocky"* ]] || [[ "${vm_name,,}" == *"rocky"* ]]; then
-            ROCKY_MACHINES+=("$ip"); echo -e "${CYAN}🏔️  Mapped Rocky Node:    $ip${NC}"
-        elif [[ "${offer}" == *"alma"*  ]] || [[ "${vm_name,,}" == *"alma"*  ]]; then
-            ALMA_MACHINES+=("$ip");  echo -e "${CYAN}🦙 Mapped AlmaLinux Node: $ip${NC}"
-        elif [[ "${offer}" == *"rhel"*  ]] || [[ "${vm_name,,}" == *"rhel"*  ]]; then
-            RHEL_MACHINES+=("$ip");  echo -e "${CYAN}🔴 Mapped RHEL Node:      $ip${NC}"
+    if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]] || [[ "$os" == *"linux"* ]]; then
+        offer="${offer,,}"
+        if   [[ "$offer" == *"rocky"* ]] || [[ "${vm_name,,}" == *"rocky"* ]]; then
+            ROCKY_MACHINES+=("$ip");  echo -e "${CYAN}🏔️  Mapped Rocky Node:    $ip${NC}"
+        elif [[ "$offer" == *"alma"*  ]] || [[ "${vm_name,,}" == *"alma"*  ]]; then
+            ALMA_MACHINES+=("$ip");   echo -e "${CYAN}🦙 Mapped AlmaLinux Node: $ip${NC}"
+        elif [[ "$offer" == *"rhel"*  ]] || [[ "${vm_name,,}" == *"rhel"*  ]]; then
+            RHEL_MACHINES+=("$ip");   echo -e "${CYAN}🔴 Mapped RHEL Node:      $ip${NC}"
         else
             UBUNTU_MACHINES+=("$ip"); echo -e "${CYAN}🟠 Mapped Ubuntu Node:    $ip${NC}"
         fi
-    elif [[ "$os" == *"Windows"* ]]; then
-        WINDOWS_MACHINES+=("$ip"); echo -e "${CYAN}🪟 Mapped Windows Node:   $ip${NC}"
+    elif [[ "$os" == *"Windows"* ]] || [[ "$os" == *"windows"* ]]; then
+        WINDOWS_MACHINES+=("$ip");    echo -e "${CYAN}🪟 Mapped Windows Node:   $ip${NC}"
     fi
-done <<< "$VM_DATA"
+}
+
+case "${CLOUD_PROVIDER}" in
+# ── AZURE ────────────────────────────────────────────────────────────
+azure)
+    echo -e "${CYAN}📡 [Azure] Querying VMs in resource group [${RG_NAME}]...${NC}"
+    if [ "$H_TARGETS" == "all" ] || [ -z "$H_TARGETS" ]; then
+        VM_DATA=$(az vm list -d -g "$RG_NAME" \
+            --query "[].[name, publicIps, storageProfile.osDisk.osType, powerState, storageProfile.imageReference.offer]" \
+            -o tsv)
+    else
+        VM_DATA=$(az vm list -d -g "$RG_NAME" \
+            --query "[?tags.Environment=='$H_TARGETS'].[name, publicIps, storageProfile.osDisk.osType, powerState, storageProfile.imageReference.offer]" \
+            -o tsv)
+    fi
+    while IFS=$'\t' read -r raw_name raw_ip raw_os raw_power raw_offer; do
+        vm_name=$(echo "$raw_name"  | tr -d '\r' | xargs)
+        ip=$(echo "$raw_ip"         | tr -d '\r' | xargs)
+        os=$(echo "$raw_os"         | tr -d '\r' | xargs)
+        power=$(echo "$raw_power"   | tr -d '\r' | xargs)
+        offer=$(echo "$raw_offer"   | tr -d '\r' | xargs)
+        IP_TO_VM_ID["$ip"]="$vm_name"   # Azure uses name as ID for run-command
+        _map_vm "$vm_name" "$ip" "$os" "$power" "$offer"
+    done <<< "$VM_DATA"
+    ;;
+
+# ── HUAWEI CLOUD ─────────────────────────────────────────────────────
+huaweicloud)
+    echo -e "${CYAN}📡 [HuaweiCloud] Querying ECS instances in region [${HW_REGION}]...${NC}"
+    # Fetch all ECS servers + their floating (public) IPs in one call.
+    # hcloud ECS ListServersDetails returns JSON with server array.
+    HW_RAW=$(hcloud ECS ListServersDetails \
+        --cli-region "${HW_REGION}" \
+        --cli-output json 2>/dev/null)
+    if [ -z "$HW_RAW" ]; then
+        echo -e "${RED}❌ [HuaweiCloud] ECS list returned empty. Check hcloud auth and HW_REGION.${NC}"
+    else
+        echo "$HW_RAW" | python3 - <<'PYEOF'
+import json, sys, os
+
+raw = sys.stdin.read()
+try:
+    data = json.loads(raw)
+except Exception as e:
+    print(f"[HW-PARSE ERROR] {e}", file=sys.stderr)
+    sys.exit(1)
+
+tag_key = os.environ.get("HW_ECS_TAG_KEY", "")
+tag_val = os.environ.get("HW_ECS_TAG_VAL", "")
+
+for s in data.get("servers", []):
+    name    = s.get("name", "")
+    srv_id  = s.get("id", "")
+    status  = s.get("status", "")   # ACTIVE | SHUTOFF | BUILD | ...
+    meta    = s.get("metadata", {})
+
+    # Filter by tag if requested
+    if tag_key:
+        tags = {t.get("key",""): t.get("value","") for t in s.get("tags", [])}
+        if tags.get(tag_key, "") != tag_val and tag_val:
+            continue
+
+    # OS type: metadata os_type = "windows" or "Linux"
+    os_type = meta.get("os_type", "Linux")
+    image_name = s.get("image", {}).get("name", "").lower()
+
+    # Public (floating) IP — look for floating type in addresses
+    public_ip = ""
+    for addrs in s.get("addresses", {}).values():
+        for a in addrs:
+            if a.get("OS-EXT-IPS:type") == "floating":
+                public_ip = a.get("addr", "")
+                break
+        if public_ip:
+            break
+
+    if not public_ip:
+        continue
+
+    power = "running" if status == "ACTIVE" else status
+    # Emit TSV: name, public_ip, os_type, power_state, image_name, server_id
+    print(f"{name}\t{public_ip}\t{os_type}\t{power}\t{image_name}\t{srv_id}")
+PYEOF
+        # read the TSV output of the python block
+        while IFS=$'\t' read -r vm_name ip os_type power offer srv_id; do
+            IP_TO_VM_ID["$ip"]="$srv_id"
+            _map_vm "$vm_name" "$ip" "$os_type" "$power" "$offer"
+        done < <(echo "$HW_RAW" | python3 -c "
+import json, sys, os
+data=json.load(sys.stdin)
+tag_key=os.environ.get('HW_ECS_TAG_KEY','')
+tag_val=os.environ.get('HW_ECS_TAG_VAL','')
+for s in data.get('servers',[]):
+    name=s.get('name',''); srv_id=s.get('id',''); status=s.get('status','')
+    meta=s.get('metadata',{}); os_type=meta.get('os_type','Linux')
+    image_name=s.get('image',{}).get('name','').lower()
+    if tag_key:
+        tags={t.get('key',''):t.get('value','') for t in s.get('tags',[])}
+        if tag_val and tags.get(tag_key,'')!=tag_val: continue
+    public_ip=''
+    for addrs in s.get('addresses',{}).values():
+        for a in addrs:
+            if a.get('OS-EXT-IPS:type')=='floating': public_ip=a.get('addr',''); break
+        if public_ip: break
+    if not public_ip: continue
+    power='running' if status=='ACTIVE' else status
+    print(f'{name}\t{public_ip}\t{os_type}\t{power}\t{image_name}\t{srv_id}')
+")
+    fi
+    ;;
+esac
 
 if [ "$H_TARGET_IP" != "all" ] && [ -n "$H_TARGET_IP" ]; then
     echo -e "${MAGENTA}🎯 MATRIX SHARDING: Isolating to node $H_TARGET_IP${NC}"
@@ -1006,10 +1351,13 @@ fi
 echo -e "\n${CYAN}⚙️  PHASE 0.3: PARALLEL INFRASTRUCTURE BOOTSTRAPPING${NC}"
 RUNNER_IP=$(curl -s https://api.ipify.org)
 
+# Validate Huawei Cloud CLI before any operations
+if [ "${CLOUD_PROVIDER}" == "huaweicloud" ]; then
+    cloud_hcloud_check || exit 1
+fi
+
 # >>> FIX 1: Track Windows bootstrap PIDs so we can explicitly wait for them
-#     to complete before proceeding to Phase 2. Without this, the main script
-#     hits Phase 2 before the Windows az vm run-command has finished, causing
-#     wait_for_winrm to timeout on a WinRM that's still being initialized.
+#     to complete before proceeding to Phase 2.
 declare -a WIN_BOOTSTRAP_PIDS=()
 
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
@@ -1019,32 +1367,22 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
                     -o StrictHostKeyChecking=no ${UBUNTU_USER}@${ip} \
                     "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
                 VM_NAME="${IP_TO_VM_NAME[$ip]}"
-                NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" \
-                    --query "networkProfile.networkInterfaces[0].id" -o tsv)
-                NSG_ID=$(az network nic show --ids "$NIC_ID" \
-                    --query "networkSecurityGroup.id" -o tsv)
-                NSG_NAME=$(basename "$NSG_ID")
-                az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" \
-                    --name "Allow_SSH_Runner_Only" --priority 998 \
-                    --destination-port-ranges 22 \
-                    --source-address-prefixes "$RUNNER_IP" \
-                    --access Allow --protocol Tcp -o none >/dev/null 2>&1 || true
+                # Provider-abstracted: open SSH port from runner
+                cloud_add_port_rule "$ip" 22 "Allow_SSH_Runner_Only"
                 PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
-                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" \
-                    --command-id RunShellScript \
-                    --scripts "useradd -m -s /bin/bash ${UBUNTU_USER} || true
+                # Bootstrap user via agent channel (Azure only; HW Cloud = SSH-only)
+                cloud_vm_run_shell "$ip" "useradd -m -s /bin/bash ${UBUNTU_USER} || true
                                echo '${UBUNTU_USER} ALL=(ALL) NOPASSWD:ALL' \
                                    > /etc/sudoers.d/99-${UBUNTU_USER}
                                chmod 440 /etc/sudoers.d/99-${UBUNTU_USER}
                                mkdir -p /home/${UBUNTU_USER}/.ssh
-                               echo '$PUB_KEY' \
+                               echo '${PUB_KEY}' \
                                    > /home/${UBUNTU_USER}/.ssh/authorized_keys
                                chown -R ${UBUNTU_USER}:${UBUNTU_USER} \
                                    /home/${UBUNTU_USER}/.ssh
                                chmod 700 /home/${UBUNTU_USER}/.ssh
                                chmod 600 /home/${UBUNTU_USER}/.ssh/authorized_keys
-                               systemctl restart sshd" \
-                    -o none >/dev/null 2>&1 || true
+                               systemctl restart sshd" || true
                 sleep 15
             fi
         ) &
@@ -1058,25 +1396,14 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" =~ ^(rhel|rocky|alma)$ ]]; t
                     -o StrictHostKeyChecking=no ${GHOST_USER}@${ip} \
                     "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
                 VM_NAME="${IP_TO_VM_NAME[$ip]}"
-                NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" \
-                    --query "networkProfile.networkInterfaces[0].id" -o tsv)
-                NSG_ID=$(az network nic show --ids "$NIC_ID" \
-                    --query "networkSecurityGroup.id" -o tsv)
-                NSG_NAME=$(basename "$NSG_ID")
-                az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" \
-                    --name "Allow_SSH_Runner_Only" --priority 998 \
-                    --destination-port-ranges 22 \
-                    --source-address-prefixes "$RUNNER_IP" \
-                    --access Allow --protocol Tcp -o none >/dev/null 2>&1 || true
+                cloud_add_port_rule "$ip" 22 "Allow_SSH_Runner_Only"
                 PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
-                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" \
-                    --command-id RunShellScript \
-                    --scripts "useradd -m -s /bin/bash ${GHOST_USER} || true
+                cloud_vm_run_shell "$ip" "useradd -m -s /bin/bash ${GHOST_USER} || true
                                echo '${GHOST_USER} ALL=(ALL) NOPASSWD:ALL' \
                                    > /etc/sudoers.d/99-${GHOST_USER}
                                chmod 440 /etc/sudoers.d/99-${GHOST_USER}
                                mkdir -p /home/${GHOST_USER}/.ssh
-                               echo '$PUB_KEY' \
+                               echo '${PUB_KEY}' \
                                    > /home/${GHOST_USER}/.ssh/authorized_keys
                                chown -R ${GHOST_USER}:${GHOST_USER} \
                                    /home/${GHOST_USER}/.ssh
@@ -1088,8 +1415,7 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" =~ ^(rhel|rocky|alma)$ ]]; t
                                echo 'PubkeyAcceptedKeyTypes +ssh-rsa' \
                                    > /etc/ssh/sshd_config.d/99-runner-key.conf \
                                    2>/dev/null || true
-                               systemctl restart sshd" \
-                    -o none >/dev/null 2>&1 || true
+                               systemctl restart sshd" || true
                 sleep 15
             fi
         ) &
@@ -1100,55 +1426,41 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
     for ip in "${WINDOWS_MACHINES[@]}"; do
         (
             VM_NAME="${IP_TO_VM_NAME[$ip]}"
-            NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" \
-                --query "networkProfile.networkInterfaces[0].id" -o tsv)
-            NSG_ID=$(az network nic show --ids "$NIC_ID" \
-                --query "networkSecurityGroup.id" -o tsv)
-            if [ -n "$NSG_ID" ]; then
-                NSG_NAME=$(basename "$NSG_ID")
-                az network nsg rule create -g "$RG_NAME" --nsg-name "$NSG_NAME" \
-                    --name "Allow_WinRM_Runner_Only" --priority 999 \
-                    --destination-port-ranges 5985 \
-                    --source-address-prefixes "$RUNNER_IP" \
-                    --access Allow --protocol Tcp -o none >/dev/null 2>&1 || true
-            fi
-            # >>> PATCH 6: added winrm quickconfig + Register-PSSessionConfiguration
-            #     + winrs shell-limit restore so the WSMan PowerShell provider host
-            #     can actually launch (fixes WSMAN ERROR CODE: 2 in cinc-auditor).
-            az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" \
-                --command-id RunPowerShellScript \
-                --scripts "Remove-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM' \
-                               -Recurse -Force -ErrorAction SilentlyContinue
-                           net user ${AUDIT_USER} '${AUDIT_PASS}' /add /y 2>&1 | Out-Null
-                           net user ${AUDIT_USER} '${AUDIT_PASS}' 2>&1 | Out-Null
-                           net localgroup Administrators ${AUDIT_USER} /add 2>&1 | Out-Null
-                           WMIC USERACCOUNT WHERE Name='${AUDIT_USER}' \
-                               SET PasswordExpires=FALSE 2>&1 | Out-Null
-                           Enable-PSRemoting -SkipNetworkProfileCheck -Force
-                           winrm quickconfig -quiet -force 2>&1 | Out-Null
-                           try { Register-PSSessionConfiguration -Name 'Microsoft.PowerShell' -Force -ErrorAction Stop | Out-Null } catch {}
-                           winrm set winrm/config/winrs '@{MaxShellsPerUser=\"30\"}' 2>&1 | Out-Null
-                           winrm set winrm/config/winrs '@{MaxMemoryPerShellMB=\"1024\"}' 2>&1 | Out-Null
-                           winrm set winrm/config/service/auth '@{Basic=\"true\"}'
-                           winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'
-                           New-ItemProperty -Name LocalAccountTokenFilterPolicy \
-                               -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System \
-                               -PropertyType DWord -Value 1 -Force
-                           Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' \
-                               -Enabled True -Profile Any -ErrorAction SilentlyContinue
-                           Restart-Service WinRM -Force" \
-                -o none >/dev/null 2>&1 || true
+            # Provider-abstracted: open WinRM port from runner
+            cloud_add_port_rule "$ip" 5985 "Allow_WinRM_Runner_Only"
+
+            # Bootstrap user + repair WinRM via agent channel.
+            # On Huawei Cloud cloud_vm_run_powershell returns 1 (no agent channel).
+            # The WinRM repair is skipped; WinRM must already be reachable.
+            cloud_vm_run_powershell "$ip" "
+Remove-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM' \
+    -Recurse -Force -ErrorAction SilentlyContinue
+net user ${AUDIT_USER} '${AUDIT_PASS}' /add /y 2>&1 | Out-Null
+net user ${AUDIT_USER} '${AUDIT_PASS}' 2>&1 | Out-Null
+net localgroup Administrators ${AUDIT_USER} /add 2>&1 | Out-Null
+WMIC USERACCOUNT WHERE Name='${AUDIT_USER}' SET PasswordExpires=FALSE 2>&1 | Out-Null
+Enable-PSRemoting -SkipNetworkProfileCheck -Force
+winrm quickconfig -quiet -force 2>&1 | Out-Null
+try { Register-PSSessionConfiguration -Name 'Microsoft.PowerShell' -Force -ErrorAction Stop | Out-Null } catch {}
+winrm set winrm/config/winrs '@{MaxShellsPerUser=\"30\"}' 2>&1 | Out-Null
+winrm set winrm/config/winrs '@{MaxMemoryPerShellMB=\"1024\"}' 2>&1 | Out-Null
+winrm set winrm/config/service/auth '@{Basic=\"true\"}'
+winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'
+New-ItemProperty -Name LocalAccountTokenFilterPolicy \
+    -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System \
+    -PropertyType DWord -Value 1 -Force
+Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' \
+    -Enabled True -Profile Any -ErrorAction SilentlyContinue
+Restart-Service WinRM -Force" || true
             sleep 20
         ) &
-        # >>> FIX 1: capture the PID of this bootstrap subshell for explicit wait later
+        # FIX 1: capture PID for explicit wait
         WIN_BOOTSTRAP_PIDS+=($!)
     done
 fi
 wait
 
-# >>> FIX 1: Explicitly wait for Windows bootstrap PIDs to complete.
-#     The main wait above catches Linux jobs, but we need to ensure the
-#     Windows az vm run-command has returned before proceeding to Phase 2.
+# FIX 1: wait for Windows bootstrap to fully complete before Phase 2
 if [ ${#WIN_BOOTSTRAP_PIDS[@]} -gt 0 ]; then
     echo -e "${CYAN}⏳ [Phase 0.3] Waiting for Windows WinRM bootstrap to complete...${NC}"
     for pid in "${WIN_BOOTSTRAP_PIDS[@]}"; do
