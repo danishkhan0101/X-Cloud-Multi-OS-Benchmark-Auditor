@@ -32,24 +32,16 @@ AUDIT_USER="${WINDOWS_ADMIN_USER:-Windows_Admin}"
 #       ├── Invoke-CISRemediation-Combined.ps1  ← self-contained PS1 (no helper)
 #       └── controls/
 #           └── cis_ws2022_v5_0_0_benchmark.rb  ← 433 controls, one file
-#
-# CHANGE FROM PRIOR VERSION:
-#   • Old: files_2.zip → setup_win_profile.sh → multi-file controls/*.rb
-#          + Invoke-CISRemediation.ps1 + 02_user_rights.ps1 (two-file)
-#   • New: single cis_ws2022_v5_0_0_benchmark.rb committed to repo
-#          + Invoke-CISRemediation-Combined.ps1 (self-contained, no helper)
-#
-# Scan invocation (from runner → VM via WinRM):
-#   cinc-auditor exec window-default-cis/window-baseline \
-#     -t winrm://IP --user USER --password PASS \
-#     --input server_role=<role> --input profile_level=<1|2> \
-#     --reporter json:report.json
-#
-# Remediation invocation (via az vm run-command):
-#   Invoke-CISRemediation-Combined.ps1 -ServerRole <role> [-Sections 1,2,17]
-#   No -Level param — all sections apply; level filtering is scan-time only.
 # ------------------------------------------------------------------
 WIN_SERVER_ROLE="${WIN_SERVER_ROLE:-member_server}"
+
+# >>> PATCH 1: reboot Windows hosts after remediation so boot-time CIS settings
+#     (VBS / Credential Guard / user-rights / per-user hive keys) actually take
+#     effect before the verification scan. Set to "false" to skip.
+WIN_REBOOT_AFTER_REMEDIATION="${WIN_REBOOT_AFTER_REMEDIATION:-true}"
+# How long to wait (seconds) for a Windows host to be back on the network
+# after `az vm restart`, before WinRM polling begins.
+WIN_REBOOT_SETTLE_SEC="${WIN_REBOOT_SETTLE_SEC:-45}"
 
 UBUNTU_CUSTOM_DIR="ubuntu-custom"
 UBUNTU_CUSTOM_XCCDF="${UBUNTU_CUSTOM_DIR}/${ORG_PREFIX}_xccdf.xml"
@@ -68,21 +60,6 @@ WIN_CUSTOM_PLAYBOOK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_remediate.yml"
 WIN_CIS_DIR="window-default-cis"
 WIN_CIS_BENCHMARK="${WIN_CIS_DIR}/window-baseline"
 
-# ------------------------------------------------------------------
-# PowerShell-native remediation (single combined script — no helper)
-# ------------------------------------------------------------------
-# WIN_PS1_REMEDIATE : Invoke-CISRemediation-Combined.ps1
-#   Self-contained — includes all sections (1,2,5,9,17,18,19) and the
-#   user-rights logic formerly in 02_user_rights.ps1.
-#   Parameters: -ServerRole <member_server|domain_controller>
-#               -Sections   <optional, e.g. "1","2","17">
-#               -WhatIf     (dry run)
-#   No -Level parameter: level filtering is done at scan time by the
-#   InSpec profile; the PS1 applies all applicable controls.
-#
-#   Used by run_win_ps1_remediation() when Ansible is unavailable,
-#   or for targeted section-level remediation.
-# ------------------------------------------------------------------
 WIN_PS1_REMEDIATE="${WIN_CIS_BENCHMARK}/Invoke-CISRemediation-Combined.ps1"
 
 export INSPEC_SSH_CONFIG_NO_SECURE=true
@@ -258,18 +235,6 @@ prefetch_scap_packages() {
 
 # ======================================================
 # GUARD: validate_win_cis_profile
-# ──────────────────────────────────────────────────────
-# Verifies the single-file CIS WS2022 v5 profile layout:
-#   window-default-cis/window-baseline/
-#     inspec.yml
-#     Invoke-CISRemediation-Combined.ps1
-#     controls/cis_ws2022_v5_0_0_benchmark.rb
-#
-# CHANGED FROM PRIOR VERSION:
-#   Old guard checked for inspec.yml + multiple section_*.rb files.
-#   New guard checks for inspec.yml + single combined .rb file.
-#   The Invoke-CISRemediation-Combined.ps1 replaces the two-file
-#   (Invoke-CISRemediation.ps1 + 02_user_rights.ps1) approach.
 # ======================================================
 validate_win_cis_profile() {
     local ok=true
@@ -314,23 +279,6 @@ validate_win_cis_profile() {
 
 # ======================================================
 # HELPER: run_win_ps1_remediation
-# ──────────────────────────────────────────────────────
-# PowerShell-native CIS remediation using the single
-# Invoke-CISRemediation-Combined.ps1 (self-contained,
-# no helper script required).
-#
-# CHANGED FROM PRIOR VERSION:
-#   Old: uploaded both Invoke-CISRemediation.ps1 AND 02_user_rights.ps1,
-#        passed -Level parameter, base64-encoded both files.
-#   New: uploads only Invoke-CISRemediation-Combined.ps1 (one file),
-#        passes -ServerRole and optional -Sections; no -Level parameter.
-#        All sections (1,2,5,9,17,18,19) apply unless -Sections filters them.
-#        Level filtering is scan-time only (cinc-auditor --input profile_level).
-#
-# Usage:  run_win_ps1_remediation <ip> <cis_level> [sections]
-#   ip        : target VM IP
-#   cis_level : "Level 1" or "Level 2" (ignored for PS1; used for logging only)
-#   sections  : optional space-separated list e.g. "1 2 17"
 # ======================================================
 run_win_ps1_remediation() {
     local ip="$1"
@@ -501,13 +449,32 @@ ensure_linux_scap_tools() {
 
 # ======================================================
 # HELPER: detect_windows_version
+# >>> PATCH 2: az vm run-command fallback + default-to-2022 instead of "unknown"
+#     Old behaviour relied solely on Ansible (ansible.windows.win_shell). On a
+#     CI runner without the ansible.windows collection or without WinRM the
+#     query returned empty -> "unknown" -> the host was SKIPPED entirely.
+#     Now: try Ansible, then fall back to `az vm run-command` (ARM channel,
+#     always works), and if both fail assume WS2022 rather than skipping.
 # ======================================================
 detect_windows_version() {
     local ip="$1"
-    local caption
+    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
+    local caption=""
+
+    # Fast path: Ansible (only if ansible.windows + WinRM connectivity present)
     caption=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
         -a '(Get-CimInstance Win32_OperatingSystem).Caption' \
         2>/dev/null | grep -oE 'Windows (Server (2019|2022|2025)|1[01])' | head -1)
+
+    # Fallback: az vm run-command — no Ansible/WinRM dependency
+    if [ -z "$caption" ] && [ -n "$vm_name" ]; then
+        caption=$(az vm run-command invoke \
+            -g "$RG_NAME" -n "$vm_name" \
+            --command-id RunPowerShellScript \
+            --scripts '(Get-CimInstance Win32_OperatingSystem).Caption' \
+            --query 'value[0].message' -o tsv 2>/dev/null \
+            | grep -oE 'Windows (Server (2019|2022|2025)|1[01])' | head -1)
+    fi
 
     case "$caption" in
         *"Server 2019"*) echo "2019" ;;
@@ -515,8 +482,100 @@ detect_windows_version() {
         *"Server 2025"*) echo "2025" ;;
         *"Windows 10"*)  echo "10"   ;;
         *"Windows 11"*)  echo "11"   ;;
-        *)               echo "unknown" ;;
+        *)
+            echo -e "${YELLOW}⚠️  [Win] Version detection failed for ${ip} — assuming WS2022${NC}" >&2
+            echo "2022"
+            ;;
     esac
+}
+
+# ======================================================
+# HELPER: ensure_winrm_powershell
+# >>> PATCH 3: repair the WSMan PowerShell provider host.
+#     Fixes "WSMAN ERROR CODE: 2 / The WSMan service could not launch a host
+#     process to process the given request" that cinc-auditor hits when opening
+#     a PowerShell shell. Common causes after a hardening pass:
+#       * the Microsoft.PowerShell PSSession config got unregistered
+#       * winrs shell limits (MaxShellsPerUser / MaxMemoryPerShellMB) were zeroed
+#       * CIS WinRM Service policy keys (18.10.90.x) disabled Basic/Unencrypted,
+#         locking out an HTTP/Basic runner
+#       * RunAsPPL (18.9.27.2) / Credential Guard disrupted remoting
+#     Runs over the Azure ARM channel (az vm run-command), NOT WinRM, so it
+#     works even when WinRM itself is currently broken.
+#
+#     NOTE: step (4) re-opens Basic/Unencrypted so an HTTP/Basic runner can
+#     reconnect after hardening. That makes 18.10.90.x show NON-compliant in the
+#     scan that follows. To keep those controls hardened, scan over HTTPS with a
+#     cert + Negotiate/Kerberos and set WINRM_REOPEN_BASIC=false.
+# ======================================================
+WINRM_REOPEN_BASIC="${WINRM_REOPEN_BASIC:-true}"
+
+ensure_winrm_powershell() {
+    local ip="$1"
+    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
+    if [ -z "$vm_name" ]; then
+        echo -e "${YELLOW}⚠️  [WinRM-Heal] No VM name mapped for ${ip} — skipping repair${NC}"
+        return 1
+    fi
+
+    local reopen_block=""
+    if [ "${WINRM_REOPEN_BASIC}" == "true" ]; then
+        reopen_block="
+\$svc = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service'
+if (-not (Test-Path \$svc)) { New-Item -Path \$svc -Force | Out-Null }
+New-ItemProperty -Path \$svc -Name 'AllowBasic'              -Value 1 -PropertyType DWord -Force | Out-Null
+New-ItemProperty -Path \$svc -Name 'AllowUnencryptedTraffic' -Value 1 -PropertyType DWord -Force | Out-Null
+New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'LocalAccountTokenFilterPolicy' -Value 1 -PropertyType DWord -Force | Out-Null
+winrm set winrm/config/service/auth '@{Basic=\"true\"}'          2>&1 | Out-Null
+winrm set winrm/config/service      '@{AllowUnencrypted=\"true\"}' 2>&1 | Out-Null
+"
+    fi
+
+    echo -e "${CYAN}🩺 [WinRM-Heal/${ip}] Re-registering PowerShell provider + restoring shell limits...${NC}"
+    az vm run-command invoke -g "$RG_NAME" -n "$vm_name" \
+        --command-id RunPowerShellScript \
+        --scripts "
+\$ErrorActionPreference = 'Continue'
+Set-Service WinRM -StartupType Automatic -ErrorAction SilentlyContinue
+Start-Service WinRM -ErrorAction SilentlyContinue
+winrm quickconfig -quiet -force 2>&1 | Out-Null
+try { Register-PSSessionConfiguration -Name 'Microsoft.PowerShell' -Force -ErrorAction Stop | Out-Null }
+catch { Enable-PSRemoting -SkipNetworkProfileCheck -Force -ErrorAction SilentlyContinue | Out-Null }
+# restore shell limits that a partial hardening can zero out
+winrm set winrm/config/winrs '@{MaxShellsPerUser=\"30\"}'    2>&1 | Out-Null
+winrm set winrm/config/winrs '@{MaxConcurrentUsers=\"10\"}'  2>&1 | Out-Null
+winrm set winrm/config/winrs '@{MaxMemoryPerShellMB=\"1024\"}' 2>&1 | Out-Null
+${reopen_block}
+Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' -Enabled True -Profile Any -ErrorAction SilentlyContinue
+Restart-Service WinRM -Force -ErrorAction SilentlyContinue
+Write-Output 'WinRM PowerShell provider re-initialized'
+" -o none >/dev/null 2>&1
+
+    local rc=$?
+    if [ $rc -eq 0 ]; then
+        echo -e "${GREEN}✅ [WinRM-Heal/${ip}] provider re-registered${NC}"
+    else
+        echo -e "${YELLOW}⚠️  [WinRM-Heal/${ip}] az run-command rc=${rc} (continuing)${NC}"
+    fi
+    sleep 5
+    return 0
+}
+
+# ======================================================
+# HELPER: reboot_windows_host (apply boot-time CIS settings)
+# >>> PATCH 4: VBS / Credential Guard / user-rights / per-user keys only take
+#     effect after a reboot. Restart + wait for WinRM + repair the provider.
+# ======================================================
+reboot_windows_host() {
+    local ip="$1"
+    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
+    [ -z "$vm_name" ] && { echo -e "${YELLOW}⚠️  [Reboot] No VM name for ${ip}${NC}"; return 0; }
+
+    echo -e "${CYAN}🔁 [Reboot/${ip}] Restarting ${vm_name} to apply boot-time CIS settings...${NC}"
+    az vm restart -g "$RG_NAME" -n "$vm_name" -o none >/dev/null 2>&1 || true
+    sleep "${WIN_REBOOT_SETTLE_SEC}"
+    wait_for_winrm "$ip" || echo -e "${YELLOW}⚠️  [Reboot/${ip}] WinRM not back within timeout${NC}"
+    ensure_winrm_powershell "$ip"
 }
 
 # ======================================================
@@ -802,6 +861,15 @@ if [ "$H_TARGET_IP" != "all" ] && [ -n "$H_TARGET_IP" ]; then
     echo -e "${MAGENTA}🎯 MATRIX SHARDING: Isolating to node $H_TARGET_IP${NC}"
     UBUNTU_MACHINES=(); RHEL_MACHINES=(); ROCKY_MACHINES=()
     ALMA_MACHINES=();   WINDOWS_MACHINES=()
+    # >>> PATCH 5: also map IP_TO_VM_NAME when sharding to a single node, so the
+    #     az-based fallbacks (detect_windows_version / ensure_winrm_powershell /
+    #     reboot_windows_host / run_win_ps1_remediation) have a VM name to use.
+    SHARD_VM_NAME="${IP_TO_VM_NAME[$H_TARGET_IP]:-}"
+    if [ -z "$SHARD_VM_NAME" ]; then
+        SHARD_VM_NAME=$(az vm list -d -g "$RG_NAME" \
+            --query "[?publicIps=='${H_TARGET_IP}'].name | [0]" -o tsv 2>/dev/null)
+        [ -n "$SHARD_VM_NAME" ] && IP_TO_VM_NAME["$H_TARGET_IP"]="$SHARD_VM_NAME"
+    fi
     case "${H_TARGET_OS,,}" in
         ubuntu)  UBUNTU_MACHINES=("$H_TARGET_IP")  ;;
         rhel)    RHEL_MACHINES=("$H_TARGET_IP")    ;;
@@ -930,6 +998,9 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
                     --source-address-prefixes "$RUNNER_IP" \
                     --access Allow --protocol Tcp -o none >/dev/null 2>&1 || true
             fi
+            # >>> PATCH 6: added winrm quickconfig + Register-PSSessionConfiguration
+            #     + winrs shell-limit restore so the WSMan PowerShell provider host
+            #     can actually launch (fixes WSMAN ERROR CODE: 2 in cinc-auditor).
             az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" \
                 --command-id RunPowerShellScript \
                 --scripts "Remove-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM' \
@@ -940,6 +1011,10 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
                            WMIC USERACCOUNT WHERE Name='${AUDIT_USER}' \
                                SET PasswordExpires=FALSE 2>&1 | Out-Null
                            Enable-PSRemoting -SkipNetworkProfileCheck -Force
+                           winrm quickconfig -quiet -force 2>&1 | Out-Null
+                           try { Register-PSSessionConfiguration -Name 'Microsoft.PowerShell' -Force -ErrorAction Stop | Out-Null } catch {}
+                           winrm set winrm/config/winrs '@{MaxShellsPerUser=\"30\"}' 2>&1 | Out-Null
+                           winrm set winrm/config/winrs '@{MaxMemoryPerShellMB=\"1024\"}' 2>&1 | Out-Null
                            winrm set winrm/config/service/auth '@{Basic=\"true\"}'
                            winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'
                            New-ItemProperty -Name LocalAccountTokenFilterPolicy \
@@ -1279,18 +1354,6 @@ run_phase_1() {
     # ================================================================
     # WINDOWS — cinc-auditor (CIS WS2022 v5.0.0, single-file profile)
     # ================================================================
-    # Profile layout (committed to repo, no zip/extraction needed):
-    #   window-default-cis/window-baseline/
-    #     inspec.yml                               ← input defaults
-    #     Invoke-CISRemediation-Combined.ps1       ← self-contained PS1
-    #     controls/cis_ws2022_v5_0_0_benchmark.rb  ← 433 controls
-    #
-    # Inputs passed via CLI (override inspec.yml defaults):
-    #   --input server_role=<member_server|domain_controller>
-    #   --input profile_level=<1|2>   (metadata; all 433 controls always run)
-    #
-    # Exit codes: 0=all pass, 100=some fail, 101=some skip — all are OK.
-    # ================================================================
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
 
@@ -1305,6 +1368,9 @@ run_phase_1() {
                         echo -e "${RED}❌ [Phase1/Win] WinRM unreachable: $IP — skipping${NC}"
                         exit 1
                     }
+                    # >>> PATCH 7: repair the PowerShell provider before scanning so
+                    #     cinc-auditor can open a shell (avoids WSMAN ERROR CODE: 2).
+                    ensure_winrm_powershell "$IP"
 
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP${NC}"
@@ -1514,6 +1580,18 @@ run_remediation() {
                 ansible-playbook -i inventory.ini "$WIN_CUSTOM_PLAYBOOK" \
                     --limit windows_nodes
             fi
+
+            # >>> PATCH 8: reboot Windows hosts after CIS remediation so boot-time
+            #     settings (VBS, Credential Guard, user-rights, per-user keys)
+            #     take effect before Phase 4 verification. Skipped for ORG-only
+            #     runs and when WIN_REBOOT_AFTER_REMEDIATION=false.
+            if [ "$RUN_CIS" == true ] && [ "${WIN_REBOOT_AFTER_REMEDIATION}" == "true" ]; then
+                echo -e "${CYAN}🔁 [Remediation/Win] Rebooting hardened Windows hosts...${NC}"
+                for IP in "${WINDOWS_MACHINES[@]}"; do
+                    reboot_windows_host "$IP" &
+                done
+                wait
+            fi
         fi
     fi
 }
@@ -1682,7 +1760,6 @@ run_phase_4() {
 
     # ================================================================
     # WINDOWS VERIFY — cinc-auditor (CIS WS2022 v5.0.0, single-file)
-    # Same inputs as Phase 1; report filename uses 'after' prefix.
     # ================================================================
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
@@ -1698,6 +1775,11 @@ run_phase_4() {
                         echo -e "${RED}❌ [Phase4/Win] WinRM unreachable: $IP — skipping${NC}"
                         exit 1
                     }
+                    # >>> PATCH 9: remediation/hardening can disable the WSMan
+                    #     PowerShell provider or lock out HTTP/Basic. Repair it
+                    #     before the verify scan so cinc-auditor can connect
+                    #     (fixes WSMAN ERROR CODE: 2 on the post-remediation scan).
+                    ensure_winrm_powershell "$IP"
 
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
@@ -1827,6 +1909,10 @@ run_cleanup() {
                         --name "Allow_WinRM_Runner_Only" \
                         -o none >/dev/null 2>&1 || true
                 fi
+                # NOTE: cleanup restores LocalAccountTokenFilterPolicy to the CIS
+                # value by removing it. If you need 18.4.1 to PASS in the final
+                # scan, run cleanup BEFORE that scan (or scan with a domain
+                # account); the runner's WinRM access depends on this key = 1.
                 az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" \
                     --command-id RunPowerShellScript \
                     --scripts "Stop-Service WinRM -WarningAction SilentlyContinue
