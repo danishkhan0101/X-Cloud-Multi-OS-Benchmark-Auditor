@@ -157,6 +157,7 @@ control 'cis-1.2.3' do
     skip 'Manual check (1.2.3): Ensure \'Allow Administrator account lockout\' is set to \'Enabled\' (MS only) (Manual)'
   end
   # Remediation guidance: To establish the recommended configuration via GP, set the following UI path to Enabled: Computer Configuration\Policies\Windows Settings\Security Settings\Account Policies\Account Lockout Policies\Allow Administrator account lockout
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-1.2.4' do
@@ -198,8 +199,9 @@ control 'cis-2.2.2' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeNetworkLogonRight') { should match_array ['*S-1-5-32-544', '*S-1-5-11', '*S-1-5-9'] }
+    its('SeNetworkLogonRight') { should match_array ['S-1-5-32-544', 'S-1-5-11', 'S-1-5-9'] }
   end
+  only_if('applies to Domain Controllers') { input('server_role') == 'domain_controller' }
 end
 
 control 'cis-2.2.3' do
@@ -211,8 +213,9 @@ control 'cis-2.2.3' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeNetworkLogonRight') { should match_array ['*S-1-5-32-544', '*S-1-5-11'] }
+    its('SeNetworkLogonRight') { should match_array ['S-1-5-32-544', 'S-1-5-11'] }
   end
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-2.2.4' do
@@ -237,8 +240,9 @@ control 'cis-2.2.5' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeMachineAccountPrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeMachineAccountPrivilege') { should match_array ['S-1-5-32-544'] }
   end
+  only_if('applies to Domain Controllers') { input('server_role') == 'domain_controller' }
 end
 
 control 'cis-2.2.6' do
@@ -250,7 +254,7 @@ control 'cis-2.2.6' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeIncreaseQuotaPrivilege') { should match_array ['*S-1-5-32-544', '*S-1-5-19', '*S-1-5-20'] }
+    its('SeIncreaseQuotaPrivilege') { should match_array ['S-1-5-32-544', 'S-1-5-19', 'S-1-5-20'] }
   end
 end
 
@@ -263,8 +267,9 @@ control 'cis-2.2.7' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeInteractiveLogonRight') { should match_array ['*S-1-5-32-544', '*S-1-5-9'] }
+    its('SeInteractiveLogonRight') { should match_array ['S-1-5-32-544', 'S-1-5-9'] }
   end
+  only_if('applies to Domain Controllers') { input('server_role') == 'domain_controller' }
 end
 
 control 'cis-2.2.8' do
@@ -276,8 +281,9 @@ control 'cis-2.2.8' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeInteractiveLogonRight') { should match_array ['*S-1-5-32-544'] }
+    its('SeInteractiveLogonRight') { should match_array ['S-1-5-32-544'] }
   end
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-2.2.9' do
@@ -289,8 +295,9 @@ control 'cis-2.2.9' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeRemoteInteractiveLogonRight') { should match_array ['*S-1-5-32-544'] }
+    its('SeRemoteInteractiveLogonRight') { should match_array ['S-1-5-32-544'] }
   end
+  only_if('applies to Domain Controllers') { input('server_role') == 'domain_controller' }
 end
 
 control 'cis-2.2.10' do
@@ -302,8 +309,9 @@ control 'cis-2.2.10' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeRemoteInteractiveLogonRight') { should match_array ['*S-1-5-32-544', '*S-1-5-32-555'] }
+    its('SeRemoteInteractiveLogonRight') { should match_array ['S-1-5-32-544', 'S-1-5-32-555'] }
   end
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-2.2.11' do
@@ -315,7 +323,7 @@ control 'cis-2.2.11' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeBackupPrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeBackupPrivilege') { should match_array ['S-1-5-32-544'] }
   end
 end
 
@@ -328,7 +336,7 @@ control 'cis-2.2.12' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeSystemtimePrivilege') { should match_array ['*S-1-5-32-544', '*S-1-5-19'] }
+    its('SeSystemtimePrivilege') { should match_array ['S-1-5-32-544', 'S-1-5-19'] }
   end
 end
 
@@ -341,7 +349,7 @@ control 'cis-2.2.13' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeCreatePagefilePrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeCreatePagefilePrivilege') { should match_array ['S-1-5-32-544'] }
   end
 end
 
@@ -367,7 +375,7 @@ control 'cis-2.2.15' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeCreateGlobalPrivilege') { should match_array ['*S-1-5-32-544', '*S-1-5-19', '*S-1-5-20', '*S-1-5-6'] }
+    its('SeCreateGlobalPrivilege') { should match_array ['S-1-5-32-544', 'S-1-5-19', 'S-1-5-20', 'S-1-5-6'] }
   end
 end
 
@@ -393,8 +401,9 @@ control 'cis-2.2.17' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeCreateSymbolicLinkPrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeCreateSymbolicLinkPrivilege') { should match_array ['S-1-5-32-544'] }
   end
+  only_if('applies to Domain Controllers') { input('server_role') == 'domain_controller' }
 end
 
 control 'cis-2.2.18' do
@@ -406,8 +415,9 @@ control 'cis-2.2.18' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeCreateSymbolicLinkPrivilege') { should match_array ['*S-1-5-32-544', '*S-1-5-83-0'] }
+    its('SeCreateSymbolicLinkPrivilege') { should match_array ['S-1-5-32-544', 'S-1-5-83-0'] }
   end
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-2.2.19' do
@@ -419,7 +429,7 @@ control 'cis-2.2.19' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeDebugPrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeDebugPrivilege') { should match_array ['S-1-5-32-544'] }
   end
 end
 
@@ -432,8 +442,9 @@ control 'cis-2.2.20' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeDenyNetworkLogonRight') { should include '*S-1-5-32-546' }
+    its('SeDenyNetworkLogonRight') { should include 'S-1-5-32-546' }
   end
+  only_if('applies to Domain Controllers') { input('server_role') == 'domain_controller' }
 end
 
 control 'cis-2.2.21' do
@@ -445,9 +456,10 @@ control 'cis-2.2.21' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeDenyNetworkLogonRight') { should include '*S-1-5-32-546' }
-    its('SeDenyNetworkLogonRight') { should include '*S-1-5-114' }
+    its('SeDenyNetworkLogonRight') { should include 'S-1-5-32-546' }
+    its('SeDenyNetworkLogonRight') { should include 'S-1-5-114' }
   end
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-2.2.22' do
@@ -459,7 +471,7 @@ control 'cis-2.2.22' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeDenyBatchLogonRight') { should include '*S-1-5-32-546' }
+    its('SeDenyBatchLogonRight') { should include 'S-1-5-32-546' }
   end
 end
 
@@ -472,7 +484,7 @@ control 'cis-2.2.23' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeDenyServiceLogonRight') { should include '*S-1-5-32-546' }
+    its('SeDenyServiceLogonRight') { should include 'S-1-5-32-546' }
   end
 end
 
@@ -485,7 +497,7 @@ control 'cis-2.2.24' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeDenyInteractiveLogonRight') { should include '*S-1-5-32-546' }
+    its('SeDenyInteractiveLogonRight') { should include 'S-1-5-32-546' }
   end
 end
 
@@ -498,8 +510,9 @@ control 'cis-2.2.25' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeDenyRemoteInteractiveLogonRight') { should include '*S-1-5-32-546' }
+    its('SeDenyRemoteInteractiveLogonRight') { should include 'S-1-5-32-546' }
   end
+  only_if('applies to Domain Controllers') { input('server_role') == 'domain_controller' }
 end
 
 control 'cis-2.2.26' do
@@ -511,8 +524,9 @@ control 'cis-2.2.26' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeDenyRemoteInteractiveLogonRight') { should match_array ['*S-1-5-32-546', '*S-1-5-113'] }
+    its('SeDenyRemoteInteractiveLogonRight') { should match_array ['S-1-5-32-546', 'S-1-5-113'] }
   end
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-2.2.27' do
@@ -524,8 +538,9 @@ control 'cis-2.2.27' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeEnableDelegationPrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeEnableDelegationPrivilege') { should match_array ['S-1-5-32-544'] }
   end
+  only_if('applies to Domain Controllers') { input('server_role') == 'domain_controller' }
 end
 
 control 'cis-2.2.28' do
@@ -539,6 +554,7 @@ control 'cis-2.2.28' do
   describe security_policy do
     its('SeEnableDelegationPrivilege') { should eq [] }
   end
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-2.2.29' do
@@ -550,7 +566,7 @@ control 'cis-2.2.29' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeRemoteShutdownPrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeRemoteShutdownPrivilege') { should match_array ['S-1-5-32-544'] }
   end
 end
 
@@ -563,7 +579,7 @@ control 'cis-2.2.30' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeAuditPrivilege') { should match_array ['*S-1-5-19', '*S-1-5-20'] }
+    its('SeAuditPrivilege') { should match_array ['S-1-5-19', 'S-1-5-20'] }
   end
 end
 
@@ -576,8 +592,9 @@ control 'cis-2.2.31' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeImpersonatePrivilege') { should match_array ['*S-1-5-32-544', '*S-1-5-19', '*S-1-5-20', '*S-1-5-6'] }
+    its('SeImpersonatePrivilege') { should match_array ['S-1-5-32-544', 'S-1-5-19', 'S-1-5-20', 'S-1-5-6'] }
   end
+  only_if('applies to Domain Controllers') { input('server_role') == 'domain_controller' }
 end
 
 control 'cis-2.2.32' do
@@ -589,8 +606,9 @@ control 'cis-2.2.32' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeImpersonatePrivilege') { should match_array ['*S-1-5-32-544', '*S-1-5-19', '*S-1-5-20', '*S-1-5-6'] }
+    its('SeImpersonatePrivilege') { should match_array ['S-1-5-32-544', 'S-1-5-19', 'S-1-5-20', 'S-1-5-6'] }
   end
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-2.2.33' do
@@ -602,7 +620,7 @@ control 'cis-2.2.33' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeIncreaseBasePriorityPrivilege') { should match_array ['*S-1-5-32-544', '*S-1-5-90-0'] }
+    its('SeIncreaseBasePriorityPrivilege') { should match_array ['S-1-5-32-544', 'S-1-5-90-0'] }
   end
 end
 
@@ -615,7 +633,7 @@ control 'cis-2.2.34' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeLoadDriverPrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeLoadDriverPrivilege') { should match_array ['S-1-5-32-544'] }
   end
 end
 
@@ -637,13 +655,13 @@ control 'cis-2.2.36' do
   impact 0.7
   tag cis_id: '2.2.36'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'DC'
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeBatchLogonRight') { should match_array ['*S-1-5-32-544'] }
+    its('SeBatchLogonRight') { should match_array ['S-1-5-32-544'] }
   end
+  only_if('applies to Domain Controllers') { input('server_role') == 'domain_controller' }
 end
 
 control 'cis-2.2.37' do
@@ -655,8 +673,9 @@ control 'cis-2.2.37' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeSecurityPrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeSecurityPrivilege') { should match_array ['S-1-5-32-544'] }
   end
+  only_if('applies to Domain Controllers') { input('server_role') == 'domain_controller' }
 end
 
 control 'cis-2.2.38' do
@@ -668,8 +687,9 @@ control 'cis-2.2.38' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeSecurityPrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeSecurityPrivilege') { should match_array ['S-1-5-32-544'] }
   end
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-2.2.39' do
@@ -694,7 +714,7 @@ control 'cis-2.2.40' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeSystemEnvironmentPrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeSystemEnvironmentPrivilege') { should match_array ['S-1-5-32-544'] }
   end
 end
 
@@ -707,7 +727,7 @@ control 'cis-2.2.41' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeManageVolumePrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeManageVolumePrivilege') { should match_array ['S-1-5-32-544'] }
   end
 end
 
@@ -720,7 +740,7 @@ control 'cis-2.2.42' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeProfileSingleProcessPrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeProfileSingleProcessPrivilege') { should match_array ['S-1-5-32-544'] }
   end
 end
 
@@ -733,7 +753,7 @@ control 'cis-2.2.43' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeSystemProfilePrivilege') { should match_array ['*S-1-5-32-544', '*S-1-5-80-3139157870-2983391045-3678747466-658725712-1809340420'] }
+    its('SeSystemProfilePrivilege') { should match_array ['S-1-5-32-544', 'S-1-5-80-3139157870-2983391045-3678747466-658725712-1809340420'] }
   end
 end
 
@@ -746,7 +766,7 @@ control 'cis-2.2.44' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeAssignPrimaryTokenPrivilege') { should match_array ['*S-1-5-19', '*S-1-5-20'] }
+    its('SeAssignPrimaryTokenPrivilege') { should match_array ['S-1-5-19', 'S-1-5-20'] }
   end
 end
 
@@ -759,7 +779,7 @@ control 'cis-2.2.45' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeRestorePrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeRestorePrivilege') { should match_array ['S-1-5-32-544'] }
   end
 end
 
@@ -772,7 +792,7 @@ control 'cis-2.2.46' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeShutdownPrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeShutdownPrivilege') { should match_array ['S-1-5-32-544'] }
   end
 end
 
@@ -787,6 +807,7 @@ control 'cis-2.2.47' do
   describe security_policy do
     its('SeSyncAgentPrivilege') { should eq [] }
   end
+  only_if('applies to Domain Controllers') { input('server_role') == 'domain_controller' }
 end
 
 control 'cis-2.2.48' do
@@ -798,7 +819,7 @@ control 'cis-2.2.48' do
   tag mechanism: 'user_rights'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe security_policy do
-    its('SeTakeOwnershipPrivilege') { should match_array ['*S-1-5-32-544'] }
+    its('SeTakeOwnershipPrivilege') { should match_array ['S-1-5-32-544'] }
   end
 end
 
@@ -814,6 +835,7 @@ control 'cis-2.3.1.1' do
     skip 'Manual check (2.3.1.1): Ensure \'Accounts: Guest account status\' is set to \'Disabled\' (MS only) (Automated)'
   end
   # Remediation guidance: To establish the recommended configuration via GP, set the following UI path to Disabled: Computer Configuration\Policies\Windows Settings\Security Settings\Local Policies\Security Options\Accounts: Guest account status
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-2.3.1.2' do
@@ -891,7 +913,7 @@ control 'cis-2.3.4.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Print\\Providers\\LanManServices\\Servers') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Print\\Providers\\LanMan Print Services\\Servers') do
     its('AddPrinterDrivers') { should cmp == 1 }
   end
 end
@@ -1050,7 +1072,6 @@ control 'cis-2.3.7.1' do
   impact 0.7
   tag cis_id: '2.3.7.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -1119,11 +1140,10 @@ control 'cis-2.3.7.6' do
   impact 0.7
   tag cis_id: '2.3.7.6'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'MS'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsNT\\CurrentVersion\\Winlogon') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon') do
     its('CachedLogonsCount') { should cmp >= 0 }
     its('CachedLogonsCount') { should cmp <= 4 }
   end
@@ -1138,7 +1158,7 @@ control 'cis-2.3.7.7' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsNT\\CurrentVersion\\Winlogon') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon') do
     its('PasswordExpiryWarning') { should cmp >= 5 }
     its('PasswordExpiryWarning') { should cmp <= 14 }
   end
@@ -1156,6 +1176,7 @@ control 'cis-2.3.7.8' do
     skip 'Manual check (2.3.7.8): Ensure \'Interactive logon: Require Domain Controller Authentication to unlock workstation\' is set to \'Enabled\' (MS only) (Automated)'
   end
   # Remediation guidance: To implement the recommended configuration via GP, set the following UI path to Enabled: Computer Configuration\Policies\Windows Settings\Security Settings\Local Policies\Security Options\Interactive logon: Require Domain Controller Authentication to unlock workstation
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-2.3.7.9' do
@@ -1166,7 +1187,7 @@ control 'cis-2.3.7.9' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsNT\\CurrentVersion\\Winlogon') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon') do
     its('ScRemoveOption') { should be_in [1, 2, 3] }
   end
 end
@@ -1298,7 +1319,6 @@ control 'cis-2.3.10.4' do
   impact 0.7
   tag cis_id: '2.3.10.4'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -1624,7 +1644,7 @@ control 'cis-2.3.15.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\SessionManager\\Kernel') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Kernel') do
     its('ObCaseInsensitive') { should cmp == 1 }
   end
 end
@@ -2599,7 +2619,6 @@ control 'cis-18.1.3' do
   impact 0.7
   tag cis_id: '18.1.3'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2669,7 +2688,7 @@ control 'cis-18.4.5' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\SessionManager\\kernel') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\kernel') do
     its('DisableExceptionChainValidation') { should cmp == 0 }
   end
 end
@@ -2745,7 +2764,6 @@ control 'cis-18.5.5' do
   impact 0.7
   tag cis_id: '18.5.5'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2772,7 +2790,6 @@ control 'cis-18.5.7' do
   impact 0.7
   tag cis_id: '18.5.7'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2800,7 +2817,6 @@ control 'cis-18.5.9' do
   impact 0.7
   tag cis_id: '18.5.9'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2814,7 +2830,6 @@ control 'cis-18.5.10' do
   impact 0.7
   tag cis_id: '18.5.10'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2869,11 +2884,10 @@ control 'cis-18.6.4.3' do
   impact 0.7
   tag cis_id: '18.6.4.3'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsNT\\DNSClient') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient') do
     its('DisableIPv6DefaultDnsServers') { should cmp == 1 }
   end
 end
@@ -2897,7 +2911,6 @@ control 'cis-18.6.5.1' do
   impact 0.7
   tag cis_id: '18.6.5.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2950,7 +2963,6 @@ control 'cis-18.6.9.1' do
   impact 0.7
   tag cis_id: '18.6.9.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2964,7 +2976,6 @@ control 'cis-18.6.9.2' do
   impact 0.7
   tag cis_id: '18.6.9.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -2978,7 +2989,6 @@ control 'cis-18.6.10.2' do
   impact 0.7
   tag cis_id: '18.6.10.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3066,7 +3076,6 @@ control 'cis-18.6.20.1' do
   impact 0.7
   tag cis_id: '18.6.20.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3080,7 +3089,6 @@ control 'cis-18.6.20.2' do
   impact 0.7
   tag cis_id: '18.6.20.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3107,7 +3115,6 @@ control 'cis-18.6.21.2' do
   impact 0.7
   tag cis_id: '18.6.21.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'MS'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3125,7 +3132,7 @@ control 'cis-18.7.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\WindowsNT\\Printers') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows NT\\Printers') do
     its('RegisterSpoolerRemoteRpcEndPoint') { should cmp == 2 }
   end
 end
@@ -3152,7 +3159,7 @@ control 'cis-18.7.3' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsNT\\Printers\\RPC') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Printers\\RPC') do
     its('RpcUseNamedPipeProtocol') { should cmp == 0 }
   end
 end
@@ -3179,7 +3186,7 @@ control 'cis-18.7.5' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsNT\\Printers\\RPC') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Printers\\RPC') do
     its('RpcProtocols') { should cmp == 5 }
   end
 end
@@ -3233,7 +3240,7 @@ control 'cis-18.7.9' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsNT\\Printers\\PointAndPrint') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Printers\\PointAndPrint') do
     its('RestrictDriverInstallationToAdministrators') { should cmp == 1 }
   end
 end
@@ -3260,7 +3267,7 @@ control 'cis-18.7.11' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\WindowsNT\\Printers\\PointAndPrint') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows NT\\Printers\\PointAndPrint') do
     its('NoWarningNoElevationOnInstall') { should cmp == 0 }
   end
 end
@@ -3273,7 +3280,7 @@ control 'cis-18.7.12' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\WindowsNT\\Printers\\PointAndPrint') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows NT\\Printers\\PointAndPrint') do
     its('UpdatePromptSettings') { should cmp == 0 }
   end
 end
@@ -3283,7 +3290,6 @@ control 'cis-18.8.1.1' do
   impact 0.7
   tag cis_id: '18.8.1.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3471,7 +3477,7 @@ control 'cis-18.9.19.2' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\GroupA4EA-00C04F79F83A}') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Group Policy\\{827D319E-6EAC-11D2-A4EA-00C04F79F83A}') do
     its('NoBackgroundPolicy') { should cmp == 0 }
   end
 end
@@ -3484,7 +3490,7 @@ control 'cis-18.9.19.3' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\GroupA4EA-00C04F79F83A}') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Group Policy\\{827D319E-6EAC-11D2-A4EA-00C04F79F83A}') do
     its('NoGPOListChanges') { should cmp == 0 }
   end
 end
@@ -3534,7 +3540,6 @@ control 'cis-18.9.20.1.2' do
   impact 0.7
   tag cis_id: '18.9.20.1.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3548,7 +3553,6 @@ control 'cis-18.9.20.1.3' do
   impact 0.7
   tag cis_id: '18.9.20.1.3'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3562,7 +3566,6 @@ control 'cis-18.9.20.1.4' do
   impact 0.7
   tag cis_id: '18.9.20.1.4'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3589,7 +3592,6 @@ control 'cis-18.9.20.1.6' do
   impact 0.0
   tag cis_id: '18.9.20.1.6'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'manual'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3604,7 +3606,6 @@ control 'cis-18.9.20.1.7' do
   impact 0.7
   tag cis_id: '18.9.20.1.7'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3618,7 +3619,6 @@ control 'cis-18.9.20.1.8' do
   impact 0.7
   tag cis_id: '18.9.20.1.8'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3632,7 +3632,6 @@ control 'cis-18.9.20.1.9' do
   impact 0.7
   tag cis_id: '18.9.20.1.9'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3646,7 +3645,6 @@ control 'cis-18.9.20.1.10' do
   impact 0.7
   tag cis_id: '18.9.20.1.10'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3660,7 +3658,6 @@ control 'cis-18.9.20.1.11' do
   impact 0.7
   tag cis_id: '18.9.20.1.11'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3674,7 +3671,6 @@ control 'cis-18.9.20.1.12' do
   impact 0.7
   tag cis_id: '18.9.20.1.12'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3688,7 +3684,6 @@ control 'cis-18.9.20.1.13' do
   impact 0.7
   tag cis_id: '18.9.20.1.13'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3703,7 +3698,6 @@ control 'cis-18.9.23.1' do
   impact 0.7
   tag cis_id: '18.9.23.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3721,7 +3715,7 @@ control 'cis-18.9.24.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\KernelProtection') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Kernel DMA Protection') do
     its('DeviceEnumerationPolicy') { should cmp == 0 }
   end
 end
@@ -3871,7 +3865,6 @@ control 'cis-18.9.28.1' do
   impact 0.7
   tag cis_id: '18.9.28.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3964,7 +3957,6 @@ control 'cis-18.9.33.1' do
   impact 0.7
   tag cis_id: '18.9.33.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3978,7 +3970,6 @@ control 'cis-18.9.33.2' do
   impact 0.7
   tag cis_id: '18.9.33.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -3992,7 +3983,6 @@ control 'cis-18.9.35.6.1' do
   impact 0.7
   tag cis_id: '18.9.35.6.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4006,7 +3996,6 @@ control 'cis-18.9.35.6.2' do
   impact 0.7
   tag cis_id: '18.9.35.6.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4049,7 +4038,7 @@ control 'cis-18.9.37.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('fAllowUnsolicited') { should cmp == 0 }
   end
 end
@@ -4080,6 +4069,7 @@ control 'cis-18.9.38.1' do
     skip 'Manual check (18.9.38.1): Ensure \'Enable RPC Endpoint Mapper Client Authentication\' is set to \'Enabled\' (MS only) (Automated)'
   end
   # Remediation guidance: To establish the recommended configuration via GP, set the following UI path to Enabled: Computer Configuration\Policies\Administrative Templates\System\Remote Procedure Call\Enable RPC Endpoint Mapper Client Authentication Note: This Group Policy path may not exist by default. It is provided by the
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-18.9.38.2' do
@@ -4087,7 +4077,6 @@ control 'cis-18.9.38.2' do
   impact 0.0
   tag cis_id: '18.9.38.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'MS'
   tag mechanism: 'manual'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4095,6 +4084,7 @@ control 'cis-18.9.38.2' do
     skip 'Manual check (18.9.38.2): Ensure \'Restrict Unauthenticated RPC clients\' is set to \'Enabled: Authenticated\' (MS only) (Automated)'
   end
   # Remediation guidance: To establish the recommended configuration via GP, set the following UI path to Enabled: Authenticated: Computer Configuration\Policies\Administrative Templates\System\Remote Procedure Call\Restrict Unauthenticated RPC clients Note: This Group Policy path may not exist by default. It is provided by 
+  only_if('applies to Member Servers') { input('server_role') == 'member_server' }
 end
 
 control 'cis-18.9.41.1' do
@@ -4116,7 +4106,6 @@ control 'cis-18.9.49.5.1' do
   impact 0.7
   tag cis_id: '18.9.49.5.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4130,7 +4119,6 @@ control 'cis-18.9.49.11.1' do
   impact 0.7
   tag cis_id: '18.9.49.11.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4144,7 +4132,6 @@ control 'cis-18.9.51.1' do
   impact 0.7
   tag cis_id: '18.9.51.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4185,7 +4172,6 @@ control 'cis-18.10.4.1' do
   impact 0.7
   tag cis_id: '18.10.4.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4264,7 +4250,6 @@ control 'cis-18.10.11.1' do
   impact 0.7
   tag cis_id: '18.10.11.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4291,7 +4276,6 @@ control 'cis-18.10.13.2' do
   impact 0.7
   tag cis_id: '18.10.13.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4357,7 +4341,6 @@ control 'cis-18.10.16.2' do
   impact 0.7
   tag cis_id: '18.10.16.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4384,7 +4367,6 @@ control 'cis-18.10.16.4' do
   impact 0.7
   tag cis_id: '18.10.16.4'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4398,7 +4380,6 @@ control 'cis-18.10.16.5' do
   impact 0.7
   tag cis_id: '18.10.16.5'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4412,7 +4393,6 @@ control 'cis-18.10.16.6' do
   impact 0.7
   tag cis_id: '18.10.16.6'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4426,7 +4406,6 @@ control 'cis-18.10.18.1' do
   impact 0.7
   tag cis_id: '18.10.18.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4505,7 +4484,6 @@ control 'cis-18.10.18.7' do
   impact 0.7
   tag cis_id: '18.10.18.7'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4675,7 +4653,6 @@ control 'cis-18.10.36.1' do
   impact 0.7
   tag cis_id: '18.10.36.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4689,7 +4666,6 @@ control 'cis-18.10.40.1' do
   impact 0.7
   tag cis_id: '18.10.40.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -4733,7 +4709,7 @@ control 'cis-18.10.42.5.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsDefender\\Spynet') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Spynet') do
     its('LocalSettingOverrideSpynetReporting') { should cmp == 0 }
   end
 end
@@ -4760,7 +4736,7 @@ control 'cis-18.10.42.6.1.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsGuard\\ASR') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Windows Defender Exploit Guard\\ASR') do
     its('ExploitGuard_ASR_Rules') { should cmp == 1 }
   end
 end
@@ -4801,7 +4777,7 @@ control 'cis-18.10.42.7.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsDefender\\MpEngine') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\MpEngine') do
     its('EnableFileHashComputation') { should cmp == 1 }
   end
 end
@@ -4811,11 +4787,10 @@ control 'cis-18.10.42.8.1' do
   impact 0.7
   tag cis_id: '18.10.42.8.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsDefender\\NIS') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\NIS') do
     its('EnableConvertWarnToBlock') { should cmp == 1 }
   end
 end
@@ -4828,7 +4803,7 @@ control 'cis-18.10.42.10.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsProtection') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection') do
     its('OobeEnableRtpAndSigUpdate') { should cmp == 1 }
   end
 end
@@ -4841,7 +4816,7 @@ control 'cis-18.10.42.10.2' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsProtection') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection') do
     its('DisableIOAVProtection') { should cmp == 0 }
   end
 end
@@ -4854,7 +4829,7 @@ control 'cis-18.10.42.10.3' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsProtection') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection') do
     its('DisableRealtimeMonitoring') { should cmp == 0 }
   end
 end
@@ -4867,7 +4842,7 @@ control 'cis-18.10.42.10.4' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsProtection') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection') do
     its('DisableBehaviorMonitoring') { should cmp == 0 }
   end
 end
@@ -4880,7 +4855,7 @@ control 'cis-18.10.42.10.5' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsProtection') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection') do
     its('DisableScriptScanning') { should cmp == 0 }
   end
 end
@@ -4960,11 +4935,10 @@ control 'cis-18.10.42.12.1' do
   impact 0.7
   tag cis_id: '18.10.42.12.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsDefender\\Reporting') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Reporting') do
     its('DisableGenericRePorts') { should cmp == 1 }
   end
 end
@@ -4977,7 +4951,7 @@ control 'cis-18.10.42.13.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsDefender\\Scan') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Scan') do
     its('QuickScanIncludeExclusions') { should cmp == 1 }
   end
 end
@@ -4990,7 +4964,7 @@ control 'cis-18.10.42.13.2' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsDefender\\Scan') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Scan') do
     its('DisablePackedExeScanning') { should cmp == 0 }
   end
 end
@@ -5003,7 +4977,7 @@ control 'cis-18.10.42.13.3' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsDefender\\Scan') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Scan') do
     its('DisableRemovableDriveScanning') { should cmp == 0 }
   end
 end
@@ -5016,7 +4990,7 @@ control 'cis-18.10.42.13.4' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsDefender\\Scan') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Scan') do
     its('DaysUntilAggressiveCatchupQuickScan') { should cmp == 7 }
   end
 end
@@ -5057,7 +5031,7 @@ control 'cis-18.10.42.17' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsDefender') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender') do
     its('HideExclusionsFromLocalUsers') { should cmp == 1 }
   end
 end
@@ -5067,7 +5041,6 @@ control 'cis-18.10.56.1' do
   impact 0.7
   tag cis_id: '18.10.56.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5084,7 +5057,7 @@ control 'cis-18.10.57.2.2' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('DisablePasswordSaving') { should cmp == 1 }
   end
 end
@@ -5094,11 +5067,10 @@ control 'cis-18.10.57.3.2.1' do
   impact 0.7
   tag cis_id: '18.10.57.3.2.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('fSingleSessionPerUser') { should cmp == 1 }
   end
 end
@@ -5108,11 +5080,10 @@ control 'cis-18.10.57.3.3.1' do
   impact 0.7
   tag cis_id: '18.10.57.3.3.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('EnableUiaRedirection') { should cmp == 0 }
   end
 end
@@ -5122,7 +5093,6 @@ control 'cis-18.10.57.3.3.2' do
   impact 0.0
   tag cis_id: '18.10.57.3.3.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'manual'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5151,11 +5121,10 @@ control 'cis-18.10.57.3.3.4' do
   impact 0.7
   tag cis_id: '18.10.57.3.3.4'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('fDisableLocationRedir') { should cmp == 1 }
   end
 end
@@ -5165,7 +5134,6 @@ control 'cis-18.10.57.3.3.5' do
   impact 0.0
   tag cis_id: '18.10.57.3.3.5'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'manual'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5180,11 +5148,10 @@ control 'cis-18.10.57.3.3.6' do
   impact 0.7
   tag cis_id: '18.10.57.3.3.6'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('fDisablePNPRedir') { should cmp == 1 }
   end
 end
@@ -5194,11 +5161,10 @@ control 'cis-18.10.57.3.3.7' do
   impact 0.7
   tag cis_id: '18.10.57.3.3.7'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('fDisableWebAuthn') { should cmp == 1 }
   end
 end
@@ -5211,7 +5177,7 @@ control 'cis-18.10.57.3.9.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('fPromptForPassword') { should cmp == 1 }
   end
 end
@@ -5224,7 +5190,7 @@ control 'cis-18.10.57.3.9.2' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('fEncryptRPCTraffic') { should cmp == 1 }
   end
 end
@@ -5251,7 +5217,7 @@ control 'cis-18.10.57.3.9.4' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('UserAuthentication') { should cmp == 1 }
   end
 end
@@ -5264,7 +5230,7 @@ control 'cis-18.10.57.3.9.5' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('MinEncryptionLevel') { should cmp == 3 }
   end
 end
@@ -5274,11 +5240,10 @@ control 'cis-18.10.57.3.10.1' do
   impact 0.7
   tag cis_id: '18.10.57.3.10.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('MaxIdleTime') { should cmp >= 1 }
     its('MaxIdleTime') { should cmp <= 900000 }
   end
@@ -5289,11 +5254,10 @@ control 'cis-18.10.57.3.10.2' do
   impact 0.7
   tag cis_id: '18.10.57.3.10.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('MaxDisconnectionTime') { should cmp == 60000 }
   end
 end
@@ -5306,7 +5270,7 @@ control 'cis-18.10.57.3.11.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('DeleteTempDirsOnExit') { should cmp == 1 }
   end
 end
@@ -5319,7 +5283,7 @@ control 'cis-18.10.57.3.11.2' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\WindowsServices') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services') do
     its('PerSessionTempDir') { should cmp == 1 }
   end
 end
@@ -5332,7 +5296,7 @@ control 'cis-18.10.58.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\InternetExplorer\\Feeds') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Internet Explorer\\Feeds') do
     its('DisableEnclosureDownload') { should cmp == 1 }
   end
 end
@@ -5345,7 +5309,7 @@ control 'cis-18.10.58.2' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\InternetExplorer\\Feeds') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Internet Explorer\\Feeds') do
     # REVIEW: organization-specific value -- benchmark prescribes: 0:
     it { should have_property 'AllowBasicAuthInClear' }
   end
@@ -5356,7 +5320,6 @@ control 'cis-18.10.59.2' do
   impact 0.0
   tag cis_id: '18.10.59.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'manual'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5374,7 +5337,7 @@ control 'cis-18.10.59.3' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsSearch') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Search') do
     its('AllowIndexingEncryptedStoresOrItems') { should cmp == 0 }
   end
 end
@@ -5384,11 +5347,10 @@ control 'cis-18.10.59.4' do
   impact 0.7
   tag cis_id: '18.10.59.4'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsSearch') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Search') do
     its('EnableDynamicContentInWSB') { should cmp == 0 }
   end
 end
@@ -5398,7 +5360,6 @@ control 'cis-18.10.63.1' do
   impact 0.0
   tag cis_id: '18.10.63.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'manual'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5427,7 +5388,6 @@ control 'cis-18.10.81.1' do
   impact 0.7
   tag cis_id: '18.10.81.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5480,7 +5440,6 @@ control 'cis-18.10.82.3' do
   impact 0.7
   tag cis_id: '18.10.82.3'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5520,7 +5479,6 @@ control 'cis-18.10.88.1' do
   impact 0.7
   tag cis_id: '18.10.88.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5534,7 +5492,6 @@ control 'cis-18.10.88.2' do
   impact 0.7
   tag cis_id: '18.10.88.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5600,7 +5557,6 @@ control 'cis-18.10.90.2.2' do
   impact 0.7
   tag cis_id: '18.10.90.2.2'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5640,7 +5596,6 @@ control 'cis-18.10.91.1' do
   impact 0.7
   tag cis_id: '18.10.91.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5737,7 +5692,7 @@ control 'cis-18.11.1' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\InternetSettings\\WinHttp') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\WinHttp') do
     its('DisableWpad') { should cmp == 1 }
   end
 end
@@ -5750,7 +5705,7 @@ control 'cis-18.11.2' do
   tag scope: 'ALL'
   tag mechanism: 'registry'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
-  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\InternetSettings') do
+  describe registry_key('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings') do
     its('DisableProxyAuthenticationSchemes') { should be_in [256, 287] }
   end
 end
@@ -5786,7 +5741,6 @@ control 'cis-19.6.6.1.1' do
   impact 0.7
   tag cis_id: '19.6.6.1.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry_user'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5897,7 +5851,6 @@ control 'cis-19.7.8.3' do
   impact 0.7
   tag cis_id: '19.7.8.3'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry_user'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5920,7 +5873,6 @@ control 'cis-19.7.8.4' do
   impact 0.7
   tag cis_id: '19.7.8.4'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry_user'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
@@ -5987,7 +5939,6 @@ control 'cis-19.7.46.2.1' do
   impact 0.7
   tag cis_id: '19.7.46.2.1'
   tag level: ['L2']
-  only_if("L2 control: only evaluated when profile_level >= 2") { input('profile_level').to_i >= 2 }
   tag scope: 'ALL'
   tag mechanism: 'registry_user'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
