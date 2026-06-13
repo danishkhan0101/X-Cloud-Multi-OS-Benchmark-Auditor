@@ -43,6 +43,19 @@ WIN_REBOOT_AFTER_REMEDIATION="${WIN_REBOOT_AFTER_REMEDIATION:-true}"
 # after `az vm restart`, before WinRM polling begins.
 WIN_REBOOT_SETTLE_SEC="${WIN_REBOOT_SETTLE_SEC:-45}"
 
+# >>> ANTI-HANG GUARDS: every Azure-agent call and WinRM wait in the Windows
+#     path is bounded so a wedged guest agent / locked-out WinRM can NEVER hang
+#     the runner. These are the knobs.
+#   WIN_AGENT_PROBE_SEC      : hard timeout wrapped around each `az vm run-command`
+#                              (a dead guest agent makes run-command hang otherwise)
+#   WIN_REBOOT_HEALTH_WAIT_SEC: max time to wait for the guest agent to answer
+#                              after a reboot before declaring the box hung
+#   WIN_SCAN_TIMEOUT_SEC     : hard timeout wrapped around each cinc-auditor exec
+#                              (a half-dead WSMan provider can hang the scan)
+WIN_AGENT_PROBE_SEC="${WIN_AGENT_PROBE_SEC:-180}"
+WIN_REBOOT_HEALTH_WAIT_SEC="${WIN_REBOOT_HEALTH_WAIT_SEC:-360}"
+WIN_SCAN_TIMEOUT_SEC="${WIN_SCAN_TIMEOUT_SEC:-1200}"
+
 UBUNTU_CUSTOM_DIR="ubuntu-custom"
 UBUNTU_CUSTOM_XCCDF="${UBUNTU_CUSTOM_DIR}/${ORG_PREFIX}_xccdf.xml"
 UBUNTU_CUSTOM_OVAL="${UBUNTU_CUSTOM_DIR}/${ORG_PREFIX}_ubuntu_rules.xml"
@@ -510,6 +523,34 @@ detect_windows_version() {
 # ======================================================
 WINRM_REOPEN_BASIC="${WINRM_REOPEN_BASIC:-true}"
 
+# ======================================================
+# HELPER: check_windows_agent_alive
+# >>> ANTI-HANG: bounded probe of the Azure guest agent (NOT WinRM).
+#     Returns 0 if the guest answered within WIN_AGENT_PROBE_SEC (OS booted),
+#     1 if the agent did not answer in time (OS hung at boot / agent dead).
+#     This is the health oracle the reboot + verify logic relies on so the
+#     runner never blocks forever on a wedged box.
+# ======================================================
+check_windows_agent_alive() {
+    local ip="$1"
+    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
+    [ -z "$vm_name" ] && return 1
+
+    local out
+    out=$(timeout "${WIN_AGENT_PROBE_SEC}" az vm run-command invoke \
+        -g "$RG_NAME" -n "$vm_name" \
+        --command-id RunPowerShellScript \
+        --scripts 'Write-Output "AGENT_ALIVE"' \
+        --query 'value[0].message' -o tsv 2>/dev/null)
+    local rc=$?
+
+    if [ $rc -eq 124 ]; then
+        # timeout killed it -> guest agent never answered
+        return 1
+    fi
+    [[ "$out" == *"AGENT_ALIVE"* ]] && return 0 || return 1
+}
+
 ensure_winrm_powershell() {
     local ip="$1"
     local vm_name="${IP_TO_VM_NAME[$ip]:-}"
@@ -532,7 +573,8 @@ winrm set winrm/config/service      '@{AllowUnencrypted=\"true\"}' 2>&1 | Out-Nu
     fi
 
     echo -e "${CYAN}🩺 [WinRM-Heal/${ip}] Re-registering PowerShell provider + restoring shell limits...${NC}"
-    az vm run-command invoke -g "$RG_NAME" -n "$vm_name" \
+    # >>> ANTI-HANG: timeout-wrapped so a wedged guest agent can't hang the runner
+    timeout "${WIN_AGENT_PROBE_SEC}" az vm run-command invoke -g "$RG_NAME" -n "$vm_name" \
         --command-id RunPowerShellScript \
         --scripts "
 \$ErrorActionPreference = 'Continue'
@@ -554,6 +596,9 @@ Write-Output 'WinRM PowerShell provider re-initialized'
     local rc=$?
     if [ $rc -eq 0 ]; then
         echo -e "${GREEN}✅ [WinRM-Heal/${ip}] provider re-registered${NC}"
+    elif [ $rc -eq 124 ]; then
+        echo -e "${RED}❌ [WinRM-Heal/${ip}] agent did not respond within ${WIN_AGENT_PROBE_SEC}s — box may be hung at boot${NC}"
+        return 1
     else
         echo -e "${YELLOW}⚠️  [WinRM-Heal/${ip}] az run-command rc=${rc} (continuing)${NC}"
     fi
@@ -562,43 +607,83 @@ Write-Output 'WinRM PowerShell provider re-initialized'
 }
 
 # ======================================================
-# HELPER: reboot_windows_host (apply boot-time CIS settings)
-# >>> PATCH 4: VBS / Credential Guard / user-rights / per-user keys only take
-#     effect after a reboot. Restart + wait for WinRM + repair the provider.
+# HELPER: reboot_windows_host (health-gated, never hangs)
+# >>> ANTI-HANG REWRITE. The old version blindly rebooted and then waited on
+#     WinRM, which wedged the runner whenever the hardening broke boot or locked
+#     WinRM out. New flow:
+#       1. Re-open WinRM over the AGENT *before* reboot, so the box comes up
+#          reachable (CIS 18.10.90.x lockout is undone going into the restart).
+#       2. Restart with --no-wait, bounded by `timeout`.
+#       3. Poll PowerState (bounded).
+#       4. Probe the GUEST AGENT (bounded). If it never answers, the OS is hung
+#          at boot -> print a loud diagnostic and RETURN non-zero. We do NOT sit
+#          on WinRM forever, and we do NOT abort the whole pipeline.
+#       5. If the agent is alive, re-open WinRM again (reboot can re-apply GPO),
+#          then do a bounded WinRM wait.
+#     Return: 0 = reachable, 2 = box hung at boot (caller decides what to do).
 # ======================================================
 reboot_windows_host() {
     local ip="$1"
     local vm_name="${IP_TO_VM_NAME[$ip]:-}"
     [ -z "$vm_name" ] && { echo -e "${YELLOW}⚠️  [Reboot] No VM name for ${ip}${NC}"; return 0; }
 
-    echo -e "${CYAN}🔁 [Reboot/${ip}] Restarting ${vm_name} (--no-wait) to apply boot-time CIS settings...${NC}"
+    # 1. Make the box WinRM-reachable BEFORE we reboot it
+    echo -e "${CYAN}🔧 [Reboot/${ip}] Re-opening WinRM via agent before reboot...${NC}"
+    ensure_winrm_powershell "$ip"
 
-    # --no-wait: returns immediately instead of blocking for 3-8 min
-    az vm restart -g "$RG_NAME" -n "$vm_name" --no-wait -o none 2>/dev/null || true
+    echo -e "${CYAN}🔁 [Reboot/${ip}] Restarting ${vm_name} (--no-wait)...${NC}"
+    # 2. --no-wait + timeout: the restart call itself can hang on a sick fabric
+    timeout 120 az vm restart -g "$RG_NAME" -n "$vm_name" --no-wait -o none 2>/dev/null || true
 
-    # Give the guest OS time to begin shutting down before we poll
+    # give the guest time to begin shutting down before polling
     sleep 20
 
-    # Poll Azure PowerState until the VM is 'running' again (max 8 min)
+    # 3. Poll PowerState until 'running' (bounded)
     local deadline=$(( SECONDS + 480 ))
     echo -e "${CYAN}⏳ [Reboot/${ip}] Waiting for VM to return to running state...${NC}"
     while [ $SECONDS -lt $deadline ]; do
         local ps
-        ps=$(az vm get-instance-view -g "$RG_NAME" -n "$vm_name" \
+        ps=$(timeout 30 az vm get-instance-view -g "$RG_NAME" -n "$vm_name" \
             --query "instanceView.statuses[?starts_with(code,'PowerState')].displayStatus" \
             -o tsv 2>/dev/null | tr -d '\r')
         if [[ "$ps" == *"running"* ]]; then
-            echo -e "${GREEN}✅ [Reboot/${ip}] VM back to running state${NC}"
+            echo -e "${GREEN}✅ [Reboot/${ip}] VM back to 'running' (fabric level)${NC}"
             break
         fi
-        echo -e "${CYAN}   [Reboot/${ip}] State: ${ps:-unknown} — waiting...${NC}"
+        echo -e "${CYAN}   [Reboot/${ip}] PowerState: ${ps:-unknown} — waiting...${NC}"
         sleep 15
     done
 
-    # Extra settle time before WinRM starts accepting PowerShell connections
     sleep "${WIN_REBOOT_SETTLE_SEC}"
-    wait_for_winrm "$ip" || echo -e "${YELLOW}⚠️  [Reboot/${ip}] WinRM not back within timeout${NC}"
+
+    # 4. Is the GUEST actually alive? (PowerState 'running' only means powered on,
+    #    NOT that Windows finished booting.) Probe the agent, bounded.
+    echo -e "${CYAN}🩺 [Reboot/${ip}] Probing guest agent (max ${WIN_REBOOT_HEALTH_WAIT_SEC}s)...${NC}"
+    local hb_deadline=$(( SECONDS + WIN_REBOOT_HEALTH_WAIT_SEC ))
+    local agent_ok=false
+    while [ $SECONDS -lt $hb_deadline ]; do
+        if check_windows_agent_alive "$ip"; then
+            agent_ok=true
+            break
+        fi
+        echo -e "${CYAN}   [Reboot/${ip}] Guest agent not answering yet — waiting...${NC}"
+        sleep 20
+    done
+
+    if [ "$agent_ok" != "true" ]; then
+        echo -e "${RED}❌ [Reboot/${ip}] Guest agent did NOT respond after reboot.${NC}"
+        echo -e "${RED}   The OS is hung at boot — a CIS control likely broke startup${NC}"
+        echo -e "${RED}   (usual suspects: a bad user-rights assignment, or LSA/RunAsPPL).${NC}"
+        echo -e "${YELLOW}   ▶ Check Azure Portal → ${vm_name} → Boot diagnostics → Screenshot.${NC}"
+        echo -e "${YELLOW}   ▶ This host is being skipped so the pipeline does not hang.${NC}"
+        return 2
+    fi
+
+    echo -e "${GREEN}✅ [Reboot/${ip}] Guest agent alive — OS booted${NC}"
+    # 5. Reboot may have re-applied GPO that re-locked WinRM; re-open again.
     ensure_winrm_powershell "$ip"
+    wait_for_winrm "$ip" || echo -e "${YELLOW}⚠️  [Reboot/${ip}] WinRM port not open yet (will retry at scan time)${NC}"
+    return 0
 }
 
 # ======================================================
@@ -921,6 +1006,12 @@ fi
 echo -e "\n${CYAN}⚙️  PHASE 0.3: PARALLEL INFRASTRUCTURE BOOTSTRAPPING${NC}"
 RUNNER_IP=$(curl -s https://api.ipify.org)
 
+# >>> FIX 1: Track Windows bootstrap PIDs so we can explicitly wait for them
+#     to complete before proceeding to Phase 2. Without this, the main script
+#     hits Phase 2 before the Windows az vm run-command has finished, causing
+#     wait_for_winrm to timeout on a WinRM that's still being initialized.
+declare -a WIN_BOOTSTRAP_PIDS=()
+
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
     for ip in "${UBUNTU_MACHINES[@]}"; do
         (
@@ -1049,9 +1140,23 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
                 -o none >/dev/null 2>&1 || true
             sleep 20
         ) &
+        # >>> FIX 1: capture the PID of this bootstrap subshell for explicit wait later
+        WIN_BOOTSTRAP_PIDS+=($!)
     done
 fi
 wait
+
+# >>> FIX 1: Explicitly wait for Windows bootstrap PIDs to complete.
+#     The main wait above catches Linux jobs, but we need to ensure the
+#     Windows az vm run-command has returned before proceeding to Phase 2.
+if [ ${#WIN_BOOTSTRAP_PIDS[@]} -gt 0 ]; then
+    echo -e "${CYAN}⏳ [Phase 0.3] Waiting for Windows WinRM bootstrap to complete...${NC}"
+    for pid in "${WIN_BOOTSTRAP_PIDS[@]}"; do
+        wait "$pid" 2>/dev/null || true
+    done
+    echo -e "${GREEN}✅ [Phase 0.3] Windows bootstrap done — proceeding to remediation${NC}"
+    sleep 10  # extra settle after az run-command returns
+fi
 
 # ======================================================
 # INVENTORY BUILDER
@@ -1399,7 +1504,8 @@ run_phase_1() {
                         echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP${NC}"
                         echo -e "${CYAN}   profile: ${WIN_CIS_BENCHMARK} | role: ${WIN_SERVER_ROLE} | level: ${WIN_INSPEC_LVL}${NC}"
 
-                        cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
+                        # >>> ANTI-HANG: timeout-wrap (rc=124 on a wedged provider)
+                        timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
                             -t "winrm://${IP}" \
                             --user="${AUDIT_USER}" \
                             --password="${AUDIT_PASS}" \
@@ -1411,6 +1517,8 @@ run_phase_1() {
                         case $rc in
                             0|100|101)
                                 echo -e "${GREEN}✅ [Phase1/Win/CIS L${WIN_INSPEC_LVL}] $IP scan complete (rc=$rc)${NC}" ;;
+                            124)
+                                echo -e "${RED}❌ [Phase1/Win/CIS L${WIN_INSPEC_LVL}] scan TIMED OUT on $IP after ${WIN_SCAN_TIMEOUT_SEC}s — WSMan provider likely wedged${NC}" ;;
                             *)
                                 echo -e "${RED}❌ [Phase1/Win/CIS L${WIN_INSPEC_LVL}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
                         esac
@@ -1418,7 +1526,7 @@ run_phase_1() {
 
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/${ORG_PREFIX^^}] Scanning $IP...${NC}"
-                        cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
+                        timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
                             -t "winrm://${IP}" \
                             --user="${AUDIT_USER}" \
                             --password="${AUDIT_PASS}" \
@@ -1427,6 +1535,8 @@ run_phase_1() {
                         case $rc in
                             0|100|101)
                                 echo -e "${GREEN}✅ [Phase1/Win/${ORG_PREFIX^^}] $IP scan complete (rc=$rc)${NC}" ;;
+                            124)
+                                echo -e "${RED}❌ [Phase1/Win/${ORG_PREFIX^^}] scan TIMED OUT on $IP after ${WIN_SCAN_TIMEOUT_SEC}s${NC}" ;;
                             *)
                                 echo -e "${RED}❌ [Phase1/Win/${ORG_PREFIX^^}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
                         esac
@@ -1584,12 +1694,25 @@ run_remediation() {
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
             if [ "$RUN_CIS" == true ]; then
+                # >>> FIX 2: extend WINRM_TIMEOUT_SEC for first connection after bootstrap.
+                # The az vm run-command in Phase 0.3 can take 60-90s to complete, plus
+                # WinRM service restart needs another 15-20s. Default 180s is too tight.
                 for IP in "${WINDOWS_MACHINES[@]}"; do
                     (
+                        local _saved_timeout=$WINRM_TIMEOUT_SEC
+                        WINRM_TIMEOUT_SEC=300
                         wait_for_winrm "$IP" || {
-                            echo -e "${RED}❌ [Remediation/Win] WinRM unreachable: $IP — skipping${NC}"
-                            exit 1
+                            echo -e "${RED}❌ [Remediation/Win] WinRM unreachable after 300s: $IP${NC}"
+                            echo -e "${YELLOW}   Attempting emergency WinRM repair via az run-command...${NC}"
+                            ensure_winrm_powershell "$IP"
+                            WINRM_TIMEOUT_SEC=120
+                            wait_for_winrm "$IP" || {
+                                echo -e "${RED}❌ [Remediation/Win] WinRM still down after repair — skipping${NC}"
+                                WINRM_TIMEOUT_SEC=$_saved_timeout
+                                exit 1
+                            }
                         }
+                        WINRM_TIMEOUT_SEC=$_saved_timeout
                         remediate_windows_host "$IP" "$CIS_LEVEL"
                     ) &
                 done
@@ -1604,16 +1727,41 @@ run_remediation() {
                     --limit windows_nodes
             fi
 
-            # >>> PATCH 8: reboot Windows hosts after CIS remediation so boot-time
-            #     settings (VBS, Credential Guard, user-rights, per-user keys)
-            #     take effect before Phase 4 verification. Skipped for ORG-only
-            #     runs and when WIN_REBOOT_AFTER_REMEDIATION=false.
+            # >>> PATCH 8 (hardened): reboot Windows hosts after CIS remediation
+            #     so boot-time settings (VBS, Credential Guard, user-rights,
+            #     per-user keys) take effect before Phase 4 verification.
+            #     ANTI-HANG: we now (a) confirm the guest agent is alive BEFORE
+            #     rebooting — never reboot an already-sick box, and (b) treat a
+            #     host that doesn't come back as a logged failure, not a hang.
             if [ "$RUN_CIS" == true ] && [ "${WIN_REBOOT_AFTER_REMEDIATION}" == "true" ]; then
-                echo -e "${CYAN}🔁 [Remediation/Win] Rebooting hardened Windows hosts...${NC}"
+                echo -e "${CYAN}🔁 [Remediation/Win] Rebooting hardened Windows hosts (health-gated)...${NC}"
+                : > /tmp/.win_hung_hosts   # reset hung-host marker file
                 for IP in "${WINDOWS_MACHINES[@]}"; do
-                    reboot_windows_host "$IP" &
+                    (
+                        # (a) Don't reboot a box that's already unresponsive —
+                        #     rebooting a half-broken OS is how you fully brick it.
+                        if ! check_windows_agent_alive "$IP"; then
+                            echo -e "${RED}❌ [Remediation/Win/${IP}] Guest agent unresponsive BEFORE reboot.${NC}"
+                            echo -e "${RED}   Remediation likely broke the OS. NOT rebooting (would worsen it).${NC}"
+                            echo -e "${YELLOW}   ▶ Check Portal → Boot diagnostics → Screenshot for ${IP}.${NC}"
+                            echo "$IP" >> /tmp/.win_hung_hosts
+                            exit 0
+                        fi
+                        # (b) Health-gated reboot. rc=2 => box hung at boot.
+                        reboot_windows_host "$IP"
+                        if [ $? -eq 2 ]; then
+                            echo "$IP" >> /tmp/.win_hung_hosts
+                        fi
+                    ) &
                 done
                 wait
+
+                if [ -s /tmp/.win_hung_hosts ]; then
+                    echo -e "${RED}⚠️  [Remediation/Win] The following hosts did not survive remediation+reboot:${NC}"
+                    while read -r h; do echo -e "${RED}     • ${h}${NC}"; done < /tmp/.win_hung_hosts
+                    echo -e "${YELLOW}   They will be skipped in Phase 4. Identify the breaking control via${NC}"
+                    echo -e "${YELLOW}   the boot-diagnostics screenshot, then guard it (see WIN_SKIP_RISKY_CONTROLS).${NC}"
+                fi
             fi
         fi
     fi
@@ -1794,9 +1942,29 @@ run_phase_4() {
 
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
+                    # >>> ANTI-HANG: skip hosts that remediation+reboot already
+                    #     declared hung — don't even try to scan a bricked box.
+                    if [ -f /tmp/.win_hung_hosts ] && grep -qx "$IP" /tmp/.win_hung_hosts 2>/dev/null; then
+                        echo -e "${RED}⏭️  [Phase4/Win] ${IP} flagged hung after remediation — skipping verify scan${NC}"
+                        echo -e "${YELLOW}   ▶ Boot-diagnostics screenshot will show the failure cause.${NC}"
+                        exit 0
+                    fi
+
                     wait_for_winrm "$IP" || {
-                        echo -e "${RED}❌ [Phase4/Win] WinRM unreachable: $IP — skipping${NC}"
-                        exit 1
+                        # WinRM port down — is the OS up at all? classify, then skip.
+                        echo -e "${YELLOW}⚠️  [Phase4/Win] WinRM port closed on ${IP} — probing guest agent...${NC}"
+                        if check_windows_agent_alive "$IP"; then
+                            echo -e "${YELLOW}   OS is up but WinRM is down. Attempting repair...${NC}"
+                            ensure_winrm_powershell "$IP"
+                            wait_for_winrm "$IP" || {
+                                echo -e "${RED}❌ [Phase4/Win] WinRM still down after repair on ${IP} — skipping${NC}"
+                                exit 1
+                            }
+                        else
+                            echo -e "${RED}❌ [Phase4/Win] Guest agent dead — ${IP} is hung at boot. Skipping.${NC}"
+                            echo -e "${YELLOW}   ▶ Portal → ${IP} → Boot diagnostics → Screenshot.${NC}"
+                            exit 1
+                        fi
                     }
                     # >>> PATCH 9: remediation/hardening can disable the WSMan
                     #     PowerShell provider or lock out HTTP/Basic. Repair it
@@ -1808,7 +1976,9 @@ run_phase_4() {
                         echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
                         echo -e "${CYAN}   profile: ${WIN_CIS_BENCHMARK} | role: ${WIN_SERVER_ROLE} | level: ${WIN_INSPEC_LVL}${NC}"
 
-                        cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
+                        # >>> ANTI-HANG: timeout-wrap so a wedged WSMan provider
+                        #     can't hang the scan forever (rc=124 on timeout).
+                        timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
                             -t "winrm://${IP}" \
                             --user="${AUDIT_USER}" \
                             --password="${AUDIT_PASS}" \
@@ -1820,6 +1990,8 @@ run_phase_4() {
                         case $rc in
                             0|100|101)
                                 echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] $IP verify complete (rc=$rc)${NC}" ;;
+                            124)
+                                echo -e "${RED}❌ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] scan TIMED OUT on $IP after ${WIN_SCAN_TIMEOUT_SEC}s — WSMan provider likely wedged${NC}" ;;
                             *)
                                 echo -e "${RED}❌ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
                         esac
@@ -1827,7 +1999,7 @@ run_phase_4() {
 
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] Verifying $IP...${NC}"
-                        cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
+                        timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
                             -t "winrm://${IP}" \
                             --user="${AUDIT_USER}" \
                             --password="${AUDIT_PASS}" \
@@ -1836,6 +2008,8 @@ run_phase_4() {
                         case $rc in
                             0|100|101)
                                 echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] $IP verify complete (rc=$rc)${NC}" ;;
+                            124)
+                                echo -e "${RED}❌ [Phase4/Win/${ORG_PREFIX^^}] scan TIMED OUT on $IP after ${WIN_SCAN_TIMEOUT_SEC}s${NC}" ;;
                             *)
                                 echo -e "${RED}❌ [Phase4/Win/${ORG_PREFIX^^}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
                         esac
