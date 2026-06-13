@@ -571,8 +571,31 @@ reboot_windows_host() {
     local vm_name="${IP_TO_VM_NAME[$ip]:-}"
     [ -z "$vm_name" ] && { echo -e "${YELLOW}⚠️  [Reboot] No VM name for ${ip}${NC}"; return 0; }
 
-    echo -e "${CYAN}🔁 [Reboot/${ip}] Restarting ${vm_name} to apply boot-time CIS settings...${NC}"
-    az vm restart -g "$RG_NAME" -n "$vm_name" -o none >/dev/null 2>&1 || true
+    echo -e "${CYAN}🔁 [Reboot/${ip}] Restarting ${vm_name} (--no-wait) to apply boot-time CIS settings...${NC}"
+
+    # --no-wait: returns immediately instead of blocking for 3-8 min
+    az vm restart -g "$RG_NAME" -n "$vm_name" --no-wait -o none 2>/dev/null || true
+
+    # Give the guest OS time to begin shutting down before we poll
+    sleep 20
+
+    # Poll Azure PowerState until the VM is 'running' again (max 8 min)
+    local deadline=$(( SECONDS + 480 ))
+    echo -e "${CYAN}⏳ [Reboot/${ip}] Waiting for VM to return to running state...${NC}"
+    while [ $SECONDS -lt $deadline ]; do
+        local ps
+        ps=$(az vm get-instance-view -g "$RG_NAME" -n "$vm_name" \
+            --query "instanceView.statuses[?starts_with(code,'PowerState')].displayStatus" \
+            -o tsv 2>/dev/null | tr -d '\r')
+        if [[ "$ps" == *"running"* ]]; then
+            echo -e "${GREEN}✅ [Reboot/${ip}] VM back to running state${NC}"
+            break
+        fi
+        echo -e "${CYAN}   [Reboot/${ip}] State: ${ps:-unknown} — waiting...${NC}"
+        sleep 15
+    done
+
+    # Extra settle time before WinRM starts accepting PowerShell connections
     sleep "${WIN_REBOOT_SETTLE_SEC}"
     wait_for_winrm "$ip" || echo -e "${YELLOW}⚠️  [Reboot/${ip}] WinRM not back within timeout${NC}"
     ensure_winrm_powershell "$ip"
