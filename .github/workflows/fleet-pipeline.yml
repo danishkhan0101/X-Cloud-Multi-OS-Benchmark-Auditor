@@ -151,9 +151,6 @@ jobs:
              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"}
 
       # ── Huawei Cloud auth ───────────────────────────────────────────────
-      # FIX 1: Use global CDN URL (not region-specific ap-southeast-1)
-      # FIX 2: Fixed default region from broken 'ap-southeast-' to 'my-kualalumpur-1'
-      # FIX 3: Added --cli-project-id to configure command
       - name: '🔐 [HuaweiCloud] Install & Configure hcloud CLI'
         if: steps.set-cloud.outputs.cloud == 'huaweicloud'
         env:
@@ -162,16 +159,34 @@ jobs:
           HW_REGION:              ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
           HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
         run: |
-          # KooCLI binary — https://support.huaweicloud.com/intl/en-us/qs-hcli/hcli_02_002.html
+          # Download KooCLI via tar.gz (confirmed working for my-kualalumpur-1 region)
           curl -sSL \
-            "https://hwcloudcdn.obs.myhuaweicloud.com/KooCLI/release/latest/hcloud_linux_amd64" \
-            -o /usr/local/bin/hcloud && chmod +x /usr/local/bin/hcloud \
-            || { echo "⚠️  Binary download failed"; exit 1; }
+            "https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/huaweicloud-cli-linux-amd64.tar.gz" \
+            -o /tmp/hcloud.tar.gz \
+            || { echo "❌ hcloud download failed"; exit 1; }
+
+          # Verify it's actually a tar.gz, not an XML error page
+          if file /tmp/hcloud.tar.gz | grep -q "XML\|ASCII\|HTML"; then
+            echo "❌ Downloaded file is not a tar.gz — wrong URL returned XML/HTML"
+            cat /tmp/hcloud.tar.gz
+            exit 1
+          fi
+
+          tar -zxf /tmp/hcloud.tar.gz -C /tmp/
+          mv /tmp/hcloud /usr/local/bin/hcloud
+          chmod +x /usr/local/bin/hcloud
+          echo "✅ hcloud installed: $(hcloud --version 2>&1 | head -1)"
+
+          # Configure — accept EULA + set credentials + project ID
           hcloud configure set \
             --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
             --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
             --cli-region="$HW_REGION" \
-            --cli-project-id="$HW_PROJECT_ID" 2>/dev/null || true
+            --cli-project-id="$HW_PROJECT_ID" \
+            --cli-agree-privacy-statement=true \
+            --cli-lang=en 2>&1 | grep -v "^$" || true
+
+          # Auth verification
           hcloud ECS ListServersDetails --cli-region="$HW_REGION" --cli-output json >/dev/null 2>&1 \
             && echo "✅ hcloud auth OK (region: $HW_REGION)" \
             || { echo "❌ hcloud auth failed — check HW_ACCESS_KEY / HW_SECRET_KEY"; exit 1; }
@@ -184,7 +199,6 @@ jobs:
           TARGET_ENV:     ${{ github.event.inputs.environment_tag || 'all' }}
           STRATEGY:       ${{ github.event.inputs.execution_strategy || 'os-grouped' }}
           RG_NAME:        ${{ vars.AZURE_RG_NAME }}
-          # FIX 4: corrected default region fallback
           HW_REGION:      ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
           HW_ECS_TAG_KEY: ${{ vars.HW_ECS_TAG_KEY || 'Environment' }}
           HW_ECS_TAG_VAL: ${{ github.event.inputs.environment_tag || '' }}
@@ -233,7 +247,7 @@ jobs:
             done <<< "$VM_DATA"
           fi
 
-          # ── Huawei Cloud — jq parses the ECS JSON (no inline Python) ──
+          # ── Huawei Cloud ──────────────────────────────────────────────
           if [ "$CLOUD" == "huaweicloud" ]; then
             echo "📡 [HuaweiCloud] Querying ECS in [$HW_REGION]..."
             HW_RAW=$(hcloud ECS ListServersDetails \
@@ -306,7 +320,6 @@ jobs:
       AZURE_KV_NAME:   ${{ vars.AZURE_KV_NAME }}
       AZURE_KV_SECRET: ${{ vars.AZURE_KV_SECRET }}
       # ── Huawei Cloud ───────────────────────────────────────────────────
-      # FIX 5: corrected all default region fallbacks to my-kualalumpur-1
       HW_REGION:              ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
       HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
       HW_CSMS_SECRET:         ${{ vars.HW_CSMS_SECRET || 'AuditPassword' }}
@@ -324,7 +337,6 @@ jobs:
       ORG_PREFIX:           ${{ vars.ORG_PREFIX }}
       GHOST_USER:           ${{ vars.GHOST_USER }}
       CUSTOM_XCCDF_PROFILE: ${{ vars.CUSTOM_XCCDF_PROFILE }}
-      # Set AUDIT_PASS as a repo secret to bypass KeyVault / CSMS entirely
       AUDIT_PASS:           ${{ secrets.AUDIT_PASS }}
       TICKET_ID:            ${{ github.event.inputs.ticket_id }}
       DEBUG_MODE:           ${{ github.event.inputs.debug_mode }}
@@ -346,10 +358,6 @@ jobs:
              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"}
 
       # ── Huawei Cloud auth ───────────────────────────────────────────────
-      # FIX 6: Added env block (was missing — caused secrets to be undefined)
-      # FIX 7: Use global CDN URL instead of ap-southeast-1 CDN
-      # FIX 8: Added --cli-project-id to configure command
-      # FIX 9: Added auth verification check (same as prepare-queue job)
       - name: '🔐 [HuaweiCloud] Install & Configure hcloud CLI'
         if: needs.prepare-queue.outputs.cloud == 'huaweicloud'
         env:
@@ -358,17 +366,35 @@ jobs:
           HW_REGION:              ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
           HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
         run: |
+          # Download KooCLI via tar.gz (confirmed working for my-kualalumpur-1 region)
           curl -sSL \
-            "https://hwcloudcdn.obs.myhuaweicloud.com/KooCLI/release/latest/hcloud_linux_amd64" \
-            -o /usr/local/bin/hcloud && chmod +x /usr/local/bin/hcloud \
+            "https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/huaweicloud-cli-linux-amd64.tar.gz" \
+            -o /tmp/hcloud.tar.gz \
             || { echo "❌ hcloud download failed"; exit 1; }
+
+          # Verify it's actually a tar.gz, not an XML error page
+          if file /tmp/hcloud.tar.gz | grep -q "XML\|ASCII\|HTML"; then
+            echo "❌ Downloaded file is not a tar.gz — wrong URL returned XML/HTML"
+            cat /tmp/hcloud.tar.gz
+            exit 1
+          fi
+
+          tar -zxf /tmp/hcloud.tar.gz -C /tmp/
+          mv /tmp/hcloud /usr/local/bin/hcloud
+          chmod +x /usr/local/bin/hcloud
+          echo "✅ hcloud installed: $(hcloud --version 2>&1 | head -1)"
+
+          # Configure — accept EULA + set credentials + project ID
           hcloud configure set \
             --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
             --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
             --cli-region="$HW_REGION" \
-            --cli-project-id="$HW_PROJECT_ID" 2>/dev/null || true
-          hcloud ECS ListServersDetails \
-            --cli-region="$HW_REGION" --cli-output json >/dev/null 2>&1 \
+            --cli-project-id="$HW_PROJECT_ID" \
+            --cli-agree-privacy-statement=true \
+            --cli-lang=en 2>&1 | grep -v "^$" || true
+
+          # Auth verification
+          hcloud ECS ListServersDetails --cli-region="$HW_REGION" --cli-output json >/dev/null 2>&1 \
             && echo "✅ hcloud auth OK (region: $HW_REGION)" \
             || { echo "❌ hcloud auth failed — check HW_ACCESS_KEY / HW_SECRET_KEY"; exit 1; }
 
