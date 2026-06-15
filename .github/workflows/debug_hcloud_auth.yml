@@ -31,24 +31,24 @@ jobs:
           echo "========================================"
           echo "2. DOWNLOADING KooCLI"
           echo "========================================"
-          # Try official international URL
+          # Official Huawei KooCLI install — tar.gz method
           curl -sSL \
-            "https://cli-intl.obs.ap-southeast-1.myhuaweicloud.com/hcloud_linux_amd64" \
-            -o /usr/local/bin/hcloud && chmod +x /usr/local/bin/hcloud \
-            && echo "✅ hcloud downloaded OK" \
-            || { echo "❌ hcloud download FAILED — trying fallback...";
-                 curl -sSL \
-                   "https://cli.obs.myhuaweicloud.com/hcloud/latest/hcloud_linux_amd64" \
-                   -o /usr/local/bin/hcloud && chmod +x /usr/local/bin/hcloud \
-                   && echo "✅ hcloud downloaded OK (fallback)" \
-                   || { echo "❌ Both download URLs failed"; exit 1; }; }
+            "https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/huaweicloud-cli-linux-amd64.tar.gz" \
+            -o /tmp/hcloud.tar.gz \
+            && echo "✅ hcloud tar.gz downloaded OK" \
+            || { echo "❌ Download FAILED"; exit 1; }
 
-          # Verify it's actually a binary not an XML error
-          if file /usr/local/bin/hcloud | grep -q "XML\|ASCII\|HTML"; then
-            echo "❌ Downloaded file is not a binary — wrong URL returned XML/HTML"
-            cat /usr/local/bin/hcloud
+          # Verify it's actually a tar.gz not XML
+          if file /tmp/hcloud.tar.gz | grep -q "XML\|ASCII\|HTML"; then
+            echo "❌ Downloaded file is not a tar.gz"
+            cat /tmp/hcloud.tar.gz
             exit 1
           fi
+
+          tar -zxvf /tmp/hcloud.tar.gz -C /tmp/
+          mv /tmp/hcloud /usr/local/bin/hcloud
+          chmod +x /usr/local/bin/hcloud
+          echo "✅ hcloud installed"
           hcloud --version 2>&1 || true
 
           echo ""
