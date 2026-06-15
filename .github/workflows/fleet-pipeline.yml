@@ -9,7 +9,7 @@ name: 🛡️ Fleet Commander Pipeline
 # │    AUDIT_PASS        Windows audit-user password (direct fallback)     │
 # │                                                                        │
 # │  NEW VARIABLES (Huawei Cloud):                                         │
-# │    HW_REGION         e.g. ap-southeast-1 (HK)  cn-north-4 (Beijing)   │
+# │    HW_REGION         e.g. my-kualalumpur-1                             │
 # │    HW_PROJECT_ID     Console → My Credentials → Projects               │
 # │    HW_CSMS_SECRET    CSMS secret name holding the audit password       │
 # │    HW_ECS_TAG_KEY    (optional) tag key to filter ECS instances        │
@@ -151,22 +151,27 @@ jobs:
              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"}
 
       # ── Huawei Cloud auth ───────────────────────────────────────────────
+      # FIX 1: Use global CDN URL (not region-specific ap-southeast-1)
+      # FIX 2: Fixed default region from broken 'ap-southeast-' to 'my-kualalumpur-1'
+      # FIX 3: Added --cli-project-id to configure command
       - name: '🔐 [HuaweiCloud] Install & Configure hcloud CLI'
         if: steps.set-cloud.outputs.cloud == 'huaweicloud'
         env:
           HUAWEICLOUD_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
           HUAWEICLOUD_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
-          HW_REGION:              ${{ vars.HW_REGION || 'ap-southeast-1' }}
+          HW_REGION:              ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
+          HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
         run: |
           # KooCLI binary — https://support.huaweicloud.com/intl/en-us/qs-hcli/hcli_02_002.html
           curl -sSL \
-            "https://ap-southeast-1-hwcloudcdn.obs.myhuaweicloud.com/KooCLI/release/latest/hcloud_linux_amd64" \
+            "https://hwcloudcdn.obs.myhuaweicloud.com/KooCLI/release/latest/hcloud_linux_amd64" \
             -o /usr/local/bin/hcloud && chmod +x /usr/local/bin/hcloud \
             || { echo "⚠️  Binary download failed"; exit 1; }
           hcloud configure set \
             --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
             --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
-            --cli-region="$HW_REGION" 2>/dev/null || true
+            --cli-region="$HW_REGION" \
+            --cli-project-id="$HW_PROJECT_ID" 2>/dev/null || true
           hcloud ECS ListServersDetails --cli-region="$HW_REGION" --cli-output json >/dev/null 2>&1 \
             && echo "✅ hcloud auth OK (region: $HW_REGION)" \
             || { echo "❌ hcloud auth failed — check HW_ACCESS_KEY / HW_SECRET_KEY"; exit 1; }
@@ -179,7 +184,8 @@ jobs:
           TARGET_ENV:     ${{ github.event.inputs.environment_tag || 'all' }}
           STRATEGY:       ${{ github.event.inputs.execution_strategy || 'os-grouped' }}
           RG_NAME:        ${{ vars.AZURE_RG_NAME }}
-          HW_REGION:      ${{ vars.HW_REGION || 'ap-southeast-1' }}
+          # FIX 4: corrected default region fallback
+          HW_REGION:      ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
           HW_ECS_TAG_KEY: ${{ vars.HW_ECS_TAG_KEY || 'Environment' }}
           HW_ECS_TAG_VAL: ${{ github.event.inputs.environment_tag || '' }}
         run: |
@@ -296,11 +302,12 @@ jobs:
       TARGET_OS:      ${{ matrix.os_target.os }}
       TARGET_IP:      ${{ matrix.os_target.ip }}
       # ── Azure ──────────────────────────────────────────────────────────
-      AZURE_RG_NAME:  ${{ vars.AZURE_RG_NAME }}
-      AZURE_KV_NAME:  ${{ vars.AZURE_KV_NAME }}
+      AZURE_RG_NAME:   ${{ vars.AZURE_RG_NAME }}
+      AZURE_KV_NAME:   ${{ vars.AZURE_KV_NAME }}
       AZURE_KV_SECRET: ${{ vars.AZURE_KV_SECRET }}
       # ── Huawei Cloud ───────────────────────────────────────────────────
-      HW_REGION:              ${{ vars.HW_REGION || 'ap-southeast-1' }}
+      # FIX 5: corrected all default region fallbacks to my-kualalumpur-1
+      HW_REGION:              ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
       HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
       HW_CSMS_SECRET:         ${{ vars.HW_CSMS_SECRET || 'AuditPassword' }}
       HW_ECS_TAG_KEY:         ${{ vars.HW_ECS_TAG_KEY || 'Environment' }}
@@ -308,7 +315,7 @@ jobs:
       HW_VPC_ID:              ${{ vars.HW_VPC_ID }}
       HUAWEICLOUD_ACCESS_KEY:  ${{ secrets.HW_ACCESS_KEY }}
       HUAWEICLOUD_SECRET_KEY:  ${{ secrets.HW_SECRET_KEY }}
-      HUAWEICLOUD_REGION:     ${{ vars.HW_REGION || 'ap-southeast-1' }}
+      HUAWEICLOUD_REGION:     ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
       # ── Shared ─────────────────────────────────────────────────────────
       LINUX_ADMIN_USER:     ${{ vars.LINUX_ADMIN_USER }}
       WINDOWS_ADMIN_USER:   ${{ vars.WINDOWS_ADMIN_USER }}
@@ -339,18 +346,31 @@ jobs:
              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"}
 
       # ── Huawei Cloud auth ───────────────────────────────────────────────
+      # FIX 6: Added env block (was missing — caused secrets to be undefined)
+      # FIX 7: Use global CDN URL instead of ap-southeast-1 CDN
+      # FIX 8: Added --cli-project-id to configure command
+      # FIX 9: Added auth verification check (same as prepare-queue job)
       - name: '🔐 [HuaweiCloud] Install & Configure hcloud CLI'
         if: needs.prepare-queue.outputs.cloud == 'huaweicloud'
+        env:
+          HUAWEICLOUD_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
+          HUAWEICLOUD_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
+          HW_REGION:              ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
+          HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
         run: |
           curl -sSL \
-            "https://ap-southeast-1-hwcloudcdn.obs.myhuaweicloud.com/KooCLI/release/latest/hcloud_linux_amd64" \
+            "https://hwcloudcdn.obs.myhuaweicloud.com/KooCLI/release/latest/hcloud_linux_amd64" \
             -o /usr/local/bin/hcloud && chmod +x /usr/local/bin/hcloud \
             || { echo "❌ hcloud download failed"; exit 1; }
           hcloud configure set \
             --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
             --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
-            --cli-region="$HW_REGION" 2>/dev/null || true
-          echo "✅ hcloud configured (region: $HW_REGION)"
+            --cli-region="$HW_REGION" \
+            --cli-project-id="$HW_PROJECT_ID" 2>/dev/null || true
+          hcloud ECS ListServersDetails \
+            --cli-region="$HW_REGION" --cli-output json >/dev/null 2>&1 \
+            && echo "✅ hcloud auth OK (region: $HW_REGION)" \
+            || { echo "❌ hcloud auth failed — check HW_ACCESS_KEY / HW_SECRET_KEY"; exit 1; }
 
       # ── SSH (Linux only) ────────────────────────────────────────────────
       - name: '🔑 Setup SSH Key'
