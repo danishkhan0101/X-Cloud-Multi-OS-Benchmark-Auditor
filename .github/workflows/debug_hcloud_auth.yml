@@ -37,6 +37,12 @@ jobs:
             && echo "✅ hcloud tar.gz downloaded OK" \
             || { echo "❌ Download FAILED"; exit 1; }
 
+          if file /tmp/hcloud.tar.gz | grep -q "XML\|ASCII\|HTML"; then
+            echo "❌ Downloaded file is not a tar.gz"
+            cat /tmp/hcloud.tar.gz
+            exit 1
+          fi
+
           tar -zxf /tmp/hcloud.tar.gz -C /tmp/
           mv /tmp/hcloud /usr/local/bin/hcloud
           chmod +x /usr/local/bin/hcloud
@@ -45,26 +51,16 @@ jobs:
 
           echo ""
           echo "========================================"
-          echo "3. ACCEPTING EULA + CONFIGURING"
+          echo "3. CONFIGURING hcloud (with EULA accept)"
           echo "========================================"
-          # Accept EULA non-interactively
-          hcloud configure init \
-            --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
-            --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
-            --cli-region="$HW_REGION" \
-            --agree-privacy-statement 2>&1 || true
-          echo "Init exit code: $?"
-
-          echo ""
-          echo "--- trying configure set after init ---"
           hcloud configure set \
             --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
             --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
-            --cli-region="$HW_REGION" 2>&1 || true
-          echo "Configure set exit code: $?"
-
-          echo ""
-          echo "hcloud configure list:"
+            --cli-region="$HW_REGION" \
+            --cli-project-id="$HW_PROJECT_ID" \
+            --cli-agree-privacy-statement=true \
+            --cli-lang=en 2>&1
+          echo "Configure exit code: $?"
           hcloud configure list 2>&1 || true
 
           echo ""
@@ -75,19 +71,3 @@ jobs:
             --cli-region="$HW_REGION" \
             --cli-output json 2>&1
           echo "ECS call exit code: $?"
-
-          echo ""
-          echo "========================================"
-          echo "5. TESTING ECS WITH EXPLICIT ENDPOINT"
-          echo "========================================"
-          hcloud ECS ListServersDetails \
-            --cli-region="$HW_REGION" \
-            --cli-output json \
-            --cli-endpoint="https://ecs.$HW_REGION.myhuaweicloud.com" 2>&1
-          echo "ECS with endpoint exit code: $?"
-
-          echo ""
-          echo "========================================"
-          echo "6. CHECK AVAILABLE hcloud configure FLAGS"
-          echo "========================================"
-          hcloud configure set --help 2>&1 || true
