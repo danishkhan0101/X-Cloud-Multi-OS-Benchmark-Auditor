@@ -44,32 +44,26 @@ jobs:
           hcloud --version 2>&1 || true
           echo ""
           echo "========================================"
-          echo "3. REAL HELP OUTPUT (configure)"
+          echo "3. CONFIGURING hcloud (EULA piped via stdin + flag)"
           echo "========================================"
-          hcloud configure --help 2>&1
-          echo "----------------------------------------"
-          hcloud configure set --help 2>&1
-          echo "----------------------------------------"
-          hcloud configure init --help 2>&1
-          echo ""
-          echo "========================================"
-          echo "4. ATTEMPT NON-INTERACTIVE EULA ACCEPT (init)"
-          echo "========================================"
-          yes | hcloud configure init \
+          yes | hcloud configure set \
             --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
             --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
-            --cli-region="$HW_REGION" 2>&1
-          echo "init exit code: $?"
+            --cli-region="$HW_REGION" \
+            --cli-project-id="$HW_PROJECT_ID" \
+            --cli-agree-privacy-statement=true \
+            --cli-lang=en 2>&1
+          echo "Configure exit code: $?"
           echo ""
           echo "========================================"
-          echo "5. CONFIGURE LIST (check what got saved)"
+          echo "4. CONFIGURE LIST (verify it saved)"
           echo "========================================"
           hcloud configure list 2>&1 || true
           echo ""
           echo "========================================"
-          echo "6. TESTING ECS API CALL"
+          echo "5. TESTING ECS API CALL"
           echo "========================================"
-          yes | hcloud ECS ListServersDetails \
+          hcloud ECS ListServersDetails \
             --cli-region="$HW_REGION" \
             --cli-output json 2>&1
           echo "ECS call exit code: $?"
