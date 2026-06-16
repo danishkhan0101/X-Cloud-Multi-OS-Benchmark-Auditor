@@ -91,7 +91,14 @@ jobs:
           echo "========================================"
           echo "5. TESTING ECS API CALL"
           echo "========================================"
+          echo "--- ECS ListServersDetails --help ---"
+          hcloud ECS ListServersDetails --help 2>&1
+          echo "--- attempt: --cli-output=json ---"
           hcloud ECS ListServersDetails \
             --cli-region="$HW_REGION" \
-            --cli-output json 2>&1
-          echo "ECS call exit code: $?"
+            --cli-output=json 2>&1
+          echo "ECS call (output=json) exit code: $?"
+          echo "--- attempt: no output flag ---"
+          hcloud ECS ListServersDetails \
+            --cli-region="$HW_REGION" 2>&1
+          echo "ECS call (no output flag) exit code: $?"
