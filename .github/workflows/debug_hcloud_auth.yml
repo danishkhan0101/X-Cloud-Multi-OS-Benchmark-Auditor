@@ -1,12 +1,9 @@
 name: 🔍 Debug HuaweiCloud Auth
-
 on:
   workflow_dispatch:
-
 jobs:
   debug-hcloud:
     runs-on: ubuntu-latest
-
     steps:
       - name: '🔍 Debug hcloud Auth'
         env:
@@ -26,7 +23,6 @@ jobs:
           [ -z "$HUAWEICLOUD_SECRET_KEY" ] && echo "❌ HW_SECRET_KEY is EMPTY" || echo "✅ HW_SECRET_KEY is set"
           [ -z "$HW_REGION" ]              && echo "❌ HW_REGION is EMPTY"     || echo "✅ HW_REGION is set"
           [ -z "$HW_PROJECT_ID" ]          && echo "❌ HW_PROJECT_ID is EMPTY" || echo "✅ HW_PROJECT_ID is set"
-
           echo ""
           echo "========================================"
           echo "2. DOWNLOADING KooCLI"
@@ -36,38 +32,44 @@ jobs:
             -o /tmp/hcloud.tar.gz \
             && echo "✅ hcloud tar.gz downloaded OK" \
             || { echo "❌ Download FAILED"; exit 1; }
-
           if file /tmp/hcloud.tar.gz | grep -q "XML\|ASCII\|HTML"; then
             echo "❌ Downloaded file is not a tar.gz"
             cat /tmp/hcloud.tar.gz
             exit 1
           fi
-
           tar -zxf /tmp/hcloud.tar.gz -C /tmp/
           mv /tmp/hcloud /usr/local/bin/hcloud
           chmod +x /usr/local/bin/hcloud
           echo "✅ hcloud installed"
           hcloud --version 2>&1 || true
-
           echo ""
           echo "========================================"
-          echo "3. CONFIGURING hcloud (with EULA accept)"
+          echo "3. REAL HELP OUTPUT (configure)"
           echo "========================================"
-          hcloud configure set \
+          hcloud configure --help 2>&1
+          echo "----------------------------------------"
+          hcloud configure set --help 2>&1
+          echo "----------------------------------------"
+          hcloud configure init --help 2>&1
+          echo ""
+          echo "========================================"
+          echo "4. ATTEMPT NON-INTERACTIVE EULA ACCEPT (init)"
+          echo "========================================"
+          yes | hcloud configure init \
             --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
             --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
-            --cli-region="$HW_REGION" \
-            --cli-project-id="$HW_PROJECT_ID" \
-            --cli-agree-privacy-statement=true \
-            --cli-lang=en 2>&1
-          echo "Configure exit code: $?"
-          hcloud configure list 2>&1 || true
-
+            --cli-region="$HW_REGION" 2>&1
+          echo "init exit code: $?"
           echo ""
           echo "========================================"
-          echo "4. TESTING ECS API CALL"
+          echo "5. CONFIGURE LIST (check what got saved)"
           echo "========================================"
-          hcloud ECS ListServersDetails \
+          hcloud configure list 2>&1 || true
+          echo ""
+          echo "========================================"
+          echo "6. TESTING ECS API CALL"
+          echo "========================================"
+          yes | hcloud ECS ListServersDetails \
             --cli-region="$HW_REGION" \
             --cli-output json 2>&1
           echo "ECS call exit code: $?"
