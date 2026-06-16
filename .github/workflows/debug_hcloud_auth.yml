@@ -20,6 +20,8 @@ jobs:
           echo "AK length     : ${#HUAWEICLOUD_ACCESS_KEY}"
           echo "SK length     : ${#HUAWEICLOUD_SECRET_KEY}"
           [ -z "$HUAWEICLOUD_ACCESS_KEY" ] && echo "❌ HW_ACCESS_KEY is EMPTY" || echo "✅ HW_ACCESS_KEY is set"
+          echo "AK hexdump:"
+          echo -n "$HUAWEICLOUD_ACCESS_KEY" | xxd
           [ -z "$HUAWEICLOUD_SECRET_KEY" ] && echo "❌ HW_SECRET_KEY is EMPTY" || echo "✅ HW_SECRET_KEY is set"
           [ -z "$HW_REGION" ]              && echo "❌ HW_REGION is EMPTY"     || echo "✅ HW_REGION is set"
           [ -z "$HW_PROJECT_ID" ]          && echo "❌ HW_PROJECT_ID is EMPTY" || echo "✅ HW_PROJECT_ID is set"
@@ -102,3 +104,11 @@ jobs:
           hcloud ECS ListServersDetails \
             --cli-region="$HW_REGION" 2>&1
           echo "ECS call (no output flag) exit code: $?"
+          echo ""
+          echo "========================================"
+          echo "6. IAM IDENTITY CHECK (validate AK/SK independent of project scope)"
+          echo "========================================"
+          hcloud IAM ShowUser --cli-region="$HW_REGION" 2>&1
+          echo "IAM check exit code: $?"
+          hcloud IAM KeystoneListProjects --cli-region="$HW_REGION" 2>&1
+          echo "IAM project list exit code: $?"
