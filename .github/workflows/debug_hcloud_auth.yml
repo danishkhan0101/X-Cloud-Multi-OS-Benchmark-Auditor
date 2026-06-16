@@ -9,6 +9,7 @@ jobs:
         env:
           HUAWEICLOUD_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
           HUAWEICLOUD_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
+          HUAWEICLOUD_SECURITY_TOKEN: ${{ secrets.HW_SECURITY_TOKEN }}
           HW_REGION:              ${{ vars.HW_REGION }}
           HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
         run: |
@@ -19,15 +20,17 @@ jobs:
           echo "HW_PROJECT_ID : $HW_PROJECT_ID"
           echo "AK length     : ${#HUAWEICLOUD_ACCESS_KEY}"
           echo "SK length     : ${#HUAWEICLOUD_SECRET_KEY}"
+          echo "Token length  : ${#HUAWEICLOUD_SECURITY_TOKEN}"
           [ -z "$HUAWEICLOUD_ACCESS_KEY" ] && echo "❌ HW_ACCESS_KEY is EMPTY" || echo "✅ HW_ACCESS_KEY is set"
-          echo "AK hexdump:"
-          echo -n "$HUAWEICLOUD_ACCESS_KEY" | xxd
           [ -z "$HUAWEICLOUD_SECRET_KEY" ] && echo "❌ HW_SECRET_KEY is EMPTY" || echo "✅ HW_SECRET_KEY is set"
+          [ -z "$HUAWEICLOUD_SECURITY_TOKEN" ] && echo "⚠️  HW_SECURITY_TOKEN is EMPTY (required for TEMP keys)" || echo "✅ HW_SECURITY_TOKEN is set"
           [ -z "$HW_REGION" ]              && echo "❌ HW_REGION is EMPTY"     || echo "✅ HW_REGION is set"
           [ -z "$HW_PROJECT_ID" ]          && echo "❌ HW_PROJECT_ID is EMPTY" || echo "✅ HW_PROJECT_ID is set"
-          echo "HW_PROJECT_ID length: ${#HW_PROJECT_ID}"
-          echo "HW_PROJECT_ID hexdump:"
-          echo -n "$HW_PROJECT_ID" | xxd | tail -5
+          echo ""
+          echo "========================================"
+          echo "1b. RUNNER CLOCK CHECK (for temp key expiry diagnosis)"
+          echo "========================================"
+          date -u
           echo ""
           echo "========================================"
           echo "2. DOWNLOADING KooCLI"
@@ -49,66 +52,23 @@ jobs:
           hcloud --version 2>&1 || true
           echo ""
           echo "========================================"
-          echo "3a. CONFIGURING hcloud (flag ONLY, no stdin)"
+          echo "3. CONFIGURING hcloud (TEMP key: AK + SK + Security Token)"
           echo "========================================"
           hcloud configure set \
+            --cli-mode=AKSK \
             --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
             --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
+            --cli-security-token="$HUAWEICLOUD_SECURITY_TOKEN" \
             --cli-region="$HW_REGION" \
             --cli-project-id="$HW_PROJECT_ID" \
             --cli-agree-privacy-statement=true \
             --cli-lang=en < /dev/null 2>&1
-          echo "Flag-only configure exit code: $?"
-          hcloud configure list 2>&1 || true
-          echo ""
-          echo "========================================"
-          echo "3b. CONFIGURING hcloud (EULA piped via stdin + flag)"
-          echo "========================================"
-          printf 'y\n' | hcloud configure set \
-            --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
-            --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
-            --cli-region="$HW_REGION" \
-            --cli-project-id="$HW_PROJECT_ID" \
-            --cli-agree-privacy-statement=true \
-            --cli-lang=en 2>&1
           echo "Configure exit code: $?"
-          echo ""
-          echo "========================================"
-          echo "3c. CONFIGURING hcloud (NO project-id at all)"
-          echo "========================================"
-          printf 'y\n' | hcloud configure set \
-            --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
-            --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
-            --cli-region="$HW_REGION" \
-            --cli-agree-privacy-statement=true \
-            --cli-lang=en 2>&1
-          echo "No-project-id configure exit code: $?"
           hcloud configure list 2>&1 || true
           echo ""
           echo "========================================"
-          echo "4. CONFIGURE LIST (verify it saved)"
+          echo "4. TESTING ECS API CALL (with security token)"
           echo "========================================"
-          hcloud configure list 2>&1 || true
-          echo ""
-          echo "========================================"
-          echo "5. TESTING ECS API CALL"
-          echo "========================================"
-          echo "--- ECS ListServersDetails --help ---"
-          hcloud ECS ListServersDetails --help 2>&1
-          echo "--- attempt: --cli-output=json ---"
-          hcloud ECS ListServersDetails \
-            --cli-region="$HW_REGION" \
-            --cli-output=json 2>&1
-          echo "ECS call (output=json) exit code: $?"
-          echo "--- attempt: no output flag ---"
           hcloud ECS ListServersDetails \
             --cli-region="$HW_REGION" 2>&1
-          echo "ECS call (no output flag) exit code: $?"
-          echo ""
-          echo "========================================"
-          echo "6. IAM IDENTITY CHECK (validate AK/SK independent of project scope)"
-          echo "========================================"
-          hcloud IAM ShowUser --cli-region="$HW_REGION" 2>&1
-          echo "IAM check exit code: $?"
-          hcloud IAM KeystoneListProjects --cli-region="$HW_REGION" 2>&1
-          echo "IAM project list exit code: $?"
+          echo "ECS call exit code: $?"
