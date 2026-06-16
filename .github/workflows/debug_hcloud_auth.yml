@@ -23,6 +23,9 @@ jobs:
           [ -z "$HUAWEICLOUD_SECRET_KEY" ] && echo "❌ HW_SECRET_KEY is EMPTY" || echo "✅ HW_SECRET_KEY is set"
           [ -z "$HW_REGION" ]              && echo "❌ HW_REGION is EMPTY"     || echo "✅ HW_REGION is set"
           [ -z "$HW_PROJECT_ID" ]          && echo "❌ HW_PROJECT_ID is EMPTY" || echo "✅ HW_PROJECT_ID is set"
+          echo "HW_PROJECT_ID length: ${#HW_PROJECT_ID}"
+          echo "HW_PROJECT_ID hexdump:"
+          echo -n "$HW_PROJECT_ID" | xxd | tail -5
           echo ""
           echo "========================================"
           echo "2. DOWNLOADING KooCLI"
@@ -67,6 +70,18 @@ jobs:
             --cli-agree-privacy-statement=true \
             --cli-lang=en 2>&1
           echo "Configure exit code: $?"
+          echo ""
+          echo "========================================"
+          echo "3c. CONFIGURING hcloud (NO project-id at all)"
+          echo "========================================"
+          printf 'y\n' | hcloud configure set \
+            --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
+            --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
+            --cli-region="$HW_REGION" \
+            --cli-agree-privacy-statement=true \
+            --cli-lang=en 2>&1
+          echo "No-project-id configure exit code: $?"
+          hcloud configure list 2>&1 || true
           echo ""
           echo "========================================"
           echo "4. CONFIGURE LIST (verify it saved)"
