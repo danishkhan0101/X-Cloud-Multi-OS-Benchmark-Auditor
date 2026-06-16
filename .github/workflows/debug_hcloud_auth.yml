@@ -44,9 +44,22 @@ jobs:
           hcloud --version 2>&1 || true
           echo ""
           echo "========================================"
-          echo "3. CONFIGURING hcloud (EULA piped via stdin + flag)"
+          echo "3a. CONFIGURING hcloud (flag ONLY, no stdin)"
           echo "========================================"
-          yes | hcloud configure set \
+          hcloud configure set \
+            --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
+            --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
+            --cli-region="$HW_REGION" \
+            --cli-project-id="$HW_PROJECT_ID" \
+            --cli-agree-privacy-statement=true \
+            --cli-lang=en < /dev/null 2>&1
+          echo "Flag-only configure exit code: $?"
+          hcloud configure list 2>&1 || true
+          echo ""
+          echo "========================================"
+          echo "3b. CONFIGURING hcloud (EULA piped via stdin + flag)"
+          echo "========================================"
+          printf 'y\n' | hcloud configure set \
             --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
             --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
             --cli-region="$HW_REGION" \
@@ -63,7 +76,7 @@ jobs:
           echo "========================================"
           echo "5. TESTING ECS API CALL"
           echo "========================================"
-          hcloud ECS ListServersDetails \
+          printf 'y\n' | hcloud ECS ListServersDetails \
             --cli-region="$HW_REGION" \
             --cli-output json 2>&1
           echo "ECS call exit code: $?"
