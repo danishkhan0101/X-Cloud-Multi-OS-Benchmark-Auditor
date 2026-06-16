@@ -91,7 +91,7 @@ jobs:
           echo "========================================"
           echo "5. TESTING ECS API CALL"
           echo "========================================"
-          printf 'y\n' | hcloud ECS ListServersDetails \
+          hcloud ECS ListServersDetails \
             --cli-region="$HW_REGION" \
             --cli-output json 2>&1
           echo "ECS call exit code: $?"
