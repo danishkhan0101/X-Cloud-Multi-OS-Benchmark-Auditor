@@ -3,18 +3,26 @@ name: 🛡️ Fleet Commander Pipeline
 # ┌────────────────────────────────────────────────────────────────────────┐
 # │  MULTI-CLOUD: azure | huaweicloud                                      │
 # │                                                                        │
-# │  NEW SECRETS (Huawei Cloud):                                           │
+# │  SECRETS REQUIRED (Huawei Cloud):                                      │
 # │    HW_ACCESS_KEY     IAM AK (Console → My Credentials → Access Keys)  │
 # │    HW_SECRET_KEY     IAM SK                                            │
 # │    AUDIT_PASS        Windows audit-user password (direct fallback)     │
 # │                                                                        │
-# │  NEW VARIABLES (Huawei Cloud):                                         │
+# │  VARIABLES REQUIRED (Huawei Cloud):                                    │
 # │    HW_REGION         e.g. my-kualalumpur-1                             │
 # │    HW_PROJECT_ID     Console → My Credentials → Projects               │
 # │    HW_CSMS_SECRET    CSMS secret name holding the audit password       │
 # │    HW_ECS_TAG_KEY    (optional) tag key to filter ECS instances        │
 # │    HW_ECS_TAG_VAL    (optional) tag value to match                     │
 # │    HW_VPC_ID         VPC ID to scope security-group queries            │
+# │                                                                        │
+# │  AUTH MODEL (Huawei Cloud):                                            │
+# │    Uses official Python SDK (huaweicloudsdkcore + huaweicloudsdkecs).  │
+# │    AK/SK signs each request locally — no hcloud (KooCLI) tool needed. │
+# │    KooCLI was removed because it resolves endpoints from its own       │
+# │    internal catalogue (public HW regions only) and cannot reach the    │
+# │    private endpoint ecs.my-kualalumpur-1.alphaedge.tmone.com.my.       │
+# │    SDK + endpoint confirmed working from GH Actions hosted runners.    │
 # └────────────────────────────────────────────────────────────────────────┘
 
 on:
@@ -106,6 +114,9 @@ jobs:
       cloud:     ${{ steps.set-cloud.outputs.cloud }}
 
     steps:
+      - name: '📥 Checkout'
+        uses: actions/checkout@v4
+
       - name: '☁️  Resolve Cloud Provider'
         id: set-cloud
         run: |
@@ -151,7 +162,14 @@ jobs:
              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"}
 
       # ── Huawei Cloud auth ───────────────────────────────────────────────
-      - name: '🔐 [HuaweiCloud] Install & Configure hcloud CLI'
+      # FIX: hcloud (KooCLI) removed entirely. It resolves endpoints from its
+      # own internal catalogue (public HW regions only) and has no awareness of
+      # the private endpoint ecs.my-kualalumpur-1.alphaedge.tmone.com.my,
+      # causing hcloud ECS ListServersDetails to silently query the wrong region
+      # and return an empty list. The Python SDK signs requests locally with
+      # AK/SK and is pointed explicitly at the private endpoint.
+      # Confirmed working from GH Actions hosted runners.
+      - name: '🔐 [HuaweiCloud] Install SDK & Verify Auth'
         if: steps.set-cloud.outputs.cloud == 'huaweicloud'
         env:
           HUAWEICLOUD_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
@@ -159,56 +177,62 @@ jobs:
           HW_REGION:              ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
           HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
         run: |
-          # Download KooCLI via tar.gz (confirmed working for my-kualalumpur-1 region)
-          curl -sSL \
-            "https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/huaweicloud-cli-linux-amd64.tar.gz" \
-            -o /tmp/hcloud.tar.gz \
-            || { echo "❌ hcloud download failed"; exit 1; }
+          echo "📦 Installing Huawei Cloud Python SDK..."
+          pip install huaweicloudsdkcore huaweicloudsdkecs --quiet
 
-          # Verify it's actually a tar.gz, not an XML error page
-          if file /tmp/hcloud.tar.gz | grep -q "XML\|ASCII\|HTML"; then
-            echo "❌ Downloaded file is not a tar.gz — wrong URL returned XML/HTML"
-            cat /tmp/hcloud.tar.gz
-            exit 1
-          fi
+          echo "🔍 Verifying AK/SK against private ECS endpoint..."
+          export HW_ECS_ENDPOINT="https://ecs.${HW_REGION}.alphaedge.tmone.com.my"
 
-          tar -zxf /tmp/hcloud.tar.gz -C /tmp/
-          mv /tmp/hcloud /usr/local/bin/hcloud
-          chmod +x /usr/local/bin/hcloud
-          echo "✅ hcloud installed: $(hcloud --version 2>&1 | head -1)"
+          python3 - <<'PYEOF'
+          import os, sys
+          from huaweicloudsdkcore.auth.credentials import BasicCredentials
+          from huaweicloudsdkecs.v2 import EcsClient, ListServersDetailsRequest
+          from huaweicloudsdkcore.exceptions import exceptions
 
-          # Configure — accept EULA + set credentials + project ID
-          hcloud configure set \
-            --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
-            --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
-            --cli-region="$HW_REGION" \
-            --cli-project-id="$HW_PROJECT_ID" \
-            --cli-agree-privacy-statement=true \
-            --cli-lang=en 2>&1 | grep -v "^$" || true
+          ak         = os.environ["HUAWEICLOUD_ACCESS_KEY"]
+          sk         = os.environ["HUAWEICLOUD_SECRET_KEY"]
+          project_id = os.environ["HW_PROJECT_ID"]
+          endpoint   = os.environ["HW_ECS_ENDPOINT"]
 
-          # Auth verification
-          hcloud ECS ListServersDetails --cli-region="$HW_REGION" --cli-output json >/dev/null 2>&1 \
-            && echo "✅ hcloud auth OK (region: $HW_REGION)" \
-            || { echo "❌ hcloud auth failed — check HW_ACCESS_KEY / HW_SECRET_KEY"; exit 1; }
+          try:
+              client = EcsClient.new_builder() \
+                  .with_credentials(BasicCredentials(ak, sk, project_id)) \
+                  .with_endpoint(endpoint) \
+                  .build()
+              resp  = client.list_servers_details(ListServersDetailsRequest())
+              count = len(resp.servers) if resp.servers else 0
+              print(f"✅ [HuaweiCloud] SDK auth OK — {count} ECS instance(s) visible")
+              print(f"   endpoint: {endpoint}")
+          except exceptions.ClientRequestException as e:
+              print(f"❌ SDK auth failed: {e.status_code} {e.error_code} {e.error_msg}",
+                    file=sys.stderr)
+              sys.exit(1)
+          except Exception as e:
+              print(f"❌ Unexpected error: {e}", file=sys.stderr)
+              sys.exit(1)
+          PYEOF
 
       # ── VM Discovery ────────────────────────────────────────────────────
       - name: '📡 Discover Online VMs'
         id: discover-vms
         env:
-          CLOUD:          ${{ steps.set-cloud.outputs.cloud }}
-          TARGET_ENV:     ${{ github.event.inputs.environment_tag || 'all' }}
-          STRATEGY:       ${{ github.event.inputs.execution_strategy || 'os-grouped' }}
-          RG_NAME:        ${{ vars.AZURE_RG_NAME }}
-          HW_REGION:      ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
-          HW_ECS_TAG_KEY: ${{ vars.HW_ECS_TAG_KEY || 'Environment' }}
-          HW_ECS_TAG_VAL: ${{ github.event.inputs.environment_tag || '' }}
+          CLOUD:                  ${{ steps.set-cloud.outputs.cloud }}
+          TARGET_ENV:             ${{ github.event.inputs.environment_tag || 'all' }}
+          STRATEGY:               ${{ github.event.inputs.execution_strategy || 'os-grouped' }}
+          RG_NAME:                ${{ vars.AZURE_RG_NAME }}
+          HW_REGION:              ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
+          HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
+          HUAWEICLOUD_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
+          HUAWEICLOUD_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
+          HW_ECS_TAG_KEY:         ${{ vars.HW_ECS_TAG_KEY || '' }}
+          HW_ECS_TAG_VAL:         ${{ github.event.inputs.environment_tag == 'all' && '' || github.event.inputs.environment_tag }}
         run: |
           HAS_UBUNTU=false; HAS_RHEL=false; HAS_ROCKY=false
           HAS_ALMA=false;   HAS_WINDOWS=false
           MATRIX_JSON="["
 
           classify_vm() {
-            local os="$1" offer="${2,,}" name="${3}" ip="$4"
+            local os="$1" offer="${2,,}" name="$3" ip="$4"
             ip=$(echo "$ip" | tr -d '\r' | xargs)
             [ -z "$ip" ] || [ "$ip" == "None" ] && return
             local name_lower="${name,,}" NODE_OS=""
@@ -248,33 +272,62 @@ jobs:
           fi
 
           # ── Huawei Cloud ──────────────────────────────────────────────
+          # FIX: replaced hcloud ECS ListServersDetails (KooCLI, wrong endpoint)
+          # with hw_ecs_discover.py (SDK, explicit private endpoint).
+          # pip install already ran in the auth step above so the SDK is available.
           if [ "$CLOUD" == "huaweicloud" ]; then
-            echo "📡 [HuaweiCloud] Querying ECS in [$HW_REGION]..."
-            HW_RAW=$(hcloud ECS ListServersDetails \
-              --cli-region "$HW_REGION" --cli-output json 2>/dev/null)
-            [ -z "$HW_RAW" ] && { echo "❌ No ECS data returned"; exit 1; }
-            while IFS=$'\t' read -r os offer name ip; do
+            HW_ECS_ENDPOINT="https://ecs.${HW_REGION}.alphaedge.tmone.com.my"
+            echo "📡 [HuaweiCloud] Querying ECS via SDK [${HW_ECS_ENDPOINT}]..."
+
+            HW_RAW=$(
+              HUAWEICLOUD_ACCESS_KEY="$HUAWEICLOUD_ACCESS_KEY" \
+              HUAWEICLOUD_SECRET_KEY="$HUAWEICLOUD_SECRET_KEY" \
+              HW_PROJECT_ID="$HW_PROJECT_ID" \
+              HW_ECS_ENDPOINT="$HW_ECS_ENDPOINT" \
+              HW_ECS_TAG_KEY="$HW_ECS_TAG_KEY" \
+              HW_ECS_TAG_VAL="$HW_ECS_TAG_VAL" \
+              python3 hw_ecs_discover.py 2>/tmp/hw_discover_err.log
+            )
+
+            if [ -z "$HW_RAW" ]; then
+              echo "❌ [HuaweiCloud] ECS discovery returned empty."
+              echo "   Check: HW_ACCESS_KEY, HW_SECRET_KEY, HW_PROJECT_ID, endpoint"
+              [ -s /tmp/hw_discover_err.log ] && cat /tmp/hw_discover_err.log
+              exit 1
+            fi
+
+            # Parse the JSON output from hw_ecs_discover.py into TSV rows
+            while IFS=$'\t' read -r os offer name ip _srv_id; do
               classify_vm "$os" "$offer" "$name" "$ip"
-            done < <(echo "$HW_RAW" | jq -r \
-              --arg tk "$HW_ECS_TAG_KEY" \
-              --arg tv "$HW_ECS_TAG_VAL" '
-              .servers[]
-              | select(.status == "ACTIVE")
-              | select(
-                  ($tk == "" or $tv == "") or
-                  (.tags // [] | any(.key == $tk and .value == $tv))
-                )
-              | . as $s
-              | [.addresses | to_entries[].value[]
-                 | select(."OS-EXT-IPS:type" == "floating") | .addr][0] as $ip
-              | select($ip != null)
-              | [
-                  ($s.metadata.os_type // "Linux"),
-                  ($s.image.name // "" | ascii_downcase),
-                  $s.name,
-                  $ip
-                ] | @tsv
-              ' 2>/dev/null)
+            done < <(echo "$HW_RAW" | python3 -c "
+import json, sys, os
+data    = json.load(sys.stdin)
+tag_key = os.environ.get('HW_ECS_TAG_KEY', '')
+tag_val = os.environ.get('HW_ECS_TAG_VAL', '')
+for s in data.get('servers', []):
+    name     = s.get('name', '')
+    srv_id   = s.get('id', '')
+    status   = s.get('status', '')
+    meta     = s.get('metadata', {})
+    os_type  = meta.get('os_type', 'Linux')
+    img_name = s.get('image', {}).get('name', '').lower()
+    if tag_key:
+        tags = {t.get('key',''): t.get('value','') for t in s.get('tags', [])}
+        if tag_val and tags.get(tag_key, '') != tag_val:
+            continue
+    public_ip = ''
+    for addrs in s.get('addresses', {}).values():
+        for a in addrs:
+            if a.get('OS-EXT-IPS:type') == 'floating':
+                public_ip = a.get('addr', '')
+                break
+        if public_ip:
+            break
+    if not public_ip:
+        continue
+    power = 'running' if status == 'ACTIVE' else status
+    print(f'{os_type}\t{img_name}\t{name}\t{public_ip}\t{srv_id}')
+")
           fi
 
           # ── Build grouped matrix ───────────────────────────────────────
@@ -323,12 +376,16 @@ jobs:
       HW_REGION:              ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
       HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
       HW_CSMS_SECRET:         ${{ vars.HW_CSMS_SECRET || 'AuditPassword' }}
-      HW_ECS_TAG_KEY:         ${{ vars.HW_ECS_TAG_KEY || 'Environment' }}
-      HW_ECS_TAG_VAL:         ${{ github.event.inputs.environment_tag || '' }}
+      HW_ECS_TAG_KEY:         ${{ vars.HW_ECS_TAG_KEY || '' }}
+      HW_ECS_TAG_VAL:         ${{ github.event.inputs.environment_tag == 'all' && '' || github.event.inputs.environment_tag }}
       HW_VPC_ID:              ${{ vars.HW_VPC_ID }}
       HUAWEICLOUD_ACCESS_KEY:  ${{ secrets.HW_ACCESS_KEY }}
       HUAWEICLOUD_SECRET_KEY:  ${{ secrets.HW_SECRET_KEY }}
       HUAWEICLOUD_REGION:     ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
+      # Explicit private endpoint — consumed by multi_os_benchmark.sh and
+      # hw_ecs_discover.py. Auto-derived from HW_REGION if not set here,
+      # but setting it explicitly avoids any ambiguity.
+      HW_ECS_ENDPOINT:        "https://ecs.${{ vars.HW_REGION || 'my-kualalumpur-1' }}.alphaedge.tmone.com.my"
       # ── Shared ─────────────────────────────────────────────────────────
       LINUX_ADMIN_USER:     ${{ vars.LINUX_ADMIN_USER }}
       WINDOWS_ADMIN_USER:   ${{ vars.WINDOWS_ADMIN_USER }}
@@ -358,7 +415,11 @@ jobs:
              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"}
 
       # ── Huawei Cloud auth ───────────────────────────────────────────────
-      - name: '🔐 [HuaweiCloud] Install & Configure hcloud CLI'
+      # FIX: hcloud (KooCLI) removed. SDK install + auth verify here gives an
+      # early fail before the main script runs, so errors are clearly diagnosed.
+      # multi_os_benchmark.sh also calls cloud_hcloud_check() at Phase 0.3
+      # (which uses the same SDK path), so auth is double-verified.
+      - name: '🔐 [HuaweiCloud] Install SDK & Verify Auth'
         if: needs.prepare-queue.outputs.cloud == 'huaweicloud'
         env:
           HUAWEICLOUD_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
@@ -366,37 +427,40 @@ jobs:
           HW_REGION:              ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
           HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
         run: |
-          # Download KooCLI via tar.gz (confirmed working for my-kualalumpur-1 region)
-          curl -sSL \
-            "https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/huaweicloud-cli-linux-amd64.tar.gz" \
-            -o /tmp/hcloud.tar.gz \
-            || { echo "❌ hcloud download failed"; exit 1; }
+          echo "📦 Installing Huawei Cloud Python SDK..."
+          pip install huaweicloudsdkcore huaweicloudsdkecs --quiet
 
-          # Verify it's actually a tar.gz, not an XML error page
-          if file /tmp/hcloud.tar.gz | grep -q "XML\|ASCII\|HTML"; then
-            echo "❌ Downloaded file is not a tar.gz — wrong URL returned XML/HTML"
-            cat /tmp/hcloud.tar.gz
-            exit 1
-          fi
+          echo "🔍 Verifying AK/SK against private ECS endpoint..."
+          export HW_ECS_ENDPOINT="https://ecs.${HW_REGION}.alphaedge.tmone.com.my"
 
-          tar -zxf /tmp/hcloud.tar.gz -C /tmp/
-          mv /tmp/hcloud /usr/local/bin/hcloud
-          chmod +x /usr/local/bin/hcloud
-          echo "✅ hcloud installed: $(hcloud --version 2>&1 | head -1)"
+          python3 - <<'PYEOF'
+          import os, sys
+          from huaweicloudsdkcore.auth.credentials import BasicCredentials
+          from huaweicloudsdkecs.v2 import EcsClient, ListServersDetailsRequest
+          from huaweicloudsdkcore.exceptions import exceptions
 
-          # Configure — accept EULA + set credentials + project ID
-          hcloud configure set \
-            --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
-            --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
-            --cli-region="$HW_REGION" \
-            --cli-project-id="$HW_PROJECT_ID" \
-            --cli-agree-privacy-statement=true \
-            --cli-lang=en 2>&1 | grep -v "^$" || true
+          ak         = os.environ["HUAWEICLOUD_ACCESS_KEY"]
+          sk         = os.environ["HUAWEICLOUD_SECRET_KEY"]
+          project_id = os.environ["HW_PROJECT_ID"]
+          endpoint   = os.environ["HW_ECS_ENDPOINT"]
 
-          # Auth verification
-          hcloud ECS ListServersDetails --cli-region="$HW_REGION" --cli-output json >/dev/null 2>&1 \
-            && echo "✅ hcloud auth OK (region: $HW_REGION)" \
-            || { echo "❌ hcloud auth failed — check HW_ACCESS_KEY / HW_SECRET_KEY"; exit 1; }
+          try:
+              client = EcsClient.new_builder() \
+                  .with_credentials(BasicCredentials(ak, sk, project_id)) \
+                  .with_endpoint(endpoint) \
+                  .build()
+              resp  = client.list_servers_details(ListServersDetailsRequest())
+              count = len(resp.servers) if resp.servers else 0
+              print(f"✅ [HuaweiCloud] SDK auth OK — {count} ECS instance(s) visible")
+              print(f"   endpoint: {endpoint}")
+          except exceptions.ClientRequestException as e:
+              print(f"❌ SDK auth failed: {e.status_code} {e.error_code} {e.error_msg}",
+                    file=sys.stderr)
+              sys.exit(1)
+          except Exception as e:
+              print(f"❌ Unexpected error: {e}", file=sys.stderr)
+              sys.exit(1)
+          PYEOF
 
       # ── SSH (Linux only) ────────────────────────────────────────────────
       - name: '🔑 Setup SSH Key'
@@ -412,7 +476,11 @@ jobs:
           ssh-add -L > ~/.ssh/id_rsa.pub
 
       # ── Linux toolchain ─────────────────────────────────────────────────
-      - name: '🛠️ Install Linux Tools (Ansible)'
+      # FIX: pip install for the HW SDK is included here so multi_os_benchmark.sh
+      # can call hw_ecs_discover.py at runtime (Phase 0.1 discovery + Phase 0.3
+      # cloud_hcloud_check). The auth step above already installs it for HW runs,
+      # but this step runs for ALL OS targets — duplicating is cheap and safe.
+      - name: '🛠️ Install Linux Tools (Ansible + HW SDK)'
         if: matrix.os_target.os != 'Windows'
         run: |
           sudo apt-get update -qq
@@ -421,6 +489,12 @@ jobs:
           python3 -m pip install --user 'ansible>=10.0.0,<11.0.0'
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           sudo sh -c 'printf "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null\n" >> /etc/ssh/ssh_config'
+
+          if [ "$CLOUD_PROVIDER" == "huaweicloud" ]; then
+            echo "📦 Installing Huawei Cloud Python SDK for runtime use..."
+            pip install huaweicloudsdkcore huaweicloudsdkecs --quiet
+            python3 -c "import huaweicloudsdkecs; print('✅ SDK import OK')"
+          fi
 
       # ── Windows toolchain ───────────────────────────────────────────────
       - name: '🛠️ Install Windows Tools (Cinc Auditor + Ansible + pywinrm)'
@@ -431,6 +505,14 @@ jobs:
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-auditor
           sudo ln -sf /usr/bin/cinc-auditor /usr/bin/inspec
+
+          # SDK also required for Windows jobs — cloud_hcloud_check() in Phase 0.3
+          # runs regardless of OS target and imports huaweicloudsdkecs.
+          if [ "$CLOUD_PROVIDER" == "huaweicloud" ]; then
+            echo "📦 Installing Huawei Cloud Python SDK for runtime use..."
+            pip install huaweicloudsdkcore huaweicloudsdkecs --quiet
+            python3 -c "import huaweicloudsdkecs; print('✅ SDK import OK')"
+          fi
 
       # ── CIS WS2022 v5 profile validation ───────────────────────────────
       - name: '🗂️ Validate CIS WS2022 v5 Profile'
@@ -483,6 +565,8 @@ jobs:
           echo "🖥️  Assigned OS Runner   : $TARGET_OS ($TARGET_IP)"
           echo "🛡️  WIN_SERVER_ROLE      : $WIN_SERVER_ROLE"
           echo "📋 Running Profile       : $PROFILE"
+          [ "$CLOUD_PROVIDER" == "huaweicloud" ] && \
+            echo "🌐 HW_ECS_ENDPOINT       : $HW_ECS_ENDPOINT"
           chmod +x multi_os_benchmark.sh
 
           BASE_ARGS=(
