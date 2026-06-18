@@ -161,11 +161,19 @@ def main():
     all_servers_raw = []
     offset = 1  # ECS ListServersDetails uses 1-based page offset
 
+    # Grab the EPS ID from the environment (put this right before the while loop)
+    eps_id = os.environ.get("HW_EPS_ID", "").strip()
+
     while True:
         try:
             req        = ListServersDetailsRequest()
             req.offset = offset
             req.limit  = 100   # max allowed per page
+            
+            # Add the Enterprise Project ID filter if provided
+            if eps_id:
+                req.enterprise_project_id = eps_id
+                
             resp       = client.list_servers_details(req)
         except exceptions.ClientRequestException as e:
             if e.status_code == 401:
