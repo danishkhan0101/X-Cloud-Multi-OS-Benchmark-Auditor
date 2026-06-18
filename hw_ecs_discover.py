@@ -81,22 +81,22 @@ def serialize(obj):
         return obj
 
 
-def get_public_ip(server):
-    """Return the first floating IP found in the server's addresses dict, or ''."""
+def get_target_ip(server):
+    """Return the floating IP if available, otherwise fallback to the fixed/private IP."""
+    fixed_ip = ""
     for addrs in (server.get("addresses") or {}).values():
         for a in addrs:
             if not isinstance(a, dict):
                 continue
             
-            # Look for both the API JSON key AND the python snake_case attribute name
-            # just in case the SDK's to_dict map translated the key.
             ip_type = a.get("OS-EXT-IPS:type") or a.get("os_ext_ips_type")
             
             if ip_type == "floating":
-                ip = a.get("addr", "")
-                if ip:
-                    return ip
-    return ""
+                return a.get("addr", "")
+            elif ip_type == "fixed" and not fixed_ip:
+                fixed_ip = a.get("addr", "")
+                
+    return fixed_ip
 
 
 def tag_matches(server, tag_key, tag_val):
@@ -211,7 +211,7 @@ def main():
         log(f"❌ Failed to serialise server objects: {e}")
         sys.exit(1)
 
-    # ── TSV output mode ───────────────────────────────────────────────────
+# ── TSV output mode ───────────────────────────────────────────────────
     if tsv_mode:
         emitted = 0
         for s in all_servers:
@@ -221,8 +221,9 @@ def main():
             if not tag_matches(s, tag_key, tag_val):
                 continue
             
-            public_ip = get_public_ip(s)
-            if not public_ip:
+            # Use the new function here
+            target_ip = get_target_ip(s)
+            if not target_ip:
                 continue
             
             name      = s.get("name", "")
@@ -231,11 +232,11 @@ def main():
             os_type   = meta.get("os_type", "Linux")
             img_name  = (s.get("image") or {}).get("name", "").lower()
             
-            # Tab-separated: matches what classify_vm in fleet_commander.yml expects
-            print(f"{os_type}\t{img_name}\t{name}\t{public_ip}\t{srv_id}")
+            # Output the target_ip instead of public_ip
+            print(f"{os_type}\t{img_name}\t{name}\t{target_ip}\t{srv_id}")
             emitted += 1
             
-        log(f"✅ {emitted} ACTIVE server(s) with public IP emitted as TSV (endpoint: {endpoint})")
+        log(f"✅ {emitted} ACTIVE server(s) emitted as TSV (endpoint: {endpoint})")
         return
 
     # ── JSON output mode (default) ────────────────────────────────────────
