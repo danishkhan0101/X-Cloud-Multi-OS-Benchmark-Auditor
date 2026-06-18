@@ -1273,6 +1273,8 @@ huaweicloud)
         HUAWEICLOUD_SECRET_KEY="${HUAWEICLOUD_SECRET_KEY}" \
         HW_PROJECT_ID="${HW_PROJECT_ID}" \
         HW_ECS_ENDPOINT="${HW_ECS_ENDPOINT}" \
+        HW_ECS_TAG_KEY="${HW_ECS_TAG_KEY}" \
+        HW_ECS_TAG_VAL="${HW_ECS_TAG_VAL}" \
         HW_EPS_ID="${HW_EPS_ID}" \
         python3 "$(dirname "$0")/hw_ecs_discover.py"
     )
