@@ -218,7 +218,7 @@ prefetch_scap_packages() {
 
     if $need_ubuntu; then
         # Force refresh if cache is suspected stale
-        rm -rf "${SCAP_CACHE_DIR}/ubuntu2204/"* mkdir -p "${SCAP_CACHE_DIR}/ubuntu2204/"
+        rm -rf "${SCAP_CACHE_DIR}/ubuntu2204/"* && mkdir -p "${SCAP_CACHE_DIR}/ubuntu2204/"
         
         echo -e "${CYAN}   Fetching Ubuntu 22.04 packages via Docker...${NC}"
         docker run --rm \
