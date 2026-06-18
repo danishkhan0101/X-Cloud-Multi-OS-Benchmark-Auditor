@@ -286,7 +286,7 @@ jobs:
               HW_ECS_TAG_KEY="$HW_ECS_TAG_KEY" \
               HW_ECS_TAG_VAL="$HW_ECS_TAG_VAL" \
               HW_EPS_ID="$HW_EPS_ID" \
-              python3 hw_ecs_discover.py --tsv 2>/tmp/hw_discover_err.log
+              python3 hw_ecs_discover.py --tsv
             )
           
             # 2. Check the true exit status of the Python script
