@@ -175,7 +175,15 @@ prefetch_scap_packages() {
         docker run --rm \
             -v "${SCAP_CACHE_DIR}/ubuntu2204:/output" \
             ubuntu:22.04 \
-            bash -c "apt-get update -qq && apt-get install --download-only -y openscap-scanner ssg-base libopenscap* libopendbx* 2>/dev/null && cp /var/cache/apt/archives/*.deb /output/ 2>/dev/null"
+            bash -c "
+                export DEBIAN_FRONTEND=noninteractive
+                apt-get update -qq 2>/dev/null
+                echo 'deb http://archive.ubuntu.com/ubuntu jammy universe' >> /etc/apt/sources.list
+                apt-get update -qq 2>/dev/null
+                apt-get install --download-only -y openscap-scanner ssg-base 2>/dev/null || true
+                apt-get install --download-only -y 'libopenscap*' 'libopendbx*' 2>/dev/null || true
+                cp /var/cache/apt/archives/*.deb /output/ 2>/dev/null || true
+            "
         echo -e "${GREEN}   ✅ Ubuntu2204 cached${NC}"
     fi
 
