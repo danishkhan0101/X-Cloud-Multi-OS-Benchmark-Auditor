@@ -1028,7 +1028,8 @@ cloud_vm_run_shell() {
     huaweicloud)
         # Similar limitation to PowerShell — no hcloud CLI agent-channel for Linux.
         # Linux bootstrap is SSH-only on Huawei Cloud.
-        return 1
+        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "${LINUX_ADMIN_USER:-root}@${ip}" "$script" >/dev/null 2>&1
+        return $?
         ;;
     esac
 }
