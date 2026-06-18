@@ -23,21 +23,27 @@ USAGE
                              e.g. https://ecs.my-kualalumpur-1.alphaedge.tmone.com.my
 
   Optional env vars:
-    HW_ECS_TAG_KEY           Tag key to filter instances (e.g. "Environment")
-    HW_ECS_TAG_VAL           Tag value to match (e.g. "Prod")
+    HW_ECS_TAG_KEY           Tag key to filter instances  (e.g. "Environment")
+    HW_ECS_TAG_VAL           Tag value to match           (e.g. "Prod")
                              Both must be set for tag filtering to apply.
 
-OUTPUT
-  JSON to stdout — same shape as the Huawei Cloud ECS API response:
-    { "servers": [ { "id", "name", "status", "metadata", "addresses",
-                     "image", "tags", ... }, ... ] }
+OUTPUT MODES
+  Default (no flag):
+    JSON to stdout — standard ECS API response shape:
+      { "servers": [ { "id", "name", "status", "metadata", "addresses",
+                       "image", "tags", ... } ] }
+    Used by: multi_os_benchmark.sh (huaweicloud discovery block)
 
-  Empty stdout + error on stderr on any failure.
-  Exit code 0 on success, non-zero on failure.
+  --tsv flag:
+    TSV to stdout — one line per ACTIVE server with a public (floating) IP:
+      os_type  image_name  vm_name  public_ip  server_id
+    Used by: fleet_commander.yml (discover-vms step)
+    Eliminates the need for any inline Python inside the YAML workflow.
 
-  The bash discovery block in multi_os_benchmark.sh reads stdout and
-  checks `if [ -z "$HW_RAW" ]` to detect failures — so stdout must be
-  either valid JSON or completely empty (never partial).
+  In both modes:
+    - All diagnostic messages go to stderr only
+    - stdout is either valid output or completely empty (never partial)
+    - Exit code 0 on success, non-zero on any failure
 
 DEPENDENCIES
   pip install huaweicloudsdkcore huaweicloudsdkecs
@@ -48,7 +54,44 @@ import os
 import sys
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def log(msg):
+    """Write a diagnostic line to stderr (never contaminates stdout)."""
+    print(f"[hw_ecs_discover] {msg}", file=sys.stderr)
+
+
+def get_public_ip(server):
+    """Return the first floating IP found in the server's addresses dict, or ''."""
+    for addrs in (server.get("addresses") or {}).values():
+        for a in addrs:
+            if a.get("OS-EXT-IPS:type") == "floating":
+                ip = a.get("addr", "")
+                if ip:
+                    return ip
+    return ""
+
+
+def tag_matches(server, tag_key, tag_val):
+    """Return True if tag filtering is disabled OR the server has the matching tag."""
+    if not tag_key or not tag_val:
+        return True
+    raw_tags = server.get("tags") or []
+    for t in raw_tags:
+        if isinstance(t, dict):
+            if t.get("key") == tag_key and t.get("value") == tag_val:
+                return True
+        elif hasattr(t, "key"):
+            if t.key == tag_key and t.value == tag_val:
+                return True
+    return False
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
 def main():
+    tsv_mode = "--tsv" in sys.argv
+
     # ── Validate required env vars ────────────────────────────────────────
     required = {
         "HUAWEICLOUD_ACCESS_KEY": os.environ.get("HUAWEICLOUD_ACCESS_KEY", ""),
@@ -58,10 +101,7 @@ def main():
     }
     missing = [k for k, v in required.items() if not v]
     if missing:
-        print(
-            f"[hw_ecs_discover] ❌ Missing required env vars: {', '.join(missing)}",
-            file=sys.stderr,
-        )
+        log(f"❌ Missing required env vars: {', '.join(missing)}")
         sys.exit(1)
 
     ak         = required["HUAWEICLOUD_ACCESS_KEY"]
@@ -77,11 +117,7 @@ def main():
         from huaweicloudsdkcore.exceptions import exceptions
         from huaweicloudsdkecs.v2 import EcsClient, ListServersDetailsRequest
     except ImportError:
-        print(
-            "[hw_ecs_discover] ❌ SDK not installed. Run: "
-            "pip install huaweicloudsdkcore huaweicloudsdkecs",
-            file=sys.stderr,
-        )
+        log("❌ SDK not installed. Run: pip install huaweicloudsdkcore huaweicloudsdkecs")
         sys.exit(1)
 
     # ── Build SDK client ──────────────────────────────────────────────────
@@ -93,105 +129,95 @@ def main():
             .build()
         )
     except Exception as e:
-        print(f"[hw_ecs_discover] ❌ Failed to build SDK client: {e}", file=sys.stderr)
+        log(f"❌ Failed to build SDK client: {e}")
         sys.exit(1)
 
     # ── Paginated fetch (ECS API defaults to 25 servers per page) ─────────
-    all_servers = []
-    offset = 1          # ECS ListServersDetails uses 1-based page offset
+    all_servers_raw = []
+    offset = 1  # ECS ListServersDetails uses 1-based page offset
 
     while True:
         try:
-            req = ListServersDetailsRequest()
+            req        = ListServersDetailsRequest()
             req.offset = offset
-            req.limit  = 100      # max allowed per page
-            resp = client.list_servers_details(req)
+            req.limit  = 100   # max allowed per page
+            resp       = client.list_servers_details(req)
         except exceptions.ClientRequestException as e:
-            # Distinguish auth failures from other API errors for clear diagnosis
             if e.status_code == 401:
-                print(
-                    f"[hw_ecs_discover] ❌ 401 Unauthorized — AK/SK invalid or expired. "
-                    f"error_code={e.error_code}",
-                    file=sys.stderr,
+                log(
+                    f"❌ 401 Unauthorized — AK/SK invalid or expired. "
+                    f"error_code={e.error_code}"
                 )
             elif e.status_code == 403:
-                print(
-                    f"[hw_ecs_discover] ❌ 403 Forbidden — AK/SK valid but IAM user "
-                    f"has no ECS:ListServersDetails permission on project {project_id}. "
-                    f"error_code={e.error_code}",
-                    file=sys.stderr,
+                log(
+                    f"❌ 403 Forbidden — AK/SK valid but IAM user has no "
+                    f"ECS:ListServersDetails permission on project {project_id}. "
+                    f"error_code={e.error_code}"
                 )
             else:
-                print(
-                    f"[hw_ecs_discover] ❌ API error {e.status_code}: "
-                    f"{e.error_code} — {e.error_msg}",
-                    file=sys.stderr,
-                )
+                log(f"❌ API error {e.status_code}: {e.error_code} — {e.error_msg}")
             sys.exit(1)
         except Exception as e:
-            # Network / DNS / TLS failures land here
             msg = str(e)
             if "Name or service not known" in msg or "getaddrinfo" in msg:
-                print(
-                    f"[hw_ecs_discover] ❌ DNS resolution failed for endpoint: {endpoint}\n"
-                    f"   The endpoint is not reachable from this network/runner.",
-                    file=sys.stderr,
+                log(
+                    f"❌ DNS resolution failed for endpoint: {endpoint}\n"
+                    f"   The endpoint is not reachable from this network/runner."
                 )
             elif "Connection refused" in msg or "timed out" in msg.lower():
-                print(
-                    f"[hw_ecs_discover] ❌ Connection failed to {endpoint}\n"
-                    f"   Check network path / firewall rules.",
-                    file=sys.stderr,
-                )
+                log(f"❌ Connection failed to {endpoint} — check network/firewall.")
             else:
-                print(f"[hw_ecs_discover] ❌ Unexpected error: {e}", file=sys.stderr)
+                log(f"❌ Unexpected error: {e}")
             sys.exit(1)
 
-        page_servers = resp.servers or []
-        all_servers.extend(page_servers)
+        page = resp.servers or []
+        all_servers_raw.extend(page)
 
-        # Stop when a page comes back with fewer items than requested
-        if len(page_servers) < 100:
+        if len(page) < 100:   # partial page = last page
             break
         offset += 1
 
-    # ── Optional tag filter ───────────────────────────────────────────────
-    if tag_key and tag_val:
-        filtered = []
-        for s in all_servers:
-            raw_tags = s.tags or []
-            # SDK returns tag objects; normalise to dict regardless of shape
-            tag_dict = {}
-            for t in raw_tags:
-                if hasattr(t, "key"):
-                    tag_dict[t.key] = t.value
-                elif isinstance(t, dict):
-                    tag_dict[t.get("key", "")] = t.get("value", "")
-            if tag_dict.get(tag_key) == tag_val:
-                filtered.append(s)
-        all_servers = filtered
-
-    # ── Serialise to JSON (to_json_object gives a plain dict) ────────────
-    # The bash parser in multi_os_benchmark.sh expects the standard ECS
-    # response shape: { "servers": [ { "id", "name", "status", "metadata",
-    #                                   "addresses", "image", "tags" } ] }
+    # ── Serialise SDK objects → plain dicts ───────────────────────────────
     try:
-        servers_json = [s.to_json_object() for s in all_servers]
+        all_servers = [s.to_json_object() for s in all_servers_raw]
     except Exception as e:
-        print(
-            f"[hw_ecs_discover] ❌ Failed to serialise server objects: {e}",
-            file=sys.stderr,
-        )
+        log(f"❌ Failed to serialise server objects: {e}")
         sys.exit(1)
 
-    count = len(servers_json)
-    print(
-        f"[hw_ecs_discover] ✅ {count} server(s) returned from {endpoint}",
-        file=sys.stderr,
-    )
+    # ── TSV output mode ───────────────────────────────────────────────────
+    # Used by fleet_commander.yml discover-vms step to avoid inline Python in YAML.
+    # Outputs only ACTIVE servers that have a floating (public) IP and pass the
+    # optional tag filter. One TSV line per server:
+    #   os_type  image_name  vm_name  public_ip  server_id
+    if tsv_mode:
+        emitted = 0
+        for s in all_servers:
+            if s.get("status") != "ACTIVE":
+                continue
+            if not tag_matches(s, tag_key, tag_val):
+                continue
+            public_ip = get_public_ip(s)
+            if not public_ip:
+                continue
+            name      = s.get("name", "")
+            srv_id    = s.get("id", "")
+            meta      = s.get("metadata") or {}
+            os_type   = meta.get("os_type", "Linux")
+            img_name  = (s.get("image") or {}).get("name", "").lower()
+            # Tab-separated: matches what classify_vm in fleet_commander.yml expects
+            print(f"{os_type}\t{img_name}\t{name}\t{public_ip}\t{srv_id}")
+            emitted += 1
+        log(f"✅ {emitted} ACTIVE server(s) with public IP emitted as TSV (endpoint: {endpoint})")
+        return
 
-    # stdout = clean JSON only — bash checks `if [ -z "$HW_RAW" ]`
-    print(json.dumps({"servers": servers_json}))
+    # ── JSON output mode (default) ────────────────────────────────────────
+    # Used by multi_os_benchmark.sh. Returns full server list; bash-side Python
+    # block does filtering. stdout must be either valid JSON or empty.
+    if tag_key and tag_val:
+        all_servers = [s for s in all_servers if tag_matches(s, tag_key, tag_val)]
+
+    log(f"✅ {len(all_servers)} server(s) returned from {endpoint}")
+    print(json.dumps({"servers": all_servers}))
 
 
 if __name__ == "__main__":
