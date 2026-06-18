@@ -273,61 +273,38 @@ jobs:
 
           # ── Huawei Cloud ──────────────────────────────────────────────
           # FIX: replaced hcloud ECS ListServersDetails (KooCLI, wrong endpoint)
-          # with hw_ecs_discover.py (SDK, explicit private endpoint).
-          # pip install already ran in the auth step above so the SDK is available.
+          # with hw_ecs_discover.py --tsv (SDK, explicit private endpoint).
+          #
+          # --tsv outputs one line per ACTIVE server with a public IP:
+          #   os_type  image_name  vm_name  public_ip  server_id
+          # This eliminates the inline python3 -c "..." block that was here
+          # before, which caused YAML parse errors in editors and linters
+          # (Python indentation + colons + f-strings inside a quoted bash
+          # string inside a YAML run: block).
+          #
+          # pip install already ran in the auth step above.
           if [ "$CLOUD" == "huaweicloud" ]; then
             HW_ECS_ENDPOINT="https://ecs.${HW_REGION}.alphaedge.tmone.com.my"
             echo "📡 [HuaweiCloud] Querying ECS via SDK [${HW_ECS_ENDPOINT}]..."
 
-            HW_RAW=$(
+            while IFS=$'\t' read -r os offer name ip _srv_id; do
+              classify_vm "$os" "$offer" "$name" "$ip"
+            done < <(
               HUAWEICLOUD_ACCESS_KEY="$HUAWEICLOUD_ACCESS_KEY" \
               HUAWEICLOUD_SECRET_KEY="$HUAWEICLOUD_SECRET_KEY" \
               HW_PROJECT_ID="$HW_PROJECT_ID" \
               HW_ECS_ENDPOINT="$HW_ECS_ENDPOINT" \
               HW_ECS_TAG_KEY="$HW_ECS_TAG_KEY" \
               HW_ECS_TAG_VAL="$HW_ECS_TAG_VAL" \
-              python3 hw_ecs_discover.py 2>/tmp/hw_discover_err.log
+              python3 hw_ecs_discover.py --tsv 2>/tmp/hw_discover_err.log
             )
 
-            if [ -z "$HW_RAW" ]; then
-              echo "❌ [HuaweiCloud] ECS discovery returned empty."
+            if [ "${PIPESTATUS[0]:-$?}" -ne 0 ]; then
+              echo "❌ [HuaweiCloud] ECS discovery failed."
               echo "   Check: HW_ACCESS_KEY, HW_SECRET_KEY, HW_PROJECT_ID, endpoint"
               [ -s /tmp/hw_discover_err.log ] && cat /tmp/hw_discover_err.log
               exit 1
             fi
-
-            # Parse the JSON output from hw_ecs_discover.py into TSV rows
-            while IFS=$'\t' read -r os offer name ip _srv_id; do
-              classify_vm "$os" "$offer" "$name" "$ip"
-            done < <(echo "$HW_RAW" | python3 -c "
-import json, sys, os
-data    = json.load(sys.stdin)
-tag_key = os.environ.get('HW_ECS_TAG_KEY', '')
-tag_val = os.environ.get('HW_ECS_TAG_VAL', '')
-for s in data.get('servers', []):
-    name     = s.get('name', '')
-    srv_id   = s.get('id', '')
-    status   = s.get('status', '')
-    meta     = s.get('metadata', {})
-    os_type  = meta.get('os_type', 'Linux')
-    img_name = s.get('image', {}).get('name', '').lower()
-    if tag_key:
-        tags = {t.get('key',''): t.get('value','') for t in s.get('tags', [])}
-        if tag_val and tags.get(tag_key, '') != tag_val:
-            continue
-    public_ip = ''
-    for addrs in s.get('addresses', {}).values():
-        for a in addrs:
-            if a.get('OS-EXT-IPS:type') == 'floating':
-                public_ip = a.get('addr', '')
-                break
-        if public_ip:
-            break
-    if not public_ip:
-        continue
-    power = 'running' if status == 'ACTIVE' else status
-    print(f'{os_type}\t{img_name}\t{name}\t{public_ip}\t{srv_id}')
-")
           fi
 
           # ── Build grouped matrix ───────────────────────────────────────
