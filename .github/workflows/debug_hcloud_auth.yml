@@ -9,7 +9,6 @@ jobs:
         env:
           HUAWEICLOUD_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
           HUAWEICLOUD_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
-          HUAWEICLOUD_SECURITY_TOKEN: ${{ secrets.HW_SECURITY_TOKEN }}
           HW_REGION:              ${{ vars.HW_REGION }}
           HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
         run: |
@@ -20,17 +19,11 @@ jobs:
           echo "HW_PROJECT_ID : $HW_PROJECT_ID"
           echo "AK length     : ${#HUAWEICLOUD_ACCESS_KEY}"
           echo "SK length     : ${#HUAWEICLOUD_SECRET_KEY}"
-          echo "Token length  : ${#HUAWEICLOUD_SECURITY_TOKEN}"
           [ -z "$HUAWEICLOUD_ACCESS_KEY" ] && echo "❌ HW_ACCESS_KEY is EMPTY" || echo "✅ HW_ACCESS_KEY is set"
           [ -z "$HUAWEICLOUD_SECRET_KEY" ] && echo "❌ HW_SECRET_KEY is EMPTY" || echo "✅ HW_SECRET_KEY is set"
-          [ -z "$HUAWEICLOUD_SECURITY_TOKEN" ] && echo "⚠️  HW_SECURITY_TOKEN is EMPTY (required for TEMP keys)" || echo "✅ HW_SECURITY_TOKEN is set"
           [ -z "$HW_REGION" ]              && echo "❌ HW_REGION is EMPTY"     || echo "✅ HW_REGION is set"
           [ -z "$HW_PROJECT_ID" ]          && echo "❌ HW_PROJECT_ID is EMPTY" || echo "✅ HW_PROJECT_ID is set"
-          echo ""
-          echo "========================================"
-          echo "1b. RUNNER CLOCK CHECK (for temp key expiry diagnosis)"
-          echo "========================================"
-          date -u
+
           echo ""
           echo "========================================"
           echo "2. DOWNLOADING KooCLI"
@@ -41,7 +34,7 @@ jobs:
             && echo "✅ hcloud tar.gz downloaded OK" \
             || { echo "❌ Download FAILED"; exit 1; }
           if file /tmp/hcloud.tar.gz | grep -q "XML\|ASCII\|HTML"; then
-            echo "❌ Downloaded file is not a tar.gz"
+            echo "❌ Downloaded file is not a tar.gz — got:"
             cat /tmp/hcloud.tar.gz
             exit 1
           fi
@@ -50,24 +43,25 @@ jobs:
           chmod +x /usr/local/bin/hcloud
           echo "✅ hcloud installed"
           hcloud --version 2>&1 || true
+
           echo ""
           echo "========================================"
-          echo "3. CONFIGURING hcloud (TEMP key: AK + SK + Security Token)"
+          echo "3. CONFIGURING hcloud (permanent AK/SK)"
           echo "========================================"
           hcloud configure set \
             --cli-mode=AKSK \
             --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
             --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
-            --cli-security-token="$HUAWEICLOUD_SECURITY_TOKEN" \
             --cli-region="$HW_REGION" \
             --cli-project-id="$HW_PROJECT_ID" \
             --cli-agree-privacy-statement=true \
             --cli-lang=en < /dev/null 2>&1
           echo "Configure exit code: $?"
           hcloud configure list 2>&1 || true
+
           echo ""
           echo "========================================"
-          echo "4. TESTING ECS API CALL (with security token)"
+          echo "4. TESTING ECS API CALL"
           echo "========================================"
           hcloud ECS ListServersDetails \
             --cli-region="$HW_REGION" 2>&1
