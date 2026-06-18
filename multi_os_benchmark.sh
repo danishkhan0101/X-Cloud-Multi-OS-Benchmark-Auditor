@@ -172,6 +172,17 @@ prefetch_scap_packages() {
         # FIX 1: was missing && between rm and mkdir — rm was treating "mkdir" as an argument
         rm -rf "${SCAP_CACHE_DIR}/ubuntu2204/"* && mkdir -p "${SCAP_CACHE_DIR}/ubuntu2204/"
         echo -e "${CYAN}   Fetching Ubuntu 22.04 packages via Docker...${NC}"
+        # FIX 4: ubuntu:22.04 Docker image only enables 'main' by default; ssg-base is in
+        # 'universe'. Without explicitly adding universe, apt-get exits non-zero, the &&
+        # chain breaks, cp never runs, and the cache directory stays empty.
+        # Solution: add universe explicitly, then install packages with || true so the
+        # cp always runs even if an optional package isn't found.
+        # FIX 5: Run each package group as a separate download command.
+        # When openscap-scanner and ssg-base were combined in one command, any
+        # dependency conflict silently failed the whole command (2>/dev/null || true)
+        # and neither ended up in the cache — so oscap was never installed on the VM.
+        # Splitting them means a failure in one package group cannot block the others.
+        # Also adding jammy-updates universe for the latest patched package versions.
         docker run --rm \
             -v "${SCAP_CACHE_DIR}/ubuntu2204:/output" \
             ubuntu:22.04 \
@@ -179,23 +190,35 @@ prefetch_scap_packages() {
                 export DEBIAN_FRONTEND=noninteractive
                 apt-get update -qq 2>/dev/null
                 echo 'deb http://archive.ubuntu.com/ubuntu jammy universe' >> /etc/apt/sources.list
+                echo 'deb http://archive.ubuntu.com/ubuntu jammy-updates universe' >> /etc/apt/sources.list
                 apt-get update -qq 2>/dev/null
-                apt-get install --download-only -y openscap-scanner ssg-base 2>/dev/null || true
-                apt-get install --download-only -y 'libopenscap*' 'libopendbx*' 2>/dev/null || true
+                apt-get install --download-only -y openscap-scanner 2>/dev/null || true
+                apt-get install --download-only -y ssg-base 2>/dev/null || true
+                apt-get install --download-only -y 'libopenscap*' 2>/dev/null || true
+                apt-get install --download-only -y 'libopendbx*' 2>/dev/null || true
                 cp /var/cache/apt/archives/*.deb /output/ 2>/dev/null || true
-            "
-        echo -e "${GREEN}   ✅ Ubuntu2204 cached${NC}"
+            " \
+            && echo -e "${GREEN}   ✅ Ubuntu2204 cached${NC}" \
+            || echo -e "${RED}   ❌ Ubuntu2204 Docker step failed${NC}"
     fi
 
     if $need_ubuntu; then
         # FIX 1 (same): was `rm ... * mkdir -p ...` — missing && caused rm to treat mkdir as arg
         rm -rf "${SCAP_CACHE_DIR}/ubuntu2404/"* && mkdir -p "${SCAP_CACHE_DIR}/ubuntu2404/"
         echo -e "${CYAN}   Fetching Ubuntu 24.04 packages via Docker...${NC}"
+        # ubuntu:24.04 ships with universe pre-enabled; using || true for consistency
         docker run --rm \
             -v "${SCAP_CACHE_DIR}/ubuntu2404:/output" \
             ubuntu:24.04 \
-            bash -c "apt-get update -qq && apt-get install --download-only -y openscap-scanner ssg-base libopenscap* libopendbx* 2>/dev/null && cp /var/cache/apt/archives/*.deb /output/ 2>/dev/null"
-        echo -e "${GREEN}   ✅ Ubuntu2404 cached${NC}"
+            bash -c "
+                export DEBIAN_FRONTEND=noninteractive
+                apt-get update -qq 2>/dev/null
+                apt-get install --download-only -y openscap-scanner ssg-base 2>/dev/null || true
+                apt-get install --download-only -y 'libopenscap*' 'libopendbx*' 2>/dev/null || true
+                cp /var/cache/apt/archives/*.deb /output/ 2>/dev/null || true
+            " \
+            && echo -e "${GREEN}   ✅ Ubuntu2404 cached${NC}" \
+            || echo -e "${RED}   ❌ Ubuntu2404 Docker step failed${NC}"
     fi
 
     local failed=0
@@ -390,8 +413,31 @@ ensure_linux_scap_tools() {
 
     local install_cmd
     if [ "$pkg_mgr" == "apt" ]; then
-        install_cmd="sudo dpkg -i /tmp/scap_offline/*.deb 2>/dev/null || true; \
-                     sudo apt-get install -f -y 2>/dev/null || true"
+        # FIX 6: The old `apt-get install -f -y` step removed our installed packages
+        # when the VM had a newer/conflicting openscap (e.g. openscap-common 1.3.9 from
+        # noble left over from a previous run). apt -f resolves conflicts by removing
+        # the packages we just installed, leaving oscap missing.
+        #
+        # New approach:
+        #   1. dpkg --force-overwrite handles file-level conflicts without removing pkgs.
+        #   2. dpkg --configure -a configures any unpacked packages without apt's removal.
+        #   3. If oscap is still missing after the offline install (conflict won the fight),
+        #      fall back to apt-get install directly on the VM — apt will correctly choose
+        #      a version of openscap-scanner that's compatible with what's already installed.
+        #   4. Same fallback for ssg-base content files.
+        install_cmd='
+            export DEBIAN_FRONTEND=noninteractive
+            sudo dpkg -i --force-overwrite /tmp/scap_offline/*.deb 2>/dev/null || true
+            sudo dpkg --configure -a 2>/dev/null || true
+            if ! command -v oscap >/dev/null 2>&1; then
+                echo "[Tool Guard] oscap not available after offline install — trying apt fallback"
+                sudo apt-get install -y --no-install-recommends openscap-scanner 2>/dev/null || true
+            fi
+            if ! ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1; then
+                echo "[Tool Guard] SCAP content missing — trying apt fallback for ssg-base"
+                sudo apt-get install -y --no-install-recommends ssg-base 2>/dev/null || true
+            fi
+        '
     else
         install_cmd="sudo dnf install -y --disablerepo='*' --allowerasing \
                          /tmp/scap_offline/*.rpm 2>/dev/null || \
