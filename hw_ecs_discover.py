@@ -41,7 +41,6 @@ def get_target_ip(server):
     addresses_block = server.get("addresses") or {}
     all_ips = []
     
-    # 1. Extract every IP address attached to the machine
     for network_name, addrs in addresses_block.items():
         if isinstance(addrs, list):
             for a in addrs:
@@ -51,11 +50,8 @@ def get_target_ip(server):
                     all_ips.append(a)
                     
     if not all_ips:
-        # Print the raw block so we can debug if Huawei changes the API again
-        log(f"DEBUG: Could not find IPs. Raw addresses block: {json.dumps(addresses_block)}")
         return ""
         
-    # 2. Prefer Public IPs (so GitHub Actions can reach it over the internet)
     for ip in all_ips:
         try:
             if not ipaddress.ip_address(ip).is_private:
@@ -63,7 +59,6 @@ def get_target_ip(server):
         except ValueError:
             pass
             
-    # 3. Fallback to the first Private IP found
     return all_ips[0]
 
 
@@ -103,6 +98,7 @@ def main():
     endpoint   = required["HW_ECS_ENDPOINT"]
     tag_key    = os.environ.get("HW_ECS_TAG_KEY", "").strip()
     tag_val    = os.environ.get("HW_ECS_TAG_VAL", "").strip()
+    eps_id     = os.environ.get("HW_EPS_ID", "").strip()
 
     # ── Import SDK ────────────────────────────────────────────────────────
     try:
@@ -128,9 +124,6 @@ def main():
     # ── Paginated fetch ───────────────────────────────────────────────────
     all_servers_raw = []
     offset = 1  
-
-    # Grab the EPS ID from the environment
-    eps_id = os.environ.get("HW_EPS_ID", "").strip()
 
     while True:
         try:
@@ -173,29 +166,28 @@ def main():
     if tsv_mode:
         emitted = 0
         for s in all_servers:
-            name = s.get("name", "Unknown")
+            # FIX: Force every variable to have a fallback string so Bash columns never collapse
+            name = s.get("name") or "unknown_name"
             status = str(s.get("status", "")).upper()
             
-            # 1. Status Filter
             if status not in ("ACTIVE", "RUNNING"):
-                log(f"⚠️ Skipping {name}: Status is '{status}'")
                 continue
             
-            # 2. Tag Filter
             if not tag_matches(s, tag_key, tag_val):
-                log(f"⚠️ Skipping {name}: Tag mismatch (Looking for {tag_key}={tag_val})")
                 continue
             
-            # 3. IP Filter
             target_ip = get_target_ip(s)
             if not target_ip:
-                log(f"⚠️ Skipping {name}: No valid IP address found.")
                 continue
             
-            srv_id    = s.get("id", "")
+            srv_id    = s.get("id") or "unknown_id"
             meta      = s.get("metadata") or {}
-            os_type   = meta.get("os_type", "Linux")
-            img_name  = (s.get("image") or {}).get("name", "").lower()
+            os_type   = meta.get("os_type") or "Linux"
+            img_name  = (s.get("image") or {}).get("name") or "unknown_image"
+            
+            # Ensure no tabs or newlines inside the variables
+            img_name = img_name.replace('\t', ' ').replace('\n', ' ')
+            name = name.replace('\t', ' ').replace('\n', ' ')
             
             print(f"{os_type}\t{img_name}\t{name}\t{target_ip}\t{srv_id}")
             emitted += 1
