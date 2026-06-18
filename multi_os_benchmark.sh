@@ -907,6 +907,7 @@ cloud_hcloud_check() {
         HUAWEICLOUD_SECRET_KEY="${HUAWEICLOUD_SECRET_KEY}" \
         HW_PROJECT_ID="${HW_PROJECT_ID}" \
         HW_ECS_ENDPOINT="${HW_ECS_ENDPOINT}" \
+        HW_EPS_ID="${HW_EPS_ID}" \
         python3 "$(dirname "$0")/hw_ecs_discover.py" >/dev/null 2>/tmp/hw_check_err.log; then
         echo -e "${RED}❌ [HuaweiCloud] SDK auth/connectivity check failed.${NC}"
         [ -s /tmp/hw_check_err.log ] && cat /tmp/hw_check_err.log
@@ -1265,14 +1266,17 @@ huaweicloud)
     # query the wrong region. We use the official SDK directly instead,
     # which signs requests locally with AK/SK and targets the endpoint
     # explicitly. Confirmed working against this exact endpoint.
-    HW_RAW=$(HUAWEICLOUD_ACCESS_KEY="${HUAWEICLOUD_ACCESS_KEY}" \
-             HUAWEICLOUD_SECRET_KEY="${HUAWEICLOUD_SECRET_KEY}" \
-             HW_PROJECT_ID="${HW_PROJECT_ID}" \
-             HW_ECS_ENDPOINT="${HW_ECS_ENDPOINT}" \
-             python3 "$(dirname "$0")/hw_ecs_discover.py" 2>/tmp/hw_discover_err.log)
-    if [ -z "$HW_RAW" ]; then
-        echo -e "${RED}❌ [HuaweiCloud] ECS list returned empty. Check AK/SK, HW_PROJECT_ID, and endpoint.${NC}"
-        [ -s /tmp/hw_discover_err.log ] && cat /tmp/hw_discover_err.log
+    HW_RAW=$(
+        HUAWEICLOUD_ACCESS_KEY="${HUAWEICLOUD_ACCESS_KEY}" \
+        HUAWEICLOUD_SECRET_KEY="${HUAWEICLOUD_SECRET_KEY}" \
+        HW_PROJECT_ID="${HW_PROJECT_ID}" \
+        HW_ECS_ENDPOINT="${HW_ECS_ENDPOINT}" \
+        HW_EPS_ID="${HW_EPS_ID}" \
+        python3 "$(dirname "$0")/hw_ecs_discover.py"
+    )
+    
+    if [ $? -ne 0 ] || [ -z "$HW_RAW" ]; then
+        echo -e "${RED}❌ [HuaweiCloud] ECS list returned empty or failed.${NC}"
     else
         echo "$HW_RAW" | python3 - <<'PYEOF'
 import json, sys, os
