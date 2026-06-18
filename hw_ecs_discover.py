@@ -8,6 +8,7 @@ SDK-based ECS discovery for Alpha Edge (private Huawei Cloud deployment).
 import json
 import os
 import sys
+import ipaddress
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -20,8 +21,6 @@ def log(msg):
 def serialize(obj):
     """
     Recursively convert Huawei Cloud SDK objects into plain Python types.
-    This bypasses an SDK bug where `.to_dict()` is shallow and leaves
-    nested ServerAddress/Tag objects inside list/dict values.
     """
     if hasattr(obj, "to_dict"):
         try:
@@ -38,21 +37,34 @@ def serialize(obj):
 
 
 def get_target_ip(server):
-    """Return the floating IP if available, otherwise fallback to the fixed/private IP."""
-    fixed_ip = ""
-    for addrs in (server.get("addresses") or {}).values():
-        for a in addrs:
-            if not isinstance(a, dict):
-                continue
+    """Scrape all IPs from the server, preferring Public EIPs over Private IPs."""
+    addresses_block = server.get("addresses") or {}
+    all_ips = []
+    
+    # 1. Extract every IP address attached to the machine
+    for network_name, addrs in addresses_block.items():
+        if isinstance(addrs, list):
+            for a in addrs:
+                if isinstance(a, dict) and a.get("addr"):
+                    all_ips.append(a.get("addr"))
+                elif isinstance(a, str):
+                    all_ips.append(a)
+                    
+    if not all_ips:
+        # Print the raw block so we can debug if Huawei changes the API again
+        log(f"DEBUG: Could not find IPs. Raw addresses block: {json.dumps(addresses_block)}")
+        return ""
+        
+    # 2. Prefer Public IPs (so GitHub Actions can reach it over the internet)
+    for ip in all_ips:
+        try:
+            if not ipaddress.ip_address(ip).is_private:
+                return ip
+        except ValueError:
+            pass
             
-            ip_type = a.get("OS-EXT-IPS:type") or a.get("os_ext_ips_type")
-            
-            if ip_type == "floating":
-                return a.get("addr", "")
-            elif ip_type == "fixed" and not fixed_ip:
-                fixed_ip = a.get("addr", "")
-                
-    return fixed_ip
+    # 3. Fallback to the first Private IP found
+    return all_ips[0]
 
 
 def tag_matches(server, tag_key, tag_val):
@@ -92,7 +104,7 @@ def main():
     tag_key    = os.environ.get("HW_ECS_TAG_KEY", "").strip()
     tag_val    = os.environ.get("HW_ECS_TAG_VAL", "").strip()
 
-    # ── Import SDK (gives a clear error if not installed) ─────────────────
+    # ── Import SDK ────────────────────────────────────────────────────────
     try:
         from huaweicloudsdkcore.auth.credentials import BasicCredentials
         from huaweicloudsdkcore.exceptions import exceptions
@@ -113,7 +125,7 @@ def main():
         log(f"❌ Failed to build SDK client: {e}")
         sys.exit(1)
 
-    # ── Paginated fetch (ECS API defaults to 25 servers per page) ─────────
+    # ── Paginated fetch ───────────────────────────────────────────────────
     all_servers_raw = []
     offset = 1  
 
