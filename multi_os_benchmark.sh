@@ -220,9 +220,9 @@ prefetch_scap_packages() {
         if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2204/"*.deb 2>/dev/null)" ]; then
             echo -e "${CYAN}   Fetching Ubuntu2204 packages...${NC}"
             sudo apt-get install --download-only -y \
-                openscap-scanner ssg-base 2>/dev/null
+                openscap-scanner ssg-base libopenscap* libopendbx* 2>/dev/null
             sudo find /var/cache/apt/archives/ \
-                \( -name "openscap*.deb" -o -name "ssg*.deb" \) \
+                \( -name "openscap*.deb" -o -name "ssg*.deb" -o -name "libopenscap*.deb" -o -name "libopendbx*.deb" \) \
                 -not -path "*/partial/*" \
                 | xargs -I{} cp {} "${SCAP_CACHE_DIR}/ubuntu2204/" 2>/dev/null
             echo -e "${GREEN}   ✅ Ubuntu2204 cached${NC}"
