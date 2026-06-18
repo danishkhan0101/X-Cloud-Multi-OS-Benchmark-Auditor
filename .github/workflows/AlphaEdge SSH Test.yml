@@ -13,9 +13,9 @@ jobs:
 
       - name: '🔍 Test SSH Password Connection'
         env:
-          VM_IP:      ${{ vars.VM_PUBLIC_IP }}
-          VM_USER:    ${{ vars.LINUX_ADMIN_USER }}
-          VM_PASS:    ${{ secrets.VM_SSH_PASSWORD }}
+          VM_IP:   ${{ vars.VM_PUBLIC_IP }}
+          VM_USER: ${{ vars.LINUX_ADMIN_USER }}
+          VM_PASS: ${{ secrets.VM_SSH_PASSWORD }}
         run: |
           echo "========================================"
           echo "1. SSH CONNECTIVITY"
@@ -24,7 +24,7 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o ConnectTimeout=10 \
             ${VM_USER}@${VM_IP} \
-            "echo '✅ Connected as $(whoami) on $(hostname)' && uname -a"
+            'echo "✅ Connected as $(whoami) on $(hostname)" && uname -a'
 
           echo ""
           echo "========================================"
