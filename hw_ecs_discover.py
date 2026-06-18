@@ -3,50 +3,6 @@
 hw_ecs_discover.py
 ──────────────────
 SDK-based ECS discovery for Alpha Edge (private Huawei Cloud deployment).
-
-WHY THIS EXISTS
-  hcloud (KooCLI) resolves endpoints from its own internal metadata catalogue,
-  which only knows public Huawei Cloud regions (*.myhuaweicloud.com). It has no
-  awareness of private endpoints like ecs.my-kualalumpur-1.alphaedge.tmone.com.my,
-  so `hcloud ECS ListServersDetails` silently queried the wrong region and
-  returned an empty list. This script uses the official Python SDK instead,
-  which signs each request locally with AK/SK (HMAC-SHA256) and is pointed
-  explicitly at the private endpoint. Confirmed working end-to-end from both
-  a local Windows machine and GitHub Actions hosted runners.
-
-USAGE
-  Required env vars:
-    HUAWEICLOUD_ACCESS_KEY   IAM Access Key (AK)
-    HUAWEICLOUD_SECRET_KEY   IAM Secret Key (SK)
-    HW_PROJECT_ID            IAM Project ID (Console → My Credentials → Projects)
-    HW_ECS_ENDPOINT          Full private ECS endpoint URL
-                             e.g. https://ecs.my-kualalumpur-1.alphaedge.tmone.com.my
-
-  Optional env vars:
-    HW_ECS_TAG_KEY           Tag key to filter instances  (e.g. "Environment")
-    HW_ECS_TAG_VAL           Tag value to match           (e.g. "Prod")
-                             Both must be set for tag filtering to apply.
-
-OUTPUT MODES
-  Default (no flag):
-    JSON to stdout — standard ECS API response shape:
-      { "servers": [ { "id", "name", "status", "metadata", "addresses",
-                       "image", "tags", ... } ] }
-    Used by: multi_os_benchmark.sh (huaweicloud discovery block)
-
-  --tsv flag:
-    TSV to stdout — one line per ACTIVE server with a public (floating) IP:
-      os_type  image_name  vm_name  public_ip  server_id
-    Used by: fleet_commander.yml (discover-vms step)
-    Eliminates the need for any inline Python inside the YAML workflow.
-
-  In both modes:
-    - All diagnostic messages go to stderr only
-    - stdout is either valid output or completely empty (never partial)
-    - Exit code 0 on success, non-zero on any failure
-
-DEPENDENCIES
-  pip install huaweicloudsdkcore huaweicloudsdkecs
 """
 
 import json
@@ -159,16 +115,16 @@ def main():
 
     # ── Paginated fetch (ECS API defaults to 25 servers per page) ─────────
     all_servers_raw = []
-    offset = 1  # ECS ListServersDetails uses 1-based page offset
+    offset = 1  
 
-    # Grab the EPS ID from the environment (put this right before the while loop)
+    # Grab the EPS ID from the environment
     eps_id = os.environ.get("HW_EPS_ID", "").strip()
 
     while True:
         try:
             req        = ListServersDetailsRequest()
             req.offset = offset
-            req.limit  = 100   # max allowed per page
+            req.limit  = 100   
             
             # Add the Enterprise Project ID filter if provided
             if eps_id:
@@ -177,70 +133,58 @@ def main():
             resp       = client.list_servers_details(req)
         except exceptions.ClientRequestException as e:
             if e.status_code == 401:
-                log(
-                    f"❌ 401 Unauthorized — AK/SK invalid or expired. "
-                    f"error_code={e.error_code}"
-                )
+                log(f"❌ 401 Unauthorized — error_code={e.error_code}")
             elif e.status_code == 403:
-                log(
-                    f"❌ 403 Forbidden — AK/SK valid but IAM user has no "
-                    f"ECS:ListServersDetails permission on project {project_id}. "
-                    f"error_code={e.error_code}"
-                )
+                log(f"❌ 403 Forbidden — error_code={e.error_code}")
             else:
                 log(f"❌ API error {e.status_code}: {e.error_code} — {e.error_msg}")
             sys.exit(1)
         except Exception as e:
-            msg = str(e)
-            if "Name or service not known" in msg or "getaddrinfo" in msg:
-                log(
-                    f"❌ DNS resolution failed for endpoint: {endpoint}\n"
-                    f"   The endpoint is not reachable from this network/runner."
-                )
-            elif "Connection refused" in msg or "timed out" in msg.lower():
-                log(f"❌ Connection failed to {endpoint} — check network/firewall.")
-            else:
-                log(f"❌ Unexpected error: {e}")
+            log(f"❌ Unexpected error: {e}")
             sys.exit(1)
 
         page = resp.servers or []
         all_servers_raw.extend(page)
 
-        if len(page) < 100:   # partial page = last page
+        if len(page) < 100:   
             break
         offset += 1
 
     # ── Serialise SDK objects → plain dicts ───────────────────────────────
     try:
-        # We process the raw response through our recursive serializer so 
-        # that nested objects like ServerAddress are fully flattened into dicts.
         all_servers = [serialize(s) for s in all_servers_raw]
     except Exception as e:
         log(f"❌ Failed to serialise server objects: {e}")
         sys.exit(1)
 
-# ── TSV output mode ───────────────────────────────────────────────────
+    # ── TSV output mode ───────────────────────────────────────────────────
     if tsv_mode:
         emitted = 0
         for s in all_servers:
-            if s.get("status") != "ACTIVE":
+            name = s.get("name", "Unknown")
+            status = str(s.get("status", "")).upper()
+            
+            # 1. Status Filter
+            if status not in ("ACTIVE", "RUNNING"):
+                log(f"⚠️ Skipping {name}: Status is '{status}'")
                 continue
             
+            # 2. Tag Filter
             if not tag_matches(s, tag_key, tag_val):
+                log(f"⚠️ Skipping {name}: Tag mismatch (Looking for {tag_key}={tag_val})")
                 continue
             
-            # Use the new function here
+            # 3. IP Filter
             target_ip = get_target_ip(s)
             if not target_ip:
+                log(f"⚠️ Skipping {name}: No valid IP address found.")
                 continue
             
-            name      = s.get("name", "")
             srv_id    = s.get("id", "")
             meta      = s.get("metadata") or {}
             os_type   = meta.get("os_type", "Linux")
             img_name  = (s.get("image") or {}).get("name", "").lower()
             
-            # Output the target_ip instead of public_ip
             print(f"{os_type}\t{img_name}\t{name}\t{target_ip}\t{srv_id}")
             emitted += 1
             
