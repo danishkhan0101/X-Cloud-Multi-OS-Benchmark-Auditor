@@ -1,0 +1,23 @@
+name: 🔐 AK/SK ECS Auth Test
+on:
+  workflow_dispatch:
+
+jobs:
+  test-aksk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Huawei Cloud SDK
+        run: pip install huaweicloudsdkcore huaweicloudsdkecs
+
+      - name: Run AK/SK auth test
+        env:
+          HW_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
+          HW_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
+          HW_PROJECT_ID: ${{ vars.HW_PROJECT_ID }}
+        run: python test_aksk_auth.py
