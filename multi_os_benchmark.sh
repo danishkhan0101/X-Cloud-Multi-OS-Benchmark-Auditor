@@ -218,13 +218,11 @@ prefetch_scap_packages() {
 
     if $need_ubuntu; then
         if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2204/"*.deb 2>/dev/null)" ]; then
-            echo -e "${CYAN}   Fetching Ubuntu2204 packages...${NC}"
-            sudo apt-get install --download-only -y \
-                openscap-scanner ssg-base libopenscap* libopendbx* 2>/dev/null
-            sudo find /var/cache/apt/archives/ \
-                \( -name "openscap*.deb" -o -name "ssg*.deb" -o -name "libopenscap*.deb" -o -name "libopendbx*.deb" \) \
-                -not -path "*/partial/*" \
-                | xargs -I{} cp {} "${SCAP_CACHE_DIR}/ubuntu2204/" 2>/dev/null
+            echo -e "${CYAN}   Fetching Ubuntu 22.04 packages via Docker...${NC}"
+            docker run --rm \
+                -v "${SCAP_CACHE_DIR}/ubuntu2204:/output" \
+                ubuntu:22.04 \
+                bash -c "apt-get update -qq && apt-get install --download-only -y openscap-scanner ssg-base 2>/dev/null && cp /var/cache/apt/archives/*.deb /output/ 2>/dev/null"
             echo -e "${GREEN}   ✅ Ubuntu2204 cached${NC}"
         else
             echo -e "${GREEN}   ✅ Ubuntu2204 cache valid — skipping download${NC}"
@@ -233,13 +231,11 @@ prefetch_scap_packages() {
 
     if $need_ubuntu; then
         if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2404/"*.deb 2>/dev/null)" ]; then
-            echo -e "${CYAN}   Fetching Ubuntu2404 packages...${NC}"
-            sudo apt-get install --download-only -y \
-                openscap-scanner ssg-base 2>/dev/null
-            sudo find /var/cache/apt/archives/ \
-                \( -name "openscap*.deb" -o -name "ssg*.deb" \) \
-                -not -path "*/partial/*" \
-                | xargs -I{} cp {} "${SCAP_CACHE_DIR}/ubuntu2404/" 2>/dev/null
+            echo -e "${CYAN}   Fetching Ubuntu 24.04 packages via Docker...${NC}"
+            docker run --rm \
+                -v "${SCAP_CACHE_DIR}/ubuntu2404:/output" \
+                ubuntu:24.04 \
+                bash -c "apt-get update -qq && apt-get install --download-only -y openscap-scanner ssg-base 2>/dev/null && cp /var/cache/apt/archives/*.deb /output/ 2>/dev/null"
             echo -e "${GREEN}   ✅ Ubuntu2404 cached${NC}"
         else
             echo -e "${GREEN}   ✅ Ubuntu2404 cache valid — skipping download${NC}"
