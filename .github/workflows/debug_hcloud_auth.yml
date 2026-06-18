@@ -1,4 +1,41 @@
-- name: '🔐 Get IAM Token & Test ECS'
+name: 🔍 Debug AlphaEdge Auth
+on:
+  workflow_dispatch:
+jobs:
+  debug-alphaedge:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: '🔍 Check Variables'
+        env:
+          HW_ACCESS_KEY:    ${{ secrets.HW_ACCESS_KEY }}
+          HW_SECRET_KEY:    ${{ secrets.HW_SECRET_KEY }}
+          HW_REGION:        ${{ vars.HW_REGION }}
+          HW_PROJECT_ID:    ${{ vars.HW_PROJECT_ID }}
+          HW_IAM_ENDPOINT:  ${{ vars.HW_IAM_ENDPOINT }}
+          HW_ECS_ENDPOINT:  ${{ vars.HW_ECS_ENDPOINT }}
+          HW_ECS_ID:        ${{ vars.HW_ECS_ID }}
+        run: |
+          echo "========================================"
+          echo "1. CHECKING VARIABLES"
+          echo "========================================"
+          echo "HW_REGION        : $HW_REGION"
+          echo "HW_PROJECT_ID    : $HW_PROJECT_ID"
+          echo "HW_IAM_ENDPOINT  : $HW_IAM_ENDPOINT"
+          echo "HW_ECS_ENDPOINT  : $HW_ECS_ENDPOINT"
+          echo "HW_ECS_ID        : $HW_ECS_ID"
+          echo "AK length        : ${#HW_ACCESS_KEY}"
+          echo "SK length        : ${#HW_SECRET_KEY}"
+          echo ""
+          [ -z "$HW_ACCESS_KEY" ]   && echo "❌ HW_ACCESS_KEY is EMPTY"   || echo "✅ HW_ACCESS_KEY is set"
+          [ -z "$HW_SECRET_KEY" ]   && echo "❌ HW_SECRET_KEY is EMPTY"   || echo "✅ HW_SECRET_KEY is set"
+          [ -z "$HW_REGION" ]       && echo "❌ HW_REGION is EMPTY"       || echo "✅ HW_REGION is set"
+          [ -z "$HW_PROJECT_ID" ]   && echo "❌ HW_PROJECT_ID is EMPTY"   || echo "✅ HW_PROJECT_ID is set"
+          [ -z "$HW_IAM_ENDPOINT" ] && echo "❌ HW_IAM_ENDPOINT is EMPTY" || echo "✅ HW_IAM_ENDPOINT is set"
+          [ -z "$HW_ECS_ENDPOINT" ] && echo "❌ HW_ECS_ENDPOINT is EMPTY" || echo "✅ HW_ECS_ENDPOINT is set"
+          [ -z "$HW_ECS_ID" ]       && echo "❌ HW_ECS_ID is EMPTY"       || echo "✅ HW_ECS_ID is set"
+
+      - name: '🔐 Get IAM Token & Test ECS'
         env:
           HW_ACCESS_KEY:    ${{ secrets.HW_ACCESS_KEY }}
           HW_SECRET_KEY:    ${{ secrets.HW_SECRET_KEY }}
