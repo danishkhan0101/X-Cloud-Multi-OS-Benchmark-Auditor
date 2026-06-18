@@ -1,4 +1,4 @@
-name: 🔍 AlphaEdge SSH Test
+name: 🔍 AlphaEdge SSH Password Test
 on:
   workflow_dispatch:
 
@@ -8,32 +8,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: '🔑 Setup SSH Key'
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
+      - name: '🛠️ Install sshpass'
+        run: sudo apt-get install -y sshpass
 
-      - name: '🔍 Test SSH + Run Mini Scan'
+      - name: '🔍 Test SSH Password Connection'
         env:
-          VM_IP: ${{ vars.VM_PUBLIC_IP }}
-          LINUX_ADMIN_USER: ${{ vars.LINUX_ADMIN_USER }}
+          VM_IP:      ${{ vars.VM_PUBLIC_IP }}
+          VM_USER:    ${{ vars.LINUX_ADMIN_USER }}
+          VM_PASS:    ${{ secrets.VM_SSH_PASSWORD }}
         run: |
-          mkdir -p ~/.ssh
-          echo "StrictHostKeyChecking no" >> ~/.ssh/config
-          echo "UserKnownHostsFile /dev/null"  >> ~/.ssh/config
-
           echo "========================================"
           echo "1. SSH CONNECTIVITY"
           echo "========================================"
-          ssh -o ConnectTimeout=10 ${LINUX_ADMIN_USER}@${VM_IP} \
+          sshpass -p "$VM_PASS" ssh \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=10 \
+            ${VM_USER}@${VM_IP} \
             "echo '✅ Connected as $(whoami) on $(hostname)' && uname -a"
 
           echo ""
           echo "========================================"
-          echo "2. INVOKING BENCHMARK (scan only, Ubuntu, this IP)"
+          echo "2. RUN BENCHMARK (scan only)"
           echo "========================================"
           chmod +x multi_os_benchmark.sh
           AUDIT_PASS=dummy \
+          SSHPASS="$VM_PASS" \
           ./multi_os_benchmark.sh \
             --headless \
             --cloud     huaweicloud \
