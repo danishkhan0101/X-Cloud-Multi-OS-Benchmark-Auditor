@@ -61,11 +61,38 @@ def log(msg):
     print(f"[hw_ecs_discover] {msg}", file=sys.stderr)
 
 
+def serialize(obj):
+    """
+    Recursively convert Huawei Cloud SDK objects into plain Python types.
+    This bypasses an SDK bug where `.to_dict()` is shallow and leaves
+    nested ServerAddress/Tag objects inside list/dict values.
+    """
+    if hasattr(obj, "to_dict"):
+        try:
+            obj = obj.to_dict()
+        except Exception:
+            pass
+            
+    if isinstance(obj, list):
+        return [serialize(i) for i in obj]
+    elif isinstance(obj, dict):
+        return {k: serialize(v) for k, v in obj.items()}
+    else:
+        return obj
+
+
 def get_public_ip(server):
     """Return the first floating IP found in the server's addresses dict, or ''."""
     for addrs in (server.get("addresses") or {}).values():
         for a in addrs:
-            if a.get("OS-EXT-IPS:type") == "floating":
+            if not isinstance(a, dict):
+                continue
+            
+            # Look for both the API JSON key AND the python snake_case attribute name
+            # just in case the SDK's to_dict map translated the key.
+            ip_type = a.get("OS-EXT-IPS:type") or a.get("os_ext_ips_type")
+            
+            if ip_type == "floating":
                 ip = a.get("addr", "")
                 if ip:
                     return ip
@@ -76,13 +103,11 @@ def tag_matches(server, tag_key, tag_val):
     """Return True if tag filtering is disabled OR the server has the matching tag."""
     if not tag_key or not tag_val:
         return True
+    
     raw_tags = server.get("tags") or []
     for t in raw_tags:
         if isinstance(t, dict):
             if t.get("key") == tag_key and t.get("value") == tag_val:
-                return True
-        elif hasattr(t, "key"):
-            if t.key == tag_key and t.value == tag_val:
                 return True
     return False
 
@@ -179,47 +204,46 @@ def main():
 
     # ── Serialise SDK objects → plain dicts ───────────────────────────────
     try:
-        # FIX: Changed .to_json_object() to .to_dict() to properly serialize Huawei Cloud Python SDK objects.
-        all_servers = [s.to_dict() for s in all_servers_raw]
+        # We process the raw response through our recursive serializer so 
+        # that nested objects like ServerAddress are fully flattened into dicts.
+        all_servers = [serialize(s) for s in all_servers_raw]
     except Exception as e:
         log(f"❌ Failed to serialise server objects: {e}")
         sys.exit(1)
 
     # ── TSV output mode ───────────────────────────────────────────────────
-    # Used by fleet_commander.yml discover-vms step to avoid inline Python in YAML.
-    # Outputs only ACTIVE servers that have a floating (public) IP and pass the
-    # optional tag filter. One TSV line per server:
-    #   os_type  image_name  vm_name  public_ip  server_id
     if tsv_mode:
         emitted = 0
         for s in all_servers:
             if s.get("status") != "ACTIVE":
                 continue
+            
             if not tag_matches(s, tag_key, tag_val):
                 continue
+            
             public_ip = get_public_ip(s)
             if not public_ip:
                 continue
+            
             name      = s.get("name", "")
             srv_id    = s.get("id", "")
             meta      = s.get("metadata") or {}
             os_type   = meta.get("os_type", "Linux")
             img_name  = (s.get("image") or {}).get("name", "").lower()
+            
             # Tab-separated: matches what classify_vm in fleet_commander.yml expects
             print(f"{os_type}\t{img_name}\t{name}\t{public_ip}\t{srv_id}")
             emitted += 1
+            
         log(f"✅ {emitted} ACTIVE server(s) with public IP emitted as TSV (endpoint: {endpoint})")
         return
 
     # ── JSON output mode (default) ────────────────────────────────────────
-    # Used by multi_os_benchmark.sh. Returns full server list; bash-side Python
-    # block does filtering. stdout must be either valid JSON or empty.
     if tag_key and tag_val:
         all_servers = [s for s in all_servers if tag_matches(s, tag_key, tag_val)]
 
     log(f"✅ {len(all_servers)} server(s) returned from {endpoint}")
     print(json.dumps({"servers": all_servers}))
-
 
 if __name__ == "__main__":
     main()
