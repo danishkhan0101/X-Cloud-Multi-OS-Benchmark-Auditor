@@ -217,29 +217,27 @@ prefetch_scap_packages() {
     fi
 
     if $need_ubuntu; then
-        if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2204/"*.deb 2>/dev/null)" ]; then
-            echo -e "${CYAN}   Fetching Ubuntu 22.04 packages via Docker...${NC}"
-            docker run --rm \
-                -v "${SCAP_CACHE_DIR}/ubuntu2204:/output" \
-                ubuntu:22.04 \
-                bash -c "apt-get update -qq && apt-get install --download-only -y openscap-scanner ssg-base 2>/dev/null && cp /var/cache/apt/archives/*.deb /output/ 2>/dev/null"
-            echo -e "${GREEN}   ✅ Ubuntu2204 cached${NC}"
-        else
-            echo -e "${GREEN}   ✅ Ubuntu2204 cache valid — skipping download${NC}"
-        fi
+        # Force refresh if cache is suspected stale
+        rm -rf "${SCAP_CACHE_DIR}/ubuntu2204/"* mkdir -p "${SCAP_CACHE_DIR}/ubuntu2204/"
+        
+        echo -e "${CYAN}   Fetching Ubuntu 22.04 packages via Docker...${NC}"
+        docker run --rm \
+            -v "${SCAP_CACHE_DIR}/ubuntu2204:/output" \
+            ubuntu:22.04 \
+            bash -c "apt-get update -qq && apt-get install --download-only -y openscap-scanner ssg-base libopenscap* libopendbx* 2>/dev/null && cp /var/cache/apt/archives/*.deb /output/ 2>/dev/null"
+        echo -e "${GREEN}   ✅ Ubuntu2204 cached${NC}"
     fi
 
     if $need_ubuntu; then
-        if [ ! "$(ls -A "${SCAP_CACHE_DIR}/ubuntu2404/"*.deb 2>/dev/null)" ]; then
-            echo -e "${CYAN}   Fetching Ubuntu 24.04 packages via Docker...${NC}"
-            docker run --rm \
-                -v "${SCAP_CACHE_DIR}/ubuntu2404:/output" \
-                ubuntu:24.04 \
-                bash -c "apt-get update -qq && apt-get install --download-only -y openscap-scanner ssg-base 2>/dev/null && cp /var/cache/apt/archives/*.deb /output/ 2>/dev/null"
-            echo -e "${GREEN}   ✅ Ubuntu2404 cached${NC}"
-        else
-            echo -e "${GREEN}   ✅ Ubuntu2404 cache valid — skipping download${NC}"
-        fi
+        # Force refresh if cache is suspected stale
+        rm -rf "${SCAP_CACHE_DIR}/ubuntu2404/"* mkdir -p "${SCAP_CACHE_DIR}/ubuntu2404/"
+        
+        echo -e "${CYAN}   Fetching Ubuntu 24.04 packages via Docker...${NC}"
+        docker run --rm \
+            -v "${SCAP_CACHE_DIR}/ubuntu2404:/output" \
+            ubuntu:24.04 \
+            bash -c "apt-get update -qq && apt-get install --download-only -y openscap-scanner ssg-base libopenscap* libopendbx* 2>/dev/null && cp /var/cache/apt/archives/*.deb /output/ 2>/dev/null"
+        echo -e "${GREEN}   ✅ Ubuntu2404 cached${NC}"
     fi
 
     local failed=0
