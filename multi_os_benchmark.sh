@@ -221,6 +221,57 @@ prefetch_scap_packages() {
             || echo -e "${RED}   ❌ Ubuntu2404 Docker step failed${NC}"
     fi
 
+    # FIX 7 (root cause of rc=11): The SCAP Security Guide is NOT packaged for Ubuntu
+    # 22.04 (jammy) in the official archive — ssg-base/openscap-scanner jump from focal
+    # (20.04) straight to noble (24.04), so the Docker prefetch above silently caches
+    # only the oscap engine and never the content datastreams. On the air-gapped VM the
+    # apt fallback then can't rescue it either, and the guard `ls .../ssg-*-ds.xml` fails
+    # with exit 11. Additionally, even on 24.04 the ssg-ubuntu*-ds.xml datastreams live in
+    # ssg-debderived, NOT ssg-base — so the apt path was always going to be incomplete.
+    #
+    # Fix: pull the prebuilt datastreams straight from the upstream ComplianceAsCode
+    # release on the runner (which has internet) and drop them into each Ubuntu cache dir.
+    # They ride along to the VM via the existing SCP push and land in
+    # /usr/share/xml/scap/ssg/content/. This works uniformly for 22.04 and 24.04 and
+    # removes the dependency on Ubuntu packaging the content at all.
+    if $need_ubuntu; then
+        local SSG_CONTENT_VER="${SSG_CONTENT_VER:-0.1.81}"
+        local ssg_url="https://github.com/ComplianceAsCode/content/releases/download/v${SSG_CONTENT_VER}/scap-security-guide-${SSG_CONTENT_VER}.tar.bz2"
+        echo -e "${CYAN}   Fetching upstream SCAP content datastreams (v${SSG_CONTENT_VER}) for Ubuntu...${NC}"
+        local ssg_tmp
+        ssg_tmp=$(mktemp -d /tmp/ssg_content_XXXXXX)
+        if curl -fsSL "${ssg_url}" -o "${ssg_tmp}/ssg.tar.bz2" 2>/dev/null; then
+            # Extract only the two Ubuntu datastreams we need (top-level dir is
+            # scap-security-guide-${VER}/). --wildcards needs the leading */ to match it.
+            tar -xjf "${ssg_tmp}/ssg.tar.bz2" -C "${ssg_tmp}" --wildcards \
+                '*/ssg-ubuntu2204-ds.xml' '*/ssg-ubuntu2404-ds.xml' 2>/dev/null || true
+
+            local ds2204 ds2404
+            ds2204=$(find "${ssg_tmp}" -name 'ssg-ubuntu2204-ds.xml' | head -n 1)
+            ds2404=$(find "${ssg_tmp}" -name 'ssg-ubuntu2404-ds.xml' | head -n 1)
+
+            if [ -n "$ds2204" ] && [ -f "$ds2204" ]; then
+                cp -f "$ds2204" "${SCAP_CACHE_DIR}/ubuntu2204/" \
+                    && echo -e "${GREEN}   ✅ Ubuntu 22.04 datastream cached (ssg-ubuntu2204-ds.xml)${NC}" \
+                    || echo -e "${RED}   ❌ Failed to copy Ubuntu 22.04 datastream${NC}"
+            else
+                echo -e "${RED}   ❌ ssg-ubuntu2204-ds.xml not found in upstream archive${NC}"
+            fi
+
+            if [ -n "$ds2404" ] && [ -f "$ds2404" ]; then
+                cp -f "$ds2404" "${SCAP_CACHE_DIR}/ubuntu2404/" \
+                    && echo -e "${GREEN}   ✅ Ubuntu 24.04 datastream cached (ssg-ubuntu2404-ds.xml)${NC}" \
+                    || echo -e "${RED}   ❌ Failed to copy Ubuntu 24.04 datastream${NC}"
+            else
+                echo -e "${RED}   ❌ ssg-ubuntu2404-ds.xml not found in upstream archive${NC}"
+            fi
+        else
+            echo -e "${YELLOW}   ⚠️  Could not download upstream SCAP content from ${ssg_url}${NC}"
+            echo -e "${YELLOW}      Ubuntu scans will fail without datastreams — check runner internet/SSG_CONTENT_VER.${NC}"
+        fi
+        rm -rf "${ssg_tmp}"
+    fi
+
     local failed=0
     local check_dirs=()
     $need_rhel   && check_dirs+=(rhel9)
@@ -418,13 +469,19 @@ ensure_linux_scap_tools() {
         # noble left over from a previous run). apt -f resolves conflicts by removing
         # the packages we just installed, leaving oscap missing.
         #
-        # New approach:
-        #   1. dpkg --force-overwrite handles file-level conflicts without removing pkgs.
-        #   2. dpkg --configure -a configures any unpacked packages without apt's removal.
-        #   3. If oscap is still missing after the offline install (conflict won the fight),
-        #      fall back to apt-get install directly on the VM — apt will correctly choose
-        #      a version of openscap-scanner that's compatible with what's already installed.
-        #   4. Same fallback for ssg-base content files.
+        # FIX 7 (cont.): On Ubuntu 22.04 there is no ssg-base/openscap-scanner package at
+        # all, and the VM is air-gapped, so the previous apt fallbacks could never succeed.
+        # We now:
+        #   1. dpkg --force-overwrite the engine debs (no apt removal of our packages).
+        #   2. dpkg --configure -a to finish configuring unpacked packages.
+        #   3. If oscap is still missing, try openscap-scanner, then libopenscap8
+        #      (jammy's engine package name) as a fallback — both are no-ops when offline
+        #      but harmless and cover the online case.
+        #   4. For content: if no ssg-*-ds.xml is present, FIRST copy the datastream that
+        #      rode along in /tmp/scap_offline (downloaded from upstream on the runner) into
+        #      /usr/share/xml/scap/ssg/content/. Only if that's somehow absent do we fall
+        #      back to apt-get install ssg-base ssg-debderived (the datastreams live in
+        #      ssg-debderived, not ssg-base) for distros where the packages do exist.
         install_cmd='
             export DEBIAN_FRONTEND=noninteractive
             sudo dpkg -i --force-overwrite /tmp/scap_offline/*.deb 2>/dev/null || true
@@ -432,10 +489,18 @@ ensure_linux_scap_tools() {
             if ! command -v oscap >/dev/null 2>&1; then
                 echo "[Tool Guard] oscap not available after offline install — trying apt fallback"
                 sudo apt-get install -y --no-install-recommends openscap-scanner 2>/dev/null || true
+                command -v oscap >/dev/null 2>&1 || \
+                    sudo apt-get install -y --no-install-recommends libopenscap8 2>/dev/null || true
             fi
             if ! ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1; then
-                echo "[Tool Guard] SCAP content missing — trying apt fallback for ssg-base"
-                sudo apt-get install -y --no-install-recommends ssg-base 2>/dev/null || true
+                if ls /tmp/scap_offline/ssg-*-ds.xml >/dev/null 2>&1; then
+                    echo "[Tool Guard] Installing SCAP datastream from offline cache (upstream SSG)"
+                    sudo mkdir -p /usr/share/xml/scap/ssg/content
+                    sudo cp -f /tmp/scap_offline/ssg-*-ds.xml /usr/share/xml/scap/ssg/content/ 2>/dev/null || true
+                else
+                    echo "[Tool Guard] SCAP content missing — trying apt fallback for ssg-base ssg-debderived"
+                    sudo apt-get install -y --no-install-recommends ssg-base ssg-debderived 2>/dev/null || true
+                fi
             fi
         '
     else
