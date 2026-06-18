@@ -38,6 +38,11 @@ HW_ECS_TAG_KEY="${HW_ECS_TAG_KEY:-Environment}"
 HW_ECS_TAG_VAL="${HW_ECS_TAG_VAL:-}"
 HW_CSMS_SECRET="${HW_CSMS_SECRET:-AuditPassword}"
 HW_VPC_ID="${HW_VPC_ID:-}"
+# HW_ECS_ENDPOINT: private Alpha Edge ECS API endpoint. Auto-derived from
+# HW_REGION if not set explicitly. Confirmed working via the official
+# Huawei Cloud Python SDK (huaweicloudsdkcore/huaweicloudsdkecs) — NOT via
+# the hcloud (KooCLI) tool, which has no awareness of this private endpoint.
+HW_ECS_ENDPOINT="${HW_ECS_ENDPOINT:-https://ecs.${HW_REGION}.alphaedge.tmone.com.my}"
 
 # ------------------------------------------------------------------
 # Windows cinc-auditor profile settings (single-file, CIS WS2022 v5)
@@ -860,7 +865,7 @@ wait_for_winrm() {
 #   cloud_vm_run_shell   ip script     — run shell on VM via agent (Linux)
 #   cloud_vm_restart     ip            — restart VM (non-blocking)
 #   cloud_vm_get_power_state ip        — returns "running"|"stopped"|other
-#   cloud_hcloud_check                 — validate hcloud CLI is ready
+#   cloud_hcloud_check                 — validate Huawei Cloud SDK auth is ready
 #
 # NOTE on Huawei Cloud Windows agent channel:
 #   Huawei Cloud ECS does NOT expose a CLI-level equivalent of
@@ -871,27 +876,43 @@ wait_for_winrm() {
 #   fallback) is unavailable on Huawei Cloud — WinRM must be up for the
 #   scanner to connect. Keep WIN_REBOOT_AFTER_REMEDIATION=false on HW Cloud
 #   until you have a bastion/VPN-based recovery path.
+#
+# NOTE on Huawei Cloud ECS discovery/auth:
+#   All Huawei Cloud ECS calls below use the official Python SDK
+#   (huaweicloudsdkcore / huaweicloudsdkecs) via hw_ecs_discover.py,
+#   NOT the hcloud (KooCLI) tool. KooCLI resolves endpoints from its own
+#   internal metadata catalogue, which only knows public Huawei Cloud
+#   regions — it has no awareness of a private endpoint such as
+#   ecs.my-kualalumpur-1.alphaedge.tmone.com.my, so `hcloud ECS
+#   ListServersDetails` silently queried the wrong region and returned an
+#   empty list. The SDK signs requests locally with AK/SK and is pointed
+#   explicitly at HW_ECS_ENDPOINT, confirmed working end-to-end (both
+#   locally and from a GitHub Actions hosted runner).
 # ======================================================
 
 # ── cloud_hcloud_check ────────────────────────────────────────────────
 cloud_hcloud_check() {
-    if ! command -v hcloud >/dev/null 2>&1; then
-        echo -e "${RED}❌ [HuaweiCloud] hcloud CLI not found.${NC}"
-        echo -e "${YELLOW}   Install: https://support.huaweicloud.com/intl/en-us/devg-apisign/api-sign-provide.html${NC}"
-        echo -e "${YELLOW}   Or:  pip3 install huaweicloudsdkcore huaweicloudsdkecs huaweicloudsdkvpc${NC}"
-        echo -e "${YELLOW}   Auth: export HUAWEICLOUD_ACCESS_KEY=... HUAWEICLOUD_SECRET_KEY=... HUAWEICLOUD_REGION=${HW_REGION}${NC}"
-        echo -e "${YELLOW}   Then: hcloud configure set --cli-region=${HW_REGION}${NC}"
+    if ! python3 -c "import huaweicloudsdkecs" 2>/dev/null; then
+        echo -e "${RED}❌ [HuaweiCloud] Python SDK not installed.${NC}"
+        echo -e "${YELLOW}   Run: pip3 install huaweicloudsdkcore huaweicloudsdkecs${NC}"
         return 1
     fi
-    # Quick connectivity test
-    if ! timeout 20 hcloud ECS ListServersDetails \
-        --cli-region "${HW_REGION}" \
-        --cli-output json >/dev/null 2>&1; then
-        echo -e "${RED}❌ [HuaweiCloud] hcloud auth/connectivity check failed.${NC}"
-        echo -e "${YELLOW}   Verify: hcloud configure list  |  hcloud ECS ListServersDetails --cli-region ${HW_REGION}${NC}"
+    if [ -z "${HUAWEICLOUD_ACCESS_KEY}" ] || [ -z "${HUAWEICLOUD_SECRET_KEY}" ] || [ -z "${HW_PROJECT_ID}" ]; then
+        echo -e "${RED}❌ [HuaweiCloud] Missing credentials. Need HUAWEICLOUD_ACCESS_KEY, HUAWEICLOUD_SECRET_KEY, HW_PROJECT_ID.${NC}"
         return 1
     fi
-    echo -e "${GREEN}✅ [HuaweiCloud] hcloud CLI authenticated (region: ${HW_REGION})${NC}"
+    # Quick connectivity test via the same SDK path discovery uses
+    if ! timeout 20 env \
+        HUAWEICLOUD_ACCESS_KEY="${HUAWEICLOUD_ACCESS_KEY}" \
+        HUAWEICLOUD_SECRET_KEY="${HUAWEICLOUD_SECRET_KEY}" \
+        HW_PROJECT_ID="${HW_PROJECT_ID}" \
+        HW_ECS_ENDPOINT="${HW_ECS_ENDPOINT}" \
+        python3 "$(dirname "$0")/hw_ecs_discover.py" >/dev/null 2>/tmp/hw_check_err.log; then
+        echo -e "${RED}❌ [HuaweiCloud] SDK auth/connectivity check failed.${NC}"
+        [ -s /tmp/hw_check_err.log ] && cat /tmp/hw_check_err.log
+        return 1
+    fi
+    echo -e "${GREEN}✅ [HuaweiCloud] SDK authenticated (endpoint: ${HW_ECS_ENDPOINT})${NC}"
     return 0
 }
 
@@ -921,7 +942,13 @@ cloud_add_port_rule() {
             --access Allow --protocol Tcp -o none >/dev/null 2>&1 || true
         ;;
     huaweicloud)
-        # Get the security group ID attached to this ECS instance
+        # NOTE: still uses hcloud CLI (KooCLI) — not yet migrated to the SDK.
+        # This path is NOT exercised in scan mode (only bootstrap/remediation
+        # flows that need to open a security-group port), and the script's
+        # current usage is scan-only against ecs-audit-ubuntu, which the
+        # confirmed-working AK/SK SDK path can already reach over SSH without
+        # this. Left as-is intentionally (see chat: "Option 1" scope) — revisit
+        # if/when remediation mode or security-group automation is needed.
         [ -z "$vm_id" ] && { echo -e "${YELLOW}⚠️  [HW] No ECS ID for ${ip}${NC}"; return 1; }
         local sg_id
         sg_id=$(timeout 30 hcloud ECS ShowServer \
@@ -1016,6 +1043,8 @@ cloud_vm_restart() {
         timeout 120 az vm restart -g "$RG_NAME" -n "$vm_name" --no-wait -o none 2>/dev/null || true
         ;;
     huaweicloud)
+        # NOTE: still uses hcloud CLI — not yet migrated to the SDK. Not
+        # exercised by scan mode. See note in cloud_add_port_rule above.
         [ -z "$vm_id" ] && return 1
         # HARD reboot = like pressing the reset button; SOFT = graceful
         timeout 120 hcloud ECS RebootServer \
@@ -1043,6 +1072,8 @@ cloud_vm_get_power_state() {
             -o tsv 2>/dev/null | tr -d '\r')
         ;;
     huaweicloud)
+        # NOTE: still uses hcloud CLI — not yet migrated to the SDK. Not
+        # exercised by scan mode. See note in cloud_add_port_rule above.
         [ -z "$vm_id" ] && { echo "unknown"; return; }
         raw=$(timeout 30 hcloud ECS ShowServer \
             --server-id "$vm_id" \
@@ -1226,14 +1257,22 @@ azure)
 
 # ── HUAWEI CLOUD ─────────────────────────────────────────────────────
 huaweicloud)
-    echo -e "${CYAN}📡 [HuaweiCloud] Querying ECS instances in region [${HW_REGION}]...${NC}"
-    # Fetch all ECS servers + their floating (public) IPs in one call.
-    # hcloud ECS ListServersDetails returns JSON with server array.
-    HW_RAW=$(hcloud ECS ListServersDetails \
-        --cli-region "${HW_REGION}" \
-        --cli-output json 2>/dev/null)
+    echo -e "${CYAN}📡 [HuaweiCloud] Querying ECS instances via SDK [endpoint: ${HW_ECS_ENDPOINT}]...${NC}"
+    # NOTE: hcloud (KooCLI) resolves endpoints from its own internal metadata
+    # catalogue, which only knows public Huawei Cloud regions. It has no way
+    # to reach a private endpoint like ecs.my-kualalumpur-1.alphaedge.tmone.com.my
+    # without --cli-endpoint on every call, which silently made discovery
+    # query the wrong region. We use the official SDK directly instead,
+    # which signs requests locally with AK/SK and targets the endpoint
+    # explicitly. Confirmed working against this exact endpoint.
+    HW_RAW=$(HUAWEICLOUD_ACCESS_KEY="${HUAWEICLOUD_ACCESS_KEY}" \
+             HUAWEICLOUD_SECRET_KEY="${HUAWEICLOUD_SECRET_KEY}" \
+             HW_PROJECT_ID="${HW_PROJECT_ID}" \
+             HW_ECS_ENDPOINT="${HW_ECS_ENDPOINT}" \
+             python3 "$(dirname "$0")/hw_ecs_discover.py" 2>/tmp/hw_discover_err.log)
     if [ -z "$HW_RAW" ]; then
-        echo -e "${RED}❌ [HuaweiCloud] ECS list returned empty. Check hcloud auth and HW_REGION.${NC}"
+        echo -e "${RED}❌ [HuaweiCloud] ECS list returned empty. Check AK/SK, HW_PROJECT_ID, and endpoint.${NC}"
+        [ -s /tmp/hw_discover_err.log ] && cat /tmp/hw_discover_err.log
     else
         echo "$HW_RAW" | python3 - <<'PYEOF'
 import json, sys, os
@@ -1351,7 +1390,7 @@ fi
 echo -e "\n${CYAN}⚙️  PHASE 0.3: PARALLEL INFRASTRUCTURE BOOTSTRAPPING${NC}"
 RUNNER_IP=$(curl -s https://api.ipify.org)
 
-# Validate Huawei Cloud CLI before any operations
+# Validate Huawei Cloud SDK auth before any operations
 if [ "${CLOUD_PROVIDER}" == "huaweicloud" ]; then
     cloud_hcloud_check || exit 1
 fi
