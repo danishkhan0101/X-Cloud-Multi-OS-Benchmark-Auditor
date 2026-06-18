@@ -179,7 +179,8 @@ def main():
 
     # ── Serialise SDK objects → plain dicts ───────────────────────────────
     try:
-        all_servers = [s.to_json_object() for s in all_servers_raw]
+        # FIX: Changed .to_json_object() to .to_dict() to properly serialize Huawei Cloud Python SDK objects.
+        all_servers = [s.to_dict() for s in all_servers_raw]
     except Exception as e:
         log(f"❌ Failed to serialise server objects: {e}")
         sys.exit(1)
