@@ -169,7 +169,7 @@ prefetch_scap_packages() {
     fi
 
     if $need_ubuntu; then
-        # FIX 1: was `rm ... * mkdir -p ...` (missing &&, rm treated mkdir as an argument)
+        # FIX 1: was missing && between rm and mkdir — rm was treating "mkdir" as an argument
         rm -rf "${SCAP_CACHE_DIR}/ubuntu2204/"* && mkdir -p "${SCAP_CACHE_DIR}/ubuntu2204/"
         echo -e "${CYAN}   Fetching Ubuntu 22.04 packages via Docker...${NC}"
         docker run --rm \
@@ -180,7 +180,7 @@ prefetch_scap_packages() {
     fi
 
     if $need_ubuntu; then
-        # FIX 1 (same): was `rm ... * mkdir -p ...`
+        # FIX 1 (same): was `rm ... * mkdir -p ...` — missing && caused rm to treat mkdir as arg
         rm -rf "${SCAP_CACHE_DIR}/ubuntu2404/"* && mkdir -p "${SCAP_CACHE_DIR}/ubuntu2404/"
         echo -e "${CYAN}   Fetching Ubuntu 24.04 packages via Docker...${NC}"
         docker run --rm \
@@ -1064,8 +1064,6 @@ azure)
 # ── HUAWEI CLOUD ─────────────────────────────────────────────────────
 huaweicloud)
     echo -e "${CYAN}📡 [HuaweiCloud] Querying ECS instances via SDK [endpoint: ${HW_ECS_ENDPOINT}]...${NC}"
-    # Uses official Python SDK (not hcloud/KooCLI) — SDK signs requests locally
-    # with AK/SK and targets the private endpoint explicitly.
     # NOTE on HW_EPS_ID: when set, the API filters server-side; all instances
     # must belong to that enterprise project or they will be excluded.
     # Verify instance enterprise-project assignment in the console if 0 are returned.
@@ -1083,14 +1081,15 @@ huaweicloud)
 
     if [ $_hw_rc -ne 0 ] || [ -z "$HW_RAW" ]; then
         echo -e "${RED}❌ [HuaweiCloud] ECS list returned empty or failed.${NC}"
+        # FIX 3: Warn if EPS ID filtering is active — the most common cause of 0 servers
         [ -n "${HW_EPS_ID}" ] && \
             echo -e "${YELLOW}   ⚠️  HW_EPS_ID='${HW_EPS_ID}' is set — verify instances belong to this enterprise project.${NC}"
     else
-        # FIX 2: Write JSON to a temp file instead of piping directly into
-        # `python3 - <<'PYEOF'`.  When both a pipe and a heredoc target the
-        # same command, bash uses the heredoc as stdin (to supply the script
-        # source), silently discarding the pipe data.  sys.stdin.read() then
-        # returns "" and json.loads("") raises "Expecting value: line 1 col 1".
+        # FIX 2: Write JSON to a temp file instead of piping into python3 - <<'PYEOF'.
+        # Root cause: when both a pipe (|) and a heredoc (<<) target the same command,
+        # bash uses the heredoc as stdin (to supply the Python script source), and the
+        # piped data from echo "$HW_RAW" is silently discarded. sys.stdin.read() then
+        # returns "" and json.loads("") raises "Expecting value: line 1 col 1 (char 0)".
         _hw_tmp=$(mktemp /tmp/hw_ecs_XXXXXX.json)
         echo "$HW_RAW" > "$_hw_tmp"
 
@@ -1171,7 +1170,7 @@ if [ "$HEADLESS" == true ] && [ "$H_TARGET_OS" != "all" ]; then
 fi
 
 # ======================================================
-# PHASE 0.3: AUTO-HEALER (parallel infrastructure bootstrap)
+# PHASE 0.3: AUTO-HEALER
 # ======================================================
 echo -e "\n${CYAN}⚙️  PHASE 0.3: PARALLEL INFRASTRUCTURE BOOTSTRAPPING${NC}"
 RUNNER_IP=$(curl -s https://api.ipify.org)
@@ -1353,13 +1352,11 @@ run_phase_1() {
                         echo -e "${RED}❌ [Phase1/Ubuntu] Skipping $IP — tools unavailable.${NC}"
                         exit 1
                     fi
-
                     RAW_VER=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                         ${UBUNTU_USER}@${IP} \
                         "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
                     UBUNTU_VER=${RAW_VER:-2404}
                     UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
-
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Ubuntu/CIS L${OS_LVL}] Scanning $IP...${NC}"
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -1377,7 +1374,6 @@ run_phase_1() {
                             echo -e "${RED}❌ [Phase1/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
-
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Ubuntu/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -1413,7 +1409,6 @@ run_phase_1() {
                         echo -e "${RED}❌ [Phase1/RHEL] Skipping $IP — tools unavailable.${NC}"
                         exit 1
                     fi
-
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/RHEL/CIS L${OS_LVL}] Scanning $IP...${NC}"
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -1434,7 +1429,6 @@ run_phase_1() {
                             echo -e "${RED}❌ [Phase1/RHEL/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
-
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/RHEL/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -1473,7 +1467,6 @@ run_phase_1() {
                         echo -e "${RED}❌ [Phase1/Rocky] Skipping $IP — tools unavailable.${NC}"
                         exit 1
                     fi
-
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Rocky/CIS L${OS_LVL}] Scanning $IP...${NC}"
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -1501,7 +1494,6 @@ run_phase_1() {
                             echo -e "${RED}❌ [Phase1/Rocky/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
-
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Rocky/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -1538,7 +1530,6 @@ run_phase_1() {
                         echo -e "${RED}❌ [Phase1/Alma] Skipping $IP — tools unavailable.${NC}"
                         exit 1
                     fi
-
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Alma/CIS L${OS_LVL}] Scanning $IP...${NC}"
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -1571,7 +1562,6 @@ run_phase_1() {
                             echo -e "${RED}❌ [Phase1/Alma/CIS] oscap failed on $IP (rc=$rc)${NC}"
                         fi
                     fi
-
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Alma/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         scp -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -1613,7 +1603,6 @@ run_phase_1() {
                         exit 1
                     }
                     ensure_winrm_powershell "$IP"
-
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
@@ -1630,7 +1619,6 @@ run_phase_1() {
                             *)         echo -e "${RED}❌ [Phase1/Win/CIS L${WIN_INSPEC_LVL}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
                         esac
                     fi
-
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
@@ -1868,12 +1856,10 @@ run_phase_4() {
                 (
                     wait_for_ssh "$IP" "$UBUNTU_USER" || { echo -e "${RED}❌ [Phase4/Ubuntu] SSH unreachable: $IP${NC}"; exit 1; }
                     ensure_linux_scap_tools "$UBUNTU_USER" "$IP" "apt" || { echo -e "${RED}❌ [Phase4/Ubuntu] Tools missing on $IP${NC}"; exit 1; }
-
                     UBUNTU_VER=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
                         "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
                     UBUNTU_VER=${UBUNTU_VER:-2404}
                     UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
-
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
@@ -1884,7 +1870,6 @@ run_phase_4() {
                             fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" "Ubuntu/CIS" || \
                             echo -e "${RED}❌ [Phase4/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
                     fi
-
                     if [ "$RUN_ORG" == true ]; then
                         REMOTE="/tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html"
                         LOCAL="./report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html"
@@ -1907,7 +1892,6 @@ run_phase_4() {
                 (
                     wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/RHEL] SSH unreachable: $IP${NC}"; exit 1; }
                     ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/RHEL] Tools missing on $IP${NC}"; exit 1; }
-
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html"
@@ -1919,7 +1903,6 @@ run_phase_4() {
                             fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "RHEL/CIS" || \
                             echo -e "${RED}❌ [Phase4/RHEL/CIS] oscap failed on $IP (rc=$rc)${NC}"
                     fi
-
                     if [ "$RUN_ORG" == true ]; then
                         REMOTE="/tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html"
                         LOCAL="./report_after_${ORG_PREFIX^^}_RHEL_${IP}.html"
@@ -1942,7 +1925,6 @@ run_phase_4() {
                 (
                     wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/Rocky] SSH unreachable: $IP${NC}"; exit 1; }
                     ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/Rocky] Tools missing on $IP${NC}"; exit 1; }
-
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html"
@@ -1957,7 +1939,6 @@ run_phase_4() {
                             fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Rocky/CIS" || \
                             echo -e "${RED}❌ [Phase4/Rocky/CIS] oscap failed on $IP (rc=$rc)${NC}"
                     fi
-
                     if [ "$RUN_ORG" == true ]; then
                         REMOTE="/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html"
                         LOCAL="./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html"
@@ -1980,7 +1961,6 @@ run_phase_4() {
                 (
                     wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/Alma] SSH unreachable: $IP${NC}"; exit 1; }
                     ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/Alma] Tools missing on $IP${NC}"; exit 1; }
-
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_ALMA_${IP}.html"
@@ -1996,7 +1976,6 @@ run_phase_4() {
                             fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Alma/CIS" || \
                             echo -e "${RED}❌ [Phase4/Alma/CIS] oscap failed on $IP (rc=$rc)${NC}"
                     fi
-
                     if [ "$RUN_ORG" == true ]; then
                         REMOTE="/tmp/report_after_${ORG_PREFIX^^}_ALMA_${IP}.html"
                         LOCAL="./report_after_${ORG_PREFIX^^}_ALMA_${IP}.html"
@@ -2025,7 +2004,6 @@ run_phase_4() {
                         echo -e "${RED}⏭️  [Phase4/Win] ${IP} flagged hung after remediation — skipping verify scan${NC}"
                         exit 0
                     fi
-
                     wait_for_winrm "$IP" || {
                         echo -e "${YELLOW}⚠️  [Phase4/Win] WinRM port closed on ${IP} — probing guest agent...${NC}"
                         if check_windows_agent_alive "$IP"; then
@@ -2040,7 +2018,6 @@ run_phase_4() {
                         fi
                     }
                     ensure_winrm_powershell "$IP"
-
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
@@ -2057,7 +2034,6 @@ run_phase_4() {
                             *)         echo -e "${RED}❌ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
                         esac
                     fi
-
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
