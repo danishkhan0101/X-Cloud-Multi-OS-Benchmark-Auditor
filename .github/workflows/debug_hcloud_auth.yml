@@ -1,41 +1,4 @@
-name: 🔍 Debug AlphaEdge Auth
-on:
-  workflow_dispatch:
-jobs:
-  debug-alphaedge:
-    runs-on: ubuntu-latest
-    steps:
-
-      - name: '🔍 Check Variables'
-        env:
-          HW_ACCESS_KEY:    ${{ secrets.HW_ACCESS_KEY }}
-          HW_SECRET_KEY:    ${{ secrets.HW_SECRET_KEY }}
-          HW_REGION:        ${{ vars.HW_REGION }}
-          HW_PROJECT_ID:    ${{ vars.HW_PROJECT_ID }}
-          HW_IAM_ENDPOINT:  ${{ vars.HW_IAM_ENDPOINT }}
-          HW_ECS_ENDPOINT:  ${{ vars.HW_ECS_ENDPOINT }}
-          HW_ECS_ID:        ${{ vars.HW_ECS_ID }}
-        run: |
-          echo "========================================"
-          echo "1. CHECKING VARIABLES"
-          echo "========================================"
-          echo "HW_REGION        : $HW_REGION"
-          echo "HW_PROJECT_ID    : $HW_PROJECT_ID"
-          echo "HW_IAM_ENDPOINT  : $HW_IAM_ENDPOINT"
-          echo "HW_ECS_ENDPOINT  : $HW_ECS_ENDPOINT"
-          echo "HW_ECS_ID        : $HW_ECS_ID"
-          echo "AK length        : ${#HW_ACCESS_KEY}"
-          echo "SK length        : ${#HW_SECRET_KEY}"
-          echo ""
-          [ -z "$HW_ACCESS_KEY" ]   && echo "❌ HW_ACCESS_KEY is EMPTY"   || echo "✅ HW_ACCESS_KEY is set"
-          [ -z "$HW_SECRET_KEY" ]   && echo "❌ HW_SECRET_KEY is EMPTY"   || echo "✅ HW_SECRET_KEY is set"
-          [ -z "$HW_REGION" ]       && echo "❌ HW_REGION is EMPTY"       || echo "✅ HW_REGION is set"
-          [ -z "$HW_PROJECT_ID" ]   && echo "❌ HW_PROJECT_ID is EMPTY"   || echo "✅ HW_PROJECT_ID is set"
-          [ -z "$HW_IAM_ENDPOINT" ] && echo "❌ HW_IAM_ENDPOINT is EMPTY" || echo "✅ HW_IAM_ENDPOINT is set"
-          [ -z "$HW_ECS_ENDPOINT" ] && echo "❌ HW_ECS_ENDPOINT is EMPTY" || echo "✅ HW_ECS_ENDPOINT is set"
-          [ -z "$HW_ECS_ID" ]       && echo "❌ HW_ECS_ID is EMPTY"       || echo "✅ HW_ECS_ID is set"
-
-      - name: '🔐 Get IAM Token & Test ECS'
+- name: '🔐 Get IAM Token & Test ECS'
         env:
           HW_ACCESS_KEY:    ${{ secrets.HW_ACCESS_KEY }}
           HW_SECRET_KEY:    ${{ secrets.HW_SECRET_KEY }}
@@ -48,15 +11,14 @@ jobs:
           echo "========================================"
           echo "2. GETTING IAM TOKEN (AlphaEdge)"
           echo "========================================"
-          echo ">> Hitting: https://${HW_IAM_ENDPOINT}/v3/auth/tokens"
-          echo ""
+          echo ">> Hitting: ${HW_IAM_ENDPOINT}/v3/auth/tokens"
 
           HTTP_STATUS=$(curl -s \
             -D /tmp/iam_headers.txt \
             -o /tmp/iam_body.json \
             -w "%{http_code}" \
             -X POST \
-            "https://${HW_IAM_ENDPOINT}/v3/auth/tokens" \
+            "${HW_IAM_ENDPOINT}/v3/auth/tokens" \
             -H "Content-Type: application/json" \
             -d "{
               \"auth\": {
@@ -80,26 +42,23 @@ jobs:
             TOKEN=$(grep -i '^x-subject-token:' /tmp/iam_headers.txt | tr -d '\r' | awk '{print $2}')
             echo "Token length: ${#TOKEN}"
           else
-            echo "❌ IAM token request FAILED — full response:"
+            echo "❌ IAM token FAILED — full response:"
             jq . /tmp/iam_body.json 2>/dev/null || cat /tmp/iam_body.json
-            echo ""
-            echo ">> Response headers:"
             cat /tmp/iam_headers.txt
             exit 1
           fi
 
           echo ""
           echo "========================================"
-          echo "3. QUERYING SPECIFIC ECS (AlphaEdge)"
+          echo "3. QUERYING SPECIFIC ECS"
           echo "========================================"
-          echo ">> Hitting: https://${HW_ECS_ENDPOINT}/v1/${HW_PROJECT_ID}/cloudservers/${HW_ECS_ID}"
-          echo ""
+          echo ">> Hitting: ${HW_ECS_ENDPOINT}/v1/${HW_PROJECT_ID}/cloudservers/${HW_ECS_ID}"
 
           ECS_STATUS=$(curl -s \
             -o /tmp/ecs_resp.json \
             -w "%{http_code}" \
             -X GET \
-            "https://${HW_ECS_ENDPOINT}/v1/${HW_PROJECT_ID}/cloudservers/${HW_ECS_ID}" \
+            "${HW_ECS_ENDPOINT}/v1/${HW_PROJECT_ID}/cloudservers/${HW_ECS_ID}" \
             -H "X-Auth-Token: $TOKEN" \
             -H "Content-Type: application/json")
 
@@ -115,7 +74,6 @@ jobs:
               "  AZ     : \(.["OS-EXT-AZ:availability_zone"])",
               "  Created: \(.created)"
             ' /tmp/ecs_resp.json
-
             echo "  IPs:"
             jq -r '
               .server.addresses
@@ -124,9 +82,8 @@ jobs:
               | .value[]
               | "  IP [\($net)]: \(.addr) (\(.["OS-EXT-IPS:type"]))"
             ' /tmp/ecs_resp.json
-
           else
-            echo "❌ ECS query FAILED — full response:"
+            echo "❌ ECS query FAILED:"
             jq . /tmp/ecs_resp.json 2>/dev/null || cat /tmp/ecs_resp.json
           fi
 
@@ -134,28 +91,23 @@ jobs:
           echo "========================================"
           echo "4. LIST ALL ECS IN PROJECT"
           echo "========================================"
-          echo ">> Hitting: https://${HW_ECS_ENDPOINT}/v1/${HW_PROJECT_ID}/cloudservers/detail"
-          echo ""
+          echo ">> Hitting: ${HW_ECS_ENDPOINT}/v1/${HW_PROJECT_ID}/cloudservers/detail"
 
           LIST_STATUS=$(curl -s \
             -o /tmp/ecs_list.json \
             -w "%{http_code}" \
             -X GET \
-            "https://${HW_ECS_ENDPOINT}/v1/${HW_PROJECT_ID}/cloudservers/detail" \
+            "${HW_ECS_ENDPOINT}/v1/${HW_PROJECT_ID}/cloudservers/detail" \
             -H "X-Auth-Token: $TOKEN" \
             -H "Content-Type: application/json")
 
           echo "ECS List HTTP Status: $LIST_STATUS"
 
           if [ "$LIST_STATUS" = "200" ]; then
-            echo "✅ ECS list retrieved!"
             COUNT=$(jq '.servers | length' /tmp/ecs_list.json)
-            echo "Total servers found: $COUNT"
-            echo ""
-            jq -r '.servers[] |
-              "  [\(.status)] \(.name) — \(.id)"
-            ' /tmp/ecs_list.json
+            echo "✅ Total servers found: $COUNT"
+            jq -r '.servers[] | "  [\(.status)] \(.name) — \(.id)"' /tmp/ecs_list.json
           else
-            echo "❌ ECS list FAILED — full response:"
+            echo "❌ ECS list FAILED:"
             jq . /tmp/ecs_list.json 2>/dev/null || cat /tmp/ecs_list.json
           fi
