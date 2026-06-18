@@ -901,6 +901,7 @@ cloud_hcloud_check() {
         echo -e "${RED}❌ [HuaweiCloud] Missing credentials. Need HUAWEICLOUD_ACCESS_KEY, HUAWEICLOUD_SECRET_KEY, HW_PROJECT_ID.${NC}"
         return 1
     fi
+    
     # Quick connectivity test via the same SDK path discovery uses
     if ! timeout 20 env \
         HUAWEICLOUD_ACCESS_KEY="${HUAWEICLOUD_ACCESS_KEY}" \
@@ -1266,6 +1267,7 @@ huaweicloud)
     # query the wrong region. We use the official SDK directly instead,
     # which signs requests locally with AK/SK and targets the endpoint
     # explicitly. Confirmed working against this exact endpoint.
+    # Inject the HW_EPS_ID variable into the python execution
     HW_RAW=$(
         HUAWEICLOUD_ACCESS_KEY="${HUAWEICLOUD_ACCESS_KEY}" \
         HUAWEICLOUD_SECRET_KEY="${HUAWEICLOUD_SECRET_KEY}" \
