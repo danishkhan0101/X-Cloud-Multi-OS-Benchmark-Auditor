@@ -226,6 +226,7 @@ jobs:
           HUAWEICLOUD_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
           HW_ECS_TAG_KEY:         ${{ vars.HW_ECS_TAG_KEY || '' }}
           HW_ECS_TAG_VAL:         ${{ github.event.inputs.environment_tag == 'all' && '' || github.event.inputs.environment_tag }}
+          HW_EPS_ID:              ${{ vars.HW_EPS_ID }} # <-- Pulls silently from GitHub Variables
         run: |
           HAS_UBUNTU=false; HAS_RHEL=false; HAS_ROCKY=false
           HAS_ALMA=false;   HAS_WINDOWS=false
@@ -284,6 +285,7 @@ jobs:
               HW_ECS_ENDPOINT="$HW_ECS_ENDPOINT" \
               HW_ECS_TAG_KEY="$HW_ECS_TAG_KEY" \
               HW_ECS_TAG_VAL="$HW_ECS_TAG_VAL" \
+              HW_EPS_ID="$HW_EPS_ID" \
               python3 hw_ecs_discover.py --tsv 2>/tmp/hw_discover_err.log
             )
           
