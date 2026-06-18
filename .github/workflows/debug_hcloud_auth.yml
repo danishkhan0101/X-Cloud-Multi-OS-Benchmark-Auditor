@@ -5,7 +5,8 @@ jobs:
   debug-hcloud:
     runs-on: ubuntu-latest
     steps:
-      - name: '🔍 Debug hcloud Auth'
+
+      - name: '🔍 Install & Configure hcloud'
         env:
           HUAWEICLOUD_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
           HUAWEICLOUD_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
@@ -59,10 +60,81 @@ jobs:
           echo "Configure exit code: $?"
           hcloud configure list 2>&1 || true
 
+      - name: '🔍 Test Specific ECS'
+        env:
+          HUAWEICLOUD_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
+          HUAWEICLOUD_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
+          HW_REGION:              ${{ vars.HW_REGION }}
+          HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
+          HW_ECS_ID:              ${{ vars.HW_ECS_ID }}
+        run: |
+          echo "========================================"
+          echo "4. TESTING SPECIFIC ECS (raw curl — no KooCLI)"
+          echo "========================================"
+          echo "Target ECS ID : $HW_ECS_ID"
+
           echo ""
-          echo "========================================"
-          echo "4. TESTING ECS API CALL"
-          echo "========================================"
-          hcloud ECS ListServersDetails \
-            --cli-region="$HW_REGION" 2>&1
-          echo "ECS call exit code: $?"
+          echo ">> Getting IAM token..."
+          HTTP_STATUS=$(curl -s -D /tmp/iam_headers.txt \
+            -o /tmp/iam_body.json \
+            -w "%{http_code}" \
+            -X POST \
+            "https://iam.${HW_REGION}.myhuaweicloud.com/v3/auth/tokens" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"auth\": {
+                \"identity\": {
+                  \"methods\": [\"hw_ak_sk\"],
+                  \"hw_ak_sk\": {
+                    \"access\": { \"key\": \"$HUAWEICLOUD_ACCESS_KEY\" },
+                    \"secret\": { \"key\": \"$HUAWEICLOUD_SECRET_KEY\" }
+                  }
+                },
+                \"scope\": {
+                  \"project\": { \"id\": \"$HW_PROJECT_ID\" }
+                }
+              }
+            }")
+
+          echo "IAM HTTP Status: $HTTP_STATUS"
+
+          if [ "$HTTP_STATUS" != "201" ]; then
+            echo "❌ IAM token request failed — full response:"
+            cat /tmp/iam_body.json | python3 -m json.tool 2>/dev/null || cat /tmp/iam_body.json
+            exit 1
+          fi
+
+          TOKEN=$(grep -i '^x-subject-token:' /tmp/iam_headers.txt | tr -d '\r' | awk '{print $2}')
+          echo "✅ Token obtained (length: ${#TOKEN})"
+
+          echo ""
+          echo ">> Querying ECS: $HW_ECS_ID ..."
+          ECS_STATUS=$(curl -s \
+            -o /tmp/ecs_resp.json \
+            -w "%{http_code}" \
+            -X GET \
+            "https://ecs.${HW_REGION}.myhuaweicloud.com/v1/${HW_PROJECT_ID}/cloudservers/${HW_ECS_ID}" \
+            -H "X-Auth-Token: $TOKEN" \
+            -H "Content-Type: application/json")
+
+          echo "ECS HTTP Status: $ECS_STATUS"
+
+          if [ "$ECS_STATUS" = "200" ]; then
+            echo "✅ ECS found! Details:"
+            python3 -c "
+            import json
+            d = json.load(open('/tmp/ecs_resp.json'))
+            s = d.get('server', {})
+            print(f'  Name   : {s.get(\"name\")}')
+            print(f'  Status : {s.get(\"status\")}')
+            print(f'  Flavor : {s.get(\"flavor\", {}).get(\"id\")}')
+            print(f'  AZ     : {s.get(\"OS-EXT-AZ:availability_zone\")}')
+            print(f'  Created: {s.get(\"created\")}')
+            for net, addrs in s.get('addresses', {}).items():
+                for a in addrs:
+                    print(f'  IP [{net}]: {a.get(\"addr\")} ({a.get(\"OS-EXT-IPS:type\")})')
+            "
+                      else
+                        echo "❌ ECS query failed — full response:"
+                        cat /tmp/ecs_resp.json | python3 -m json.tool 2>/dev/null || cat /tmp/ecs_resp.json
+                      fi
