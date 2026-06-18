@@ -121,20 +121,25 @@ jobs:
 
           if [ "$ECS_STATUS" = "200" ]; then
             echo "✅ ECS found! Details:"
-            python3 -c "
-            import json
-            d = json.load(open('/tmp/ecs_resp.json'))
-            s = d.get('server', {})
-            print(f'  Name   : {s.get(\"name\")}')
-            print(f'  Status : {s.get(\"status\")}')
-            print(f'  Flavor : {s.get(\"flavor\", {}).get(\"id\")}')
-            print(f'  AZ     : {s.get(\"OS-EXT-AZ:availability_zone\")}')
-            print(f'  Created: {s.get(\"created\")}')
-            for net, addrs in s.get('addresses', {}).items():
-                for a in addrs:
-                    print(f'  IP [{net}]: {a.get(\"addr\")} ({a.get(\"OS-EXT-IPS:type\")})')
-            "
-                      else
-                        echo "❌ ECS query failed — full response:"
-                        cat /tmp/ecs_resp.json | python3 -m json.tool 2>/dev/null || cat /tmp/ecs_resp.json
-                      fi
+            jq -r '
+              .server |
+              "  Name   : \(.name)",
+              "  Status : \(.status)",
+              "  Flavor : \(.flavor.id)",
+              "  AZ     : \(.["OS-EXT-AZ:availability_zone"])",
+              "  Created: \(.created)"
+            ' /tmp/ecs_resp.json
+
+            echo "  IPs:"
+            jq -r '
+              .server.addresses
+              | to_entries[]
+              | .key as $net
+              | .value[]
+              | "  IP [\($net)]: \(.addr) (\(.["OS-EXT-IPS:type"]))"
+            ' /tmp/ecs_resp.json
+
+          else
+            echo "❌ ECS query failed — full response:"
+            jq . /tmp/ecs_resp.json 2>/dev/null || cat /tmp/ecs_resp.json
+          fi
