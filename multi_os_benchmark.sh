@@ -221,89 +221,126 @@ prefetch_scap_packages() {
             || echo -e "${RED}   ❌ Ubuntu2404 Docker step failed${NC}"
     fi
 
-   # FIX 8: The hardcoded SSG_CONTENT_VER (e.g. 0.1.81) may not exist, and the
-    # 200MB+ tarball download can silently fail because (a) curl exits non-zero but
-    # the outer || true absorbs it, and (b) the cache already has .deb files from
-    # Docker so the non-empty-dir check passes — leaving the cache without a
-    # datastream. Fix: auto-resolve the latest release via GitHub API, try a direct
-    # per-file download first (each xml is ~2-5 MB vs the full tarball), and fall
-    # back to tarball extraction only if needed. Any failure is now fatal to prefetch.
+  # FIX 9: GitHub release CDN (objects.githubusercontent.com) is blocked from
+    # the runner network even though api.github.com is reachable. All previous
+    # curl/tar approaches fail because the download redirect target is unreachable.
+    #
+    # Solution: download ssg-debderived from Ubuntu 24.04 noble's apt archive
+    # (archive.ubuntu.com IS reachable). Noble's ssg-debderived (~v0.1.72) contains
+    # BOTH ssg-ubuntu2204-ds.xml and ssg-ubuntu2404-ds.xml. We extract the xmls
+    # from the deb on the runner and also carry the deb to the VM cache so the
+    # air-gapped VM can dpkg-deb -x it without needing internet.
+    # GitHub releases are still tried as a secondary fallback for cases where the
+    # CDN IS reachable, but a failure there no longer aborts prefetch.
     if $need_ubuntu; then
-        local SSG_CONTENT_VER="${SSG_CONTENT_VER:-}"
+        echo -e "${CYAN}   Fetching SCAP datastreams via ssg-debderived (noble apt — no GitHub CDN needed)...${NC}"
+        local ds_tmp
+        ds_tmp=$(mktemp -d /tmp/ssg_ds_XXXXXX)
 
-        # Auto-resolve latest release if version is not pinned
-        if [ -z "$SSG_CONTENT_VER" ]; then
-            echo -e "${CYAN}   Resolving latest ComplianceAsCode release via GitHub API...${NC}"
-            SSG_CONTENT_VER=$(curl -fsSL --max-time 15 \
+        docker run --rm \
+            -v "${ds_tmp}:/output" \
+            ubuntu:24.04 \
+            bash -c "
+                export DEBIAN_FRONTEND=noninteractive
+                apt-get update -qq 2>/dev/null
+                apt-get install --download-only -y --no-install-recommends \
+                    ssg-debderived 2>/dev/null || true
+                cp /var/cache/apt/archives/ssg-debderived*.deb /output/ 2>/dev/null || true
+            " \
+            && echo -e "${GREEN}   ✅ ssg-debderived deb pulled via Docker/apt${NC}" \
+            || echo -e "${YELLOW}   ⚠️  Docker apt step exited non-zero (checking output anyway)${NC}"
+
+        local ssg_deb
+        ssg_deb=$(find "${ds_tmp}" -name 'ssg-debderived*.deb' | head -1)
+
+        if [ -n "$ssg_deb" ] && [ -f "$ssg_deb" ]; then
+            local deb_extract="${ds_tmp}/extract"
+            mkdir -p "$deb_extract"
+            dpkg-deb -x "$ssg_deb" "$deb_extract" 2>/dev/null
+
+            local ds2204 ds2404
+            ds2204=$(find "$deb_extract" -name 'ssg-ubuntu2204-ds.xml' | head -1)
+            ds2404=$(find "$deb_extract" -name 'ssg-ubuntu2404-ds.xml' | head -1)
+
+            if [ -n "$ds2204" ] && [ -f "$ds2204" ]; then
+                cp -f "$ds2204" "${SCAP_CACHE_DIR}/ubuntu2204/"
+                echo -e "${GREEN}   ✅ ssg-ubuntu2204-ds.xml extracted from ssg-debderived${NC}"
+            else
+                echo -e "${YELLOW}   ⚠️  ssg-ubuntu2204-ds.xml not found in noble ssg-debderived${NC}"
+            fi
+            if [ -n "$ds2404" ] && [ -f "$ds2404" ]; then
+                cp -f "$ds2404" "${SCAP_CACHE_DIR}/ubuntu2404/"
+                echo -e "${GREEN}   ✅ ssg-ubuntu2404-ds.xml extracted from ssg-debderived${NC}"
+            else
+                echo -e "${YELLOW}   ⚠️  ssg-ubuntu2404-ds.xml not found in noble ssg-debderived${NC}"
+            fi
+
+            # Carry the deb to both VM caches — the air-gapped VM will
+            # dpkg-deb -x it to get the xml without needing internet
+            cp -f "$ssg_deb" "${SCAP_CACHE_DIR}/ubuntu2204/" 2>/dev/null || true
+            cp -f "$ssg_deb" "${SCAP_CACHE_DIR}/ubuntu2404/" 2>/dev/null || true
+        else
+            echo -e "${YELLOW}   ⚠️  ssg-debderived deb not found in Docker output${NC}"
+        fi
+
+        rm -rf "${ds_tmp}"
+
+        # Secondary: try GitHub releases for any xml still missing.
+        # This succeeds when the CDN is reachable; fails silently otherwise.
+        local SSG_VER="${SSG_CONTENT_VER:-}"
+        if [ -z "$SSG_VER" ]; then
+            SSG_VER=$(curl -fsSL --max-time 15 \
                 "https://api.github.com/repos/ComplianceAsCode/content/releases/latest" \
                 2>/dev/null \
                 | python3 -c "
-import json, sys
-try:
-    d = json.load(sys.stdin)
-    print(d['tag_name'].lstrip('v'))
-except Exception:
-    sys.exit(1)
-" 2>/dev/null)
-            if [ -z "$SSG_CONTENT_VER" ]; then
-                SSG_CONTENT_VER="0.1.75"   # known-good fallback
-                echo -e "${YELLOW}   ⚠️  GitHub API lookup failed — using fallback v${SSG_CONTENT_VER}${NC}"
-            else
-                echo -e "${GREEN}   ✅ Resolved latest SSG: v${SSG_CONTENT_VER}${NC}"
-            fi
+import json,sys
+try: print(json.load(sys.stdin)['tag_name'].lstrip('v'))
+except: sys.exit(1)
+" 2>/dev/null || echo "0.1.75")
         fi
 
-        local base_url="https://github.com/ComplianceAsCode/content/releases/download/v${SSG_CONTENT_VER}"
-        local ssg_tmp
-        ssg_tmp=$(mktemp -d /tmp/ssg_content_XXXXXX)
+        for _cache_key in ubuntu2204 ubuntu2404; do
+            ls "${SCAP_CACHE_DIR}/${_cache_key}/ssg-"*.xml >/dev/null 2>&1 && continue
+            local _ver="${_cache_key//ubuntu/}"
+            local _ds="ssg-ubuntu${_ver}-ds.xml"
+            local _dest="${SCAP_CACHE_DIR}/${_cache_key}/${_ds}"
+            local _base="https://github.com/ComplianceAsCode/content/releases/download/v${SSG_VER}"
 
-        _fetch_ubuntu_ds() {
-            local ds_file="$1" cache_subdir="$2"
-            local dest="${SCAP_CACHE_DIR}/${cache_subdir}/${ds_file}"
-
-            if [ -f "$dest" ] && [ -s "$dest" ]; then
-                echo -e "${GREEN}   ✅ ${ds_file} already cached — skipping${NC}"
-                return 0
+            echo -e "${CYAN}   Trying GitHub CDN for ${_ds} (v${SSG_VER})...${NC}"
+            # Try direct per-file asset (~5 MB)
+            if curl -fsSL --retry 2 --retry-delay 5 --max-time 120 \
+                   "${_base}/${_ds}" -o "$_dest" 2>/tmp/_ssg_curl_err.txt \
+               && [ -s "$_dest" ]; then
+                echo -e "${GREEN}   ✅ ${_ds} downloaded from GitHub${NC}"
+                continue
             fi
+            echo -e "${YELLOW}   ⚠️  GitHub direct download failed: $(head -1 /tmp/_ssg_curl_err.txt 2>/dev/null)${NC}"
 
-            echo -e "${CYAN}   Downloading ${ds_file} (v${SSG_CONTENT_VER})...${NC}"
-
-            # Attempt 1: direct per-file asset download (~2-5 MB)
-            if curl -fsSL --retry 3 --retry-delay 5 --max-time 120 \
-                   "${base_url}/${ds_file}" -o "$dest" 2>/dev/null \
-               && [ -s "$dest" ]; then
-                echo -e "${GREEN}   ✅ ${ds_file} cached (direct download)${NC}"
-                return 0
-            fi
-
-            # Attempt 2: extract from full tarball (one download shared across both files)
-            local tarball="${ssg_tmp}/ssg.tar.bz2"
-            if [ ! -f "$tarball" ]; then
-                echo -e "${CYAN}   Downloading full SSG tarball (v${SSG_CONTENT_VER}) as fallback...${NC}"
+            # Try tarball (shared across both loops via /tmp sentinel)
+            local _tarball="/tmp/_ssg_tb_${SSG_VER}.tar.bz2"
+            if [ ! -f "$_tarball" ]; then
+                echo -e "${CYAN}   Downloading full SSG tarball (v${SSG_VER}) as last resort...${NC}"
                 curl -fsSL --retry 2 --retry-delay 10 --max-time 600 \
-                    "${base_url}/scap-security-guide-${SSG_CONTENT_VER}.tar.bz2" \
-                    -o "$tarball" 2>/dev/null || true
+                    "${_base}/scap-security-guide-${SSG_VER}.tar.bz2" \
+                    -o "$_tarball" 2>/tmp/_ssg_curl_err.txt \
+                || { echo -e "${YELLOW}   ⚠️  Tarball failed: $(head -1 /tmp/_ssg_curl_err.txt 2>/dev/null)${NC}"
+                     rm -f "$_tarball"; }
+            fi
+            if [ -f "$_tarball" ] && [ -s "$_tarball" ]; then
+                local _tb_tmp
+                _tb_tmp=$(mktemp -d /tmp/ssg_tb_XXXXXX)
+                tar -xjf "$_tarball" -C "$_tb_tmp" --wildcards "*/${_ds}" 2>/dev/null || true
+                local _extracted
+                _extracted=$(find "$_tb_tmp" -name "${_ds}" | head -1)
+                [ -n "$_extracted" ] && cp -f "$_extracted" "$_dest" \
+                    && echo -e "${GREEN}   ✅ ${_ds} extracted from tarball${NC}"
+                rm -rf "$_tb_tmp"
             fi
 
-            if [ -f "$tarball" ] && [ -s "$tarball" ]; then
-                tar -xjf "$tarball" -C "${ssg_tmp}" \
-                    --wildcards "*/${ds_file}" 2>/dev/null || true
-                local extracted
-                extracted=$(find "${ssg_tmp}" -name "${ds_file}" | head -n 1)
-                if [ -n "$extracted" ] && [ -f "$extracted" ]; then
-                    cp -f "$extracted" "$dest"
-                    echo -e "${GREEN}   ✅ ${ds_file} cached (tarball extraction)${NC}"
-                    return 0
-                fi
-            fi
-
-            echo -e "${RED}   ❌ Could not obtain ${ds_file} — check SSG_CONTENT_VER='${SSG_CONTENT_VER}' and internet access${NC}"
-            return 1
-        }
-
-        _fetch_ubuntu_ds "ssg-ubuntu2204-ds.xml" "ubuntu2204"
-        _fetch_ubuntu_ds "ssg-ubuntu2404-ds.xml" "ubuntu2404"
-        rm -rf "${ssg_tmp}"
+            ls "${SCAP_CACHE_DIR}/${_cache_key}/ssg-"*.xml >/dev/null 2>&1 \
+                || echo -e "${RED}   ❌ ${_ds} could not be obtained via any method${NC}"
+        done
+        rm -f /tmp/_ssg_tb_*.tar.bz2 /tmp/_ssg_curl_err.txt 2>/dev/null || true
     fi
 
     local failed=0
@@ -538,12 +575,23 @@ ensure_linux_scap_tools() {
             fi
             if ! ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1; then
                 if ls /tmp/scap_offline/ssg-*-ds.xml >/dev/null 2>&1; then
-                    echo "[Tool Guard] Installing SCAP datastream from offline cache (upstream SSG)"
+                    # Direct xml files from GitHub CDN (when CDN is reachable)
                     sudo mkdir -p /usr/share/xml/scap/ssg/content
-                    sudo cp -f /tmp/scap_offline/ssg-*-ds.xml /usr/share/xml/scap/ssg/content/ 2>/dev/null || true
+                    sudo cp -f /tmp/scap_offline/ssg-*-ds.xml \
+                        /usr/share/xml/scap/ssg/content/ 2>/dev/null || true
+                elif ls /tmp/scap_offline/ssg-debderived*.deb >/dev/null 2>&1; then
+                    # ssg-debderived deb from noble apt — extract xmls without internet
+                    _deb_extract=$(mktemp -d /tmp/ssg_deb_XXXXXX)
+                    dpkg-deb -x /tmp/scap_offline/ssg-debderived*.deb \
+                        "$_deb_extract" 2>/dev/null || true
+                    sudo mkdir -p /usr/share/xml/scap/ssg/content
+                    find "$_deb_extract" -name 'ssg-ubuntu*-ds.xml' \
+                        -exec sudo cp -f {} /usr/share/xml/scap/ssg/content/ \;
+                    rm -rf "$_deb_extract"
                 else
-                    echo "[Tool Guard] SCAP content missing — trying apt fallback for ssg-base ssg-debderived"
-                    sudo apt-get install -y --no-install-recommends ssg-base ssg-debderived 2>/dev/null || true
+                    # Air-gapped and no cached content — apt fallback (online VMs only)
+                    sudo apt-get install -y --no-install-recommends \
+                        ssg-base ssg-debderived 2>/dev/null || true
                 fi
             fi
         '
