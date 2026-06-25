@@ -221,54 +221,88 @@ prefetch_scap_packages() {
             || echo -e "${RED}   ❌ Ubuntu2404 Docker step failed${NC}"
     fi
 
-    # FIX 7 (root cause of rc=11): The SCAP Security Guide is NOT packaged for Ubuntu
-    # 22.04 (jammy) in the official archive — ssg-base/openscap-scanner jump from focal
-    # (20.04) straight to noble (24.04), so the Docker prefetch above silently caches
-    # only the oscap engine and never the content datastreams. On the air-gapped VM the
-    # apt fallback then can't rescue it either, and the guard `ls .../ssg-*-ds.xml` fails
-    # with exit 11. Additionally, even on 24.04 the ssg-ubuntu*-ds.xml datastreams live in
-    # ssg-debderived, NOT ssg-base — so the apt path was always going to be incomplete.
-    #
-    # Fix: pull the prebuilt datastreams straight from the upstream ComplianceAsCode
-    # release on the runner (which has internet) and drop them into each Ubuntu cache dir.
-    # They ride along to the VM via the existing SCP push and land in
-    # /usr/share/xml/scap/ssg/content/. This works uniformly for 22.04 and 24.04 and
-    # removes the dependency on Ubuntu packaging the content at all.
+   # FIX 8: The hardcoded SSG_CONTENT_VER (e.g. 0.1.81) may not exist, and the
+    # 200MB+ tarball download can silently fail because (a) curl exits non-zero but
+    # the outer || true absorbs it, and (b) the cache already has .deb files from
+    # Docker so the non-empty-dir check passes — leaving the cache without a
+    # datastream. Fix: auto-resolve the latest release via GitHub API, try a direct
+    # per-file download first (each xml is ~2-5 MB vs the full tarball), and fall
+    # back to tarball extraction only if needed. Any failure is now fatal to prefetch.
     if $need_ubuntu; then
-        local SSG_CONTENT_VER="${SSG_CONTENT_VER:-0.1.81}"
-        local ssg_url="https://github.com/ComplianceAsCode/content/releases/download/v${SSG_CONTENT_VER}/scap-security-guide-${SSG_CONTENT_VER}.tar.bz2"
-        echo -e "${CYAN}   Fetching upstream SCAP content datastreams (v${SSG_CONTENT_VER}) for Ubuntu...${NC}"
+        local SSG_CONTENT_VER="${SSG_CONTENT_VER:-}"
+
+        # Auto-resolve latest release if version is not pinned
+        if [ -z "$SSG_CONTENT_VER" ]; then
+            echo -e "${CYAN}   Resolving latest ComplianceAsCode release via GitHub API...${NC}"
+            SSG_CONTENT_VER=$(curl -fsSL --max-time 15 \
+                "https://api.github.com/repos/ComplianceAsCode/content/releases/latest" \
+                2>/dev/null \
+                | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    print(d['tag_name'].lstrip('v'))
+except Exception:
+    sys.exit(1)
+" 2>/dev/null)
+            if [ -z "$SSG_CONTENT_VER" ]; then
+                SSG_CONTENT_VER="0.1.75"   # known-good fallback
+                echo -e "${YELLOW}   ⚠️  GitHub API lookup failed — using fallback v${SSG_CONTENT_VER}${NC}"
+            else
+                echo -e "${GREEN}   ✅ Resolved latest SSG: v${SSG_CONTENT_VER}${NC}"
+            fi
+        fi
+
+        local base_url="https://github.com/ComplianceAsCode/content/releases/download/v${SSG_CONTENT_VER}"
         local ssg_tmp
         ssg_tmp=$(mktemp -d /tmp/ssg_content_XXXXXX)
-        if curl -fsSL "${ssg_url}" -o "${ssg_tmp}/ssg.tar.bz2" 2>/dev/null; then
-            # Extract only the two Ubuntu datastreams we need (top-level dir is
-            # scap-security-guide-${VER}/). --wildcards needs the leading */ to match it.
-            tar -xjf "${ssg_tmp}/ssg.tar.bz2" -C "${ssg_tmp}" --wildcards \
-                '*/ssg-ubuntu2204-ds.xml' '*/ssg-ubuntu2404-ds.xml' 2>/dev/null || true
 
-            local ds2204 ds2404
-            ds2204=$(find "${ssg_tmp}" -name 'ssg-ubuntu2204-ds.xml' | head -n 1)
-            ds2404=$(find "${ssg_tmp}" -name 'ssg-ubuntu2404-ds.xml' | head -n 1)
+        _fetch_ubuntu_ds() {
+            local ds_file="$1" cache_subdir="$2"
+            local dest="${SCAP_CACHE_DIR}/${cache_subdir}/${ds_file}"
 
-            if [ -n "$ds2204" ] && [ -f "$ds2204" ]; then
-                cp -f "$ds2204" "${SCAP_CACHE_DIR}/ubuntu2204/" \
-                    && echo -e "${GREEN}   ✅ Ubuntu 22.04 datastream cached (ssg-ubuntu2204-ds.xml)${NC}" \
-                    || echo -e "${RED}   ❌ Failed to copy Ubuntu 22.04 datastream${NC}"
-            else
-                echo -e "${RED}   ❌ ssg-ubuntu2204-ds.xml not found in upstream archive${NC}"
+            if [ -f "$dest" ] && [ -s "$dest" ]; then
+                echo -e "${GREEN}   ✅ ${ds_file} already cached — skipping${NC}"
+                return 0
             fi
 
-            if [ -n "$ds2404" ] && [ -f "$ds2404" ]; then
-                cp -f "$ds2404" "${SCAP_CACHE_DIR}/ubuntu2404/" \
-                    && echo -e "${GREEN}   ✅ Ubuntu 24.04 datastream cached (ssg-ubuntu2404-ds.xml)${NC}" \
-                    || echo -e "${RED}   ❌ Failed to copy Ubuntu 24.04 datastream${NC}"
-            else
-                echo -e "${RED}   ❌ ssg-ubuntu2404-ds.xml not found in upstream archive${NC}"
+            echo -e "${CYAN}   Downloading ${ds_file} (v${SSG_CONTENT_VER})...${NC}"
+
+            # Attempt 1: direct per-file asset download (~2-5 MB)
+            if curl -fsSL --retry 3 --retry-delay 5 --max-time 120 \
+                   "${base_url}/${ds_file}" -o "$dest" 2>/dev/null \
+               && [ -s "$dest" ]; then
+                echo -e "${GREEN}   ✅ ${ds_file} cached (direct download)${NC}"
+                return 0
             fi
-        else
-            echo -e "${YELLOW}   ⚠️  Could not download upstream SCAP content from ${ssg_url}${NC}"
-            echo -e "${YELLOW}      Ubuntu scans will fail without datastreams — check runner internet/SSG_CONTENT_VER.${NC}"
-        fi
+
+            # Attempt 2: extract from full tarball (one download shared across both files)
+            local tarball="${ssg_tmp}/ssg.tar.bz2"
+            if [ ! -f "$tarball" ]; then
+                echo -e "${CYAN}   Downloading full SSG tarball (v${SSG_CONTENT_VER}) as fallback...${NC}"
+                curl -fsSL --retry 2 --retry-delay 10 --max-time 600 \
+                    "${base_url}/scap-security-guide-${SSG_CONTENT_VER}.tar.bz2" \
+                    -o "$tarball" 2>/dev/null || true
+            fi
+
+            if [ -f "$tarball" ] && [ -s "$tarball" ]; then
+                tar -xjf "$tarball" -C "${ssg_tmp}" \
+                    --wildcards "*/${ds_file}" 2>/dev/null || true
+                local extracted
+                extracted=$(find "${ssg_tmp}" -name "${ds_file}" | head -n 1)
+                if [ -n "$extracted" ] && [ -f "$extracted" ]; then
+                    cp -f "$extracted" "$dest"
+                    echo -e "${GREEN}   ✅ ${ds_file} cached (tarball extraction)${NC}"
+                    return 0
+                fi
+            fi
+
+            echo -e "${RED}   ❌ Could not obtain ${ds_file} — check SSG_CONTENT_VER='${SSG_CONTENT_VER}' and internet access${NC}"
+            return 1
+        }
+
+        _fetch_ubuntu_ds "ssg-ubuntu2204-ds.xml" "ubuntu2204"
+        _fetch_ubuntu_ds "ssg-ubuntu2404-ds.xml" "ubuntu2404"
         rm -rf "${ssg_tmp}"
     fi
 
@@ -287,6 +321,16 @@ prefetch_scap_packages() {
         if [ ! "$(ls -A "${SCAP_CACHE_DIR}/${d}/" 2>/dev/null)" ]; then
             echo -e "${RED}⚠️  [Phase 0.2b] Cache still empty: ${d}${NC}"
             failed=1
+        fi
+        # FIX 8 (cont.): Ubuntu caches must contain the SCAP datastream xml.
+        # Without this check, a Docker success + SSG download failure produces a
+        # non-empty cache (deb files only) that passes the empty-dir check above
+        # but leaves the VM without a datastream → exit 11 on the remote host.
+        if [[ "${d}" == ubuntu* ]]; then
+            if ! ls "${SCAP_CACHE_DIR}/${d}/ssg-"*.xml >/dev/null 2>&1; then
+                echo -e "${RED}⚠️  [Phase 0.2b] SCAP datastream xml missing from ${d} cache — SSG download failed${NC}"
+                failed=1
+            fi
         fi
     done
 
