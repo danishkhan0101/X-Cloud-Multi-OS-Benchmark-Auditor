@@ -1884,8 +1884,25 @@ run_remediation() {
             wait
         fi
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [ "$RUN_ORG" == true ]; then
-            ansible-playbook -i inventory.ini $UBUNTU_CUSTOM_PLAYBOOK \
-                --limit ubuntu_nodes >/dev/null 2>&1 || true
+            # Guard 1: verify playbook exists
+            if [ ! -f "$UBUNTU_CUSTOM_PLAYBOOK" ]; then
+                echo -e "${RED}❌ [Remediation/Ubuntu/ORG] Playbook not found: $UBUNTU_CUSTOM_PLAYBOOK${NC}"
+                echo -e "${YELLOW}   Files in ubuntu-custom/: $(ls ubuntu-custom/ 2>/dev/null || echo 'directory missing')${NC}"
+            else
+                # Guard 2: re-SCP custom content before remediation
+                for IP in "${UBUNTU_MACHINES[@]}"; do
+                    echo -e "${CYAN}📤 [Remediation/Ubuntu/ORG] SCPing custom content to ${IP}...${NC}"
+                    scp -o BatchMode=yes -o StrictHostKeyChecking=no \
+                        "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" \
+                        ${UBUNTU_USER}@${IP}:/tmp/ \
+                        || echo -e "${RED}❌ SCP failed for ${IP}${NC}"
+                done
+        
+                echo -e "${CYAN}🛠️  [Remediation/Ubuntu/ORG] Running playbook...${NC}"
+                ansible-playbook -i inventory.ini "$UBUNTU_CUSTOM_PLAYBOOK" \
+                    --limit ubuntu_nodes -v   # Remove >/dev/null so failures are visible
+                echo -e "${GREEN}✅ [Remediation/Ubuntu/ORG] Playbook complete (rc=$?)${NC}"
+            fi
         fi
     fi
 
