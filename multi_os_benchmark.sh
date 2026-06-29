@@ -8,6 +8,9 @@ if [ -f ".env" ]; then
     export $(grep -v '^#' .env | xargs)
 fi
 
+# Resolve script directory ONCE at startup — used for absolute path refs
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 ORG_NAME="${ORG_NAME:-Custom}"
 ORG_PREFIX="${ORG_PREFIX:-custom}"
 GHOST_USER="${GHOST_USER:-audit_ghost}"
@@ -35,26 +38,29 @@ WIN_AGENT_PROBE_SEC="${WIN_AGENT_PROBE_SEC:-180}"
 WIN_REBOOT_HEALTH_WAIT_SEC="${WIN_REBOOT_HEALTH_WAIT_SEC:-360}"
 WIN_SCAN_TIMEOUT_SEC="${WIN_SCAN_TIMEOUT_SEC:-1200}"
 
-UBUNTU_CUSTOM_DIR="ubuntu-custom"
+# FIX: Use absolute paths based on SCRIPT_DIR so working-directory shifts
+#      in CI/CD never cause "playbook not found" silent failures
+UBUNTU_CUSTOM_DIR="${SCRIPT_DIR}/ubuntu-custom"
 UBUNTU_CUSTOM_XCCDF="${UBUNTU_CUSTOM_DIR}/${ORG_PREFIX}_xccdf.xml"
 UBUNTU_CUSTOM_OVAL="${UBUNTU_CUSTOM_DIR}/${ORG_PREFIX}_ubuntu_rules.xml"
 UBUNTU_CUSTOM_PLAYBOOK="${UBUNTU_CUSTOM_DIR}/ubuntu_custom_playbook.yml"
 
-RHEL_CUSTOM_DIR="rhel-custom"
+RHEL_CUSTOM_DIR="${SCRIPT_DIR}/rhel-custom"
 RHEL_CUSTOM_XCCDF="${RHEL_CUSTOM_DIR}/${ORG_PREFIX}_rhel_xccdf.xml"
 RHEL_CUSTOM_OVAL="${RHEL_CUSTOM_DIR}/${ORG_PREFIX}_rhel_rules.xml"
 RHEL_CUSTOM_PLAYBOOK="${RHEL_CUSTOM_DIR}/rhel_custom_playbook.yml"
 
-WIN_CUSTOM_DIR="window-custom"
+WIN_CUSTOM_DIR="${SCRIPT_DIR}/window-custom"
 WIN_CUSTOM_BENCHMARK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_baseline.rb"
 WIN_CUSTOM_PLAYBOOK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_remediate.yml"
 
-WIN_CIS_DIR="window-default-cis"
+WIN_CIS_DIR="${SCRIPT_DIR}/window-default-cis"
 WIN_CIS_BENCHMARK="${WIN_CIS_DIR}/window-baseline"
 WIN_PS1_REMEDIATE="${WIN_CIS_BENCHMARK}/Invoke-CISRemediation-Combined.ps1"
 
 export INSPEC_SSH_CONFIG_NO_SECURE=true
-BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; MAGENTA='\033[0;35m'; NC='\033[0m'
+BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+RED='\033[0;31m'; MAGENTA='\033[0;35m'; NC='\033[0m'
 clear
 
 # ======================================================
@@ -169,20 +175,8 @@ prefetch_scap_packages() {
     fi
 
     if $need_ubuntu; then
-        # FIX 1: was missing && between rm and mkdir — rm was treating "mkdir" as an argument
         rm -rf "${SCAP_CACHE_DIR}/ubuntu2204/"* && mkdir -p "${SCAP_CACHE_DIR}/ubuntu2204/"
         echo -e "${CYAN}   Fetching Ubuntu 22.04 packages via Docker...${NC}"
-        # FIX 4: ubuntu:22.04 Docker image only enables 'main' by default; ssg-base is in
-        # 'universe'. Without explicitly adding universe, apt-get exits non-zero, the &&
-        # chain breaks, cp never runs, and the cache directory stays empty.
-        # Solution: add universe explicitly, then install packages with || true so the
-        # cp always runs even if an optional package isn't found.
-        # FIX 5: Run each package group as a separate download command.
-        # When openscap-scanner and ssg-base were combined in one command, any
-        # dependency conflict silently failed the whole command (2>/dev/null || true)
-        # and neither ended up in the cache — so oscap was never installed on the VM.
-        # Splitting them means a failure in one package group cannot block the others.
-        # Also adding jammy-updates universe for the latest patched package versions.
         docker run --rm \
             -v "${SCAP_CACHE_DIR}/ubuntu2204:/output" \
             ubuntu:22.04 \
@@ -203,10 +197,8 @@ prefetch_scap_packages() {
     fi
 
     if $need_ubuntu; then
-        # FIX 1 (same): was `rm ... * mkdir -p ...` — missing && caused rm to treat mkdir as arg
         rm -rf "${SCAP_CACHE_DIR}/ubuntu2404/"* && mkdir -p "${SCAP_CACHE_DIR}/ubuntu2404/"
         echo -e "${CYAN}   Fetching Ubuntu 24.04 packages via Docker...${NC}"
-        # ubuntu:24.04 ships with universe pre-enabled; using || true for consistency
         docker run --rm \
             -v "${SCAP_CACHE_DIR}/ubuntu2404:/output" \
             ubuntu:24.04 \
@@ -221,26 +213,12 @@ prefetch_scap_packages() {
             || echo -e "${RED}   ❌ Ubuntu2404 Docker step failed${NC}"
     fi
 
-  # FIX 9: GitHub release CDN (objects.githubusercontent.com) is blocked from
-    # the runner network even though api.github.com is reachable. All previous
-    # curl/tar approaches fail because the download redirect target is unreachable.
-    #
-    # Solution: download ssg-debderived from Ubuntu 24.04 noble's apt archive
-    # (archive.ubuntu.com IS reachable). Noble's ssg-debderived (~v0.1.72) contains
-    # BOTH ssg-ubuntu2204-ds.xml and ssg-ubuntu2404-ds.xml. We extract the xmls
-    # from the deb on the runner and also carry the deb to the VM cache so the
-    # air-gapped VM can dpkg-deb -x it without needing internet.
-    # GitHub releases are still tried as a secondary fallback for cases where the
-    # CDN IS reachable, but a failure there no longer aborts prefetch.
     if $need_ubuntu; then
         echo -e "${CYAN}   Fetching SCAP datastreams via ssg-debderived (Docker install)...${NC}"
         local ds_tmp
         ds_tmp=$(mktemp -d /tmp/ssg_ds_XXXXXX)
         chmod 777 "${ds_tmp}"
 
-        # Install ssg-debderived properly (not download-only) so transitive
-        # dependencies also install and all datastreams land in the expected path.
-        # Then copy whatever ubuntu*-ds.xml files exist directly to output.
         docker run --rm \
             -v "${ds_tmp}:/output" \
             ubuntu:24.04 \
@@ -256,7 +234,6 @@ prefetch_scap_packages() {
             && echo -e "${GREEN}   ✅ ssg-debderived installed in Docker${NC}" \
             || echo -e "${YELLOW}   ⚠️  Docker step exited non-zero (checking output anyway)${NC}"
 
-        # Distribute whatever datastreams were found to the right cache dirs
         for _ds_file in "${ds_tmp}"/ssg-ubuntu*-ds.xml; do
             [ -f "$_ds_file" ] || continue
             _fname=$(basename "$_ds_file")
@@ -269,7 +246,6 @@ prefetch_scap_packages() {
             fi
         done
 
-        # Also download the deb for air-gapped VM fallback
         docker run --rm \
             -v "${ds_tmp}:/output" \
             ubuntu:24.04 \
@@ -290,8 +266,6 @@ prefetch_scap_packages() {
 
         rm -rf "${ds_tmp}"
 
-        # If ubuntu2404 still has no datastream, try jammy's ssg-debderived
-        # (some versions shipped 2404 content backported to jammy repos)
         if ! ls "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" >/dev/null 2>&1; then
             echo -e "${YELLOW}   ⚠️  2404 datastream not in noble ssg-debderived — trying jammy...${NC}"
             local ds_tmp22
@@ -325,10 +299,6 @@ prefetch_scap_packages() {
             rm -rf "${ds_tmp22}"
         fi
 
-        # Last resort: copy 2204 datastream as 2404 fallback.
-        # The 2204 profile runs successfully against 22.04 VMs. For actual 24.04
-        # VMs the scan will warn about profile mismatch but still complete.
-        # This is only reached if no 2404 content exists in any Ubuntu package.
         if ! ls "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" >/dev/null 2>&1; then
             if ls "${SCAP_CACHE_DIR}/ubuntu2204/ssg-ubuntu2204-ds.xml" >/dev/null 2>&1; then
                 echo -e "${YELLOW}   ⚠️  No 2404 datastream available — using 2204 as fallback for ubuntu2404 cache${NC}"
@@ -354,16 +324,8 @@ prefetch_scap_packages() {
             echo -e "${RED}⚠️  [Phase 0.2b] Cache still empty: ${d}${NC}"
             failed=1
         fi
-        # FIX 8 (cont.): Ubuntu caches must contain the SCAP datastream xml.
-        # Without this check, a Docker success + SSG download failure produces a
-        # non-empty cache (deb files only) that passes the empty-dir check above
-        # but leaves the VM without a datastream → exit 11 on the remote host.
         if [[ "${d}" == ubuntu* ]]; then
             if ! ls "${SCAP_CACHE_DIR}/${d}/ssg-"*.xml >/dev/null 2>&1; then
-                # If the sibling cache has a datastream, warn but don't fail —
-                # the last-resort copy above ensures at least one xml per cache dir.
-                # A hard failure here would block all Ubuntu scans when 24.04 content
-                # simply isn't packaged yet in the available apt repos.
                 if ls "${SCAP_CACHE_DIR}"/ubuntu*/ssg-*.xml >/dev/null 2>&1; then
                     echo -e "${YELLOW}⚠️  [Phase 0.2b] No SCAP xml in ${d} — will use available datastream at runtime${NC}"
                 else
@@ -395,23 +357,17 @@ validate_win_cis_profile() {
         echo -e "${RED}❌ [Profile Guard] ${inspec_yml} not found.${NC}"
         ok=false
     fi
-
     if [ ! -f "${rb_file}" ]; then
         echo -e "${RED}❌ [Profile Guard] ${rb_file} not found.${NC}"
         ok=false
     fi
-
     if [ ! -f "${ps1_file}" ]; then
         echo -e "${YELLOW}⚠️  [Profile Guard] ${ps1_file} not found — PS1 remediation path unavailable.${NC}"
     fi
+    if [ "$ok" == "false" ]; then return 1; fi
 
-    if [ "$ok" == "false" ]; then
-        return 1
-    fi
-
-    local ctrl_count
+    local ctrl_count l1_count l2_count
     ctrl_count=$(grep -c "^control " "${rb_file}" 2>/dev/null || echo 0)
-    local l1_count l2_count
     l1_count=$(grep -c "tag level: \['L1'\]" "${rb_file}" 2>/dev/null || echo 0)
     l2_count=$(grep -c "tag level: \['L2'\]" "${rb_file}" 2>/dev/null || echo 0)
     echo -e "${GREEN}✅ [Profile Guard] CIS WS2022 v5 profile OK — ${ctrl_count} controls (L1: ${l1_count}, L2: ${l2_count}).${NC}"
@@ -548,24 +504,6 @@ ensure_linux_scap_tools() {
 
     local install_cmd
     if [ "$pkg_mgr" == "apt" ]; then
-        # FIX 6: The old `apt-get install -f -y` step removed our installed packages
-        # when the VM had a newer/conflicting openscap (e.g. openscap-common 1.3.9 from
-        # noble left over from a previous run). apt -f resolves conflicts by removing
-        # the packages we just installed, leaving oscap missing.
-        #
-        # FIX 7 (cont.): On Ubuntu 22.04 there is no ssg-base/openscap-scanner package at
-        # all, and the VM is air-gapped, so the previous apt fallbacks could never succeed.
-        # We now:
-        #   1. dpkg --force-overwrite the engine debs (no apt removal of our packages).
-        #   2. dpkg --configure -a to finish configuring unpacked packages.
-        #   3. If oscap is still missing, try openscap-scanner, then libopenscap8
-        #      (jammy's engine package name) as a fallback — both are no-ops when offline
-        #      but harmless and cover the online case.
-        #   4. For content: if no ssg-*-ds.xml is present, FIRST copy the datastream that
-        #      rode along in /tmp/scap_offline (downloaded from upstream on the runner) into
-        #      /usr/share/xml/scap/ssg/content/. Only if that's somehow absent do we fall
-        #      back to apt-get install ssg-base ssg-debderived (the datastreams live in
-        #      ssg-debderived, not ssg-base) for distros where the packages do exist.
         install_cmd='
             export DEBIAN_FRONTEND=noninteractive
             sudo dpkg -i --force-overwrite /tmp/scap_offline/*.deb 2>/dev/null || true
@@ -578,21 +516,18 @@ ensure_linux_scap_tools() {
             fi
             if ! ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1; then
                 if ls /tmp/scap_offline/ssg-*-ds.xml >/dev/null 2>&1; then
-                    # Direct xml files from GitHub CDN (when CDN is reachable)
                     sudo mkdir -p /usr/share/xml/scap/ssg/content
                     sudo cp -f /tmp/scap_offline/ssg-*-ds.xml \
                         /usr/share/xml/scap/ssg/content/ 2>/dev/null || true
                 elif ls /tmp/scap_offline/ssg-debderived*.deb >/dev/null 2>&1; then
-                    # ssg-debderived deb from noble apt — extract xmls without internet
                     _deb_extract=$(mktemp -d /tmp/ssg_deb_XXXXXX)
                     dpkg-deb -x /tmp/scap_offline/ssg-debderived*.deb \
                         "$_deb_extract" 2>/dev/null || true
                     sudo mkdir -p /usr/share/xml/scap/ssg/content
-                    find "$_deb_extract" -name 'ssg-ubuntu*-ds.xml' \
+                    find "$_deb_extract" -name "ssg-ubuntu*-ds.xml" \
                         -exec sudo cp -f {} /usr/share/xml/scap/ssg/content/ \;
                     rm -rf "$_deb_extract"
                 else
-                    # Air-gapped and no cached content — apt fallback (online VMs only)
                     sudo apt-get install -y --no-install-recommends \
                         ssg-base ssg-debderived 2>/dev/null || true
                 fi
@@ -626,6 +561,47 @@ ensure_linux_scap_tools() {
     fi
 
     echo -e "${GREEN}✅ [Tool Guard] SCAP ready on ${ip} (offline SCP install — no VM internet used)${NC}"
+    return 0
+}
+
+# ======================================================
+# HELPER: scp_custom_content
+# FIX: Centralised helper so Phase 1, Phase 2, and Phase 4
+#      all use the same logic and never forget to re-SCP.
+# ======================================================
+scp_custom_content_ubuntu() {
+    local user="$1"
+    local ip="$2"
+    echo -e "${CYAN}📤 [SCP] Pushing custom XCCDF/OVAL to ${ip}...${NC}"
+    scp -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o ControlMaster=no -o ControlPath=none \
+        -o ConnectTimeout=10 \
+        "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" \
+        "${user}@${ip}:/tmp/"
+    local rc=$?
+    if [ $rc -ne 0 ]; then
+        echo -e "${RED}❌ [SCP] Failed to push custom content to ${ip} (rc=${rc})${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✅ [SCP] Custom content ready on ${ip}${NC}"
+    return 0
+}
+
+scp_custom_content_rhel() {
+    local user="$1"
+    local ip="$2"
+    echo -e "${CYAN}📤 [SCP] Pushing custom RHEL XCCDF/OVAL to ${ip}...${NC}"
+    scp -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o ControlMaster=no -o ControlPath=none \
+        -o ConnectTimeout=10 \
+        "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" \
+        "${user}@${ip}:/tmp/"
+    local rc=$?
+    if [ $rc -ne 0 ]; then
+        echo -e "${RED}❌ [SCP] Failed to push custom RHEL content to ${ip} (rc=${rc})${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✅ [SCP] Custom RHEL content ready on ${ip}${NC}"
     return 0
 }
 
@@ -804,23 +780,23 @@ remediate_windows_host() {
     case "$ver" in
         2019) role_name="ansible-lockdown.windows_2019_cis"
               role_install_target="ansible-lockdown.windows_2019_cis"
-              playbook_file="window-default-cis/cis_remediate_2019.yml"
+              playbook_file="${SCRIPT_DIR}/window-default-cis/cis_remediate_2019.yml"
               tag_scope_l1="level1-memberserver" ;;
         2022) role_name="ansible-lockdown.windows_2022_cis"
               role_install_target="ansible-lockdown.windows_2022_cis"
-              playbook_file="window-default-cis/cis_remediate_2022.yml"
+              playbook_file="${SCRIPT_DIR}/window-default-cis/cis_remediate_2022.yml"
               tag_scope_l1="level1-memberserver" ;;
         2025) role_name="Windows-2025-CIS"
               role_install_target="git+https://github.com/ansible-lockdown/Windows-2025-CIS.git"
-              playbook_file="window-default-cis/cis_remediate_2025.yml"
+              playbook_file="${SCRIPT_DIR}/window-default-cis/cis_remediate_2025.yml"
               tag_scope_l1="level1-memberserver" ;;
         10)   role_name="ansible-lockdown.windows_10_cis"
               role_install_target="ansible-lockdown.windows_10_cis"
-              playbook_file="window-default-cis/cis_remediate_win10.yml"
+              playbook_file="${SCRIPT_DIR}/window-default-cis/cis_remediate_win10.yml"
               tag_scope_l1="level1-corporate-enterprise-environment" ;;
         11)   role_name="ansible-lockdown.windows_11_cis"
               role_install_target="ansible-lockdown.windows_11_cis"
-              playbook_file="window-default-cis/cis_remediate_win11.yml"
+              playbook_file="${SCRIPT_DIR}/window-default-cis/cis_remediate_win11.yml"
               tag_scope_l1="level1-corporate-enterprise-environment" ;;
     esac
 
@@ -951,7 +927,7 @@ cloud_hcloud_check() {
         return 1
     fi
     if [ -z "${HUAWEICLOUD_ACCESS_KEY}" ] || [ -z "${HUAWEICLOUD_SECRET_KEY}" ] || [ -z "${HW_PROJECT_ID}" ]; then
-        echo -e "${RED}❌ [HuaweiCloud] Missing credentials. Need HUAWEICLOUD_ACCESS_KEY, HUAWEICLOUD_SECRET_KEY, HW_PROJECT_ID.${NC}"
+        echo -e "${RED}❌ [HuaweiCloud] Missing credentials.${NC}"
         return 1
     fi
 
@@ -961,7 +937,7 @@ cloud_hcloud_check() {
         HW_PROJECT_ID="${HW_PROJECT_ID}" \
         HW_ECS_ENDPOINT="${HW_ECS_ENDPOINT}" \
         HW_EPS_ID="${HW_EPS_ID}" \
-        python3 "$(dirname "$0")/hw_ecs_discover.py" >/dev/null 2>/tmp/hw_check_err.log; then
+        python3 "${SCRIPT_DIR}/hw_ecs_discover.py" >/dev/null 2>/tmp/hw_check_err.log; then
         echo -e "${RED}❌ [HuaweiCloud] SDK auth/connectivity check failed.${NC}"
         [ -s /tmp/hw_check_err.log ] && cat /tmp/hw_check_err.log
         return 1
@@ -995,27 +971,6 @@ cloud_add_port_rule() {
         ;;
     huaweicloud)
         [ -z "$vm_id" ] && { echo -e "${YELLOW}⚠️  [HW] No ECS ID for ${ip}${NC}"; return 1; }
-        local sg_id
-        sg_id=$(timeout 30 hcloud ECS ShowServer \
-            --server-id "$vm_id" \
-            --cli-region "${HW_REGION}" \
-            --cli-output json 2>/dev/null \
-            | python3 -c "
-import json,sys
-d=json.load(sys.stdin)
-sgs=d.get('server',{}).get('security_groups',[])
-print(sgs[0].get('id','') if sgs else '')
-" 2>/dev/null)
-        [ -z "$sg_id" ] && { echo -e "${YELLOW}⚠️  [HW] Could not find SG for ${ip}${NC}"; return 1; }
-        timeout 30 hcloud VPC CreateSecurityGroupRule \
-            --cli-region "${HW_REGION}" \
-            --security-group-id "$sg_id" \
-            --security-group-rule.direction "ingress" \
-            --security-group-rule.protocol "tcp" \
-            --security-group-rule.port-range-min "$port" \
-            --security-group-rule.port-range-max "$port" \
-            --security-group-rule.remote-ip-prefix "${runner_ip}/32" \
-            --cli-output json >/dev/null 2>&1 || true
         ;;
     esac
 }
@@ -1037,7 +992,6 @@ cloud_vm_run_powershell() {
         ;;
     huaweicloud)
         echo -e "${YELLOW}⚠️  [HW] Agent-channel PowerShell not available on Huawei Cloud.${NC}" >&2
-        echo -e "${YELLOW}   WinRM must be reachable for Windows operations.${NC}" >&2
         return 1
         ;;
     esac
@@ -1059,7 +1013,8 @@ cloud_vm_run_shell() {
         return $?
         ;;
     huaweicloud)
-        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "${LINUX_ADMIN_USER:-root}@${ip}" "$script" >/dev/null 2>&1
+        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+            "${LINUX_ADMIN_USER:-root}@${ip}" "$script" >/dev/null 2>&1
         return $?
         ;;
     esac
@@ -1252,7 +1207,6 @@ _map_vm() {
 }
 
 case "${CLOUD_PROVIDER}" in
-# ── AZURE ────────────────────────────────────────────────────────────
 azure)
     echo -e "${CYAN}📡 [Azure] Querying VMs in resource group [${RG_NAME}]...${NC}"
     if [ "$H_TARGETS" == "all" ] || [ -z "$H_TARGETS" ]; then
@@ -1275,12 +1229,8 @@ azure)
     done <<< "$VM_DATA"
     ;;
 
-# ── HUAWEI CLOUD ─────────────────────────────────────────────────────
 huaweicloud)
     echo -e "${CYAN}📡 [HuaweiCloud] Querying ECS instances via SDK [endpoint: ${HW_ECS_ENDPOINT}]...${NC}"
-    # NOTE on HW_EPS_ID: when set, the API filters server-side; all instances
-    # must belong to that enterprise project or they will be excluded.
-    # Verify instance enterprise-project assignment in the console if 0 are returned.
     HW_RAW=$(
         HUAWEICLOUD_ACCESS_KEY="${HUAWEICLOUD_ACCESS_KEY}" \
         HUAWEICLOUD_SECRET_KEY="${HUAWEICLOUD_SECRET_KEY}" \
@@ -1289,21 +1239,15 @@ huaweicloud)
         HW_ECS_TAG_KEY="${HW_ECS_TAG_KEY}" \
         HW_ECS_TAG_VAL="${HW_ECS_TAG_VAL}" \
         HW_EPS_ID="${HW_EPS_ID}" \
-        python3 "$(dirname "$0")/hw_ecs_discover.py"
+        python3 "${SCRIPT_DIR}/hw_ecs_discover.py"
     )
     _hw_rc=$?
 
     if [ $_hw_rc -ne 0 ] || [ -z "$HW_RAW" ]; then
         echo -e "${RED}❌ [HuaweiCloud] ECS list returned empty or failed.${NC}"
-        # FIX 3: Warn if EPS ID filtering is active — the most common cause of 0 servers
         [ -n "${HW_EPS_ID}" ] && \
             echo -e "${YELLOW}   ⚠️  HW_EPS_ID='${HW_EPS_ID}' is set — verify instances belong to this enterprise project.${NC}"
     else
-        # FIX 2: Write JSON to a temp file instead of piping into python3 - <<'PYEOF'.
-        # Root cause: when both a pipe (|) and a heredoc (<<) target the same command,
-        # bash uses the heredoc as stdin (to supply the Python script source), and the
-        # piped data from echo "$HW_RAW" is silently discarded. sys.stdin.read() then
-        # returns "" and json.loads("") raises "Expecting value: line 1 col 1 (char 0)".
         _hw_tmp=$(mktemp /tmp/hw_ecs_XXXXXX.json)
         echo "$HW_RAW" > "$_hw_tmp"
 
@@ -1590,10 +1534,9 @@ run_phase_1() {
                     fi
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Ubuntu/${ORG_PREFIX^^}] Scanning $IP...${NC}"
-                        scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                            "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" \
-                            ${UBUNTU_USER}@${IP}:/tmp/ \
-                            || { echo -e "${RED}❌ [Phase1] SCP of custom content failed for $IP${NC}"; exit 1; }
+                        # FIX: use centralised SCP helper — always push before scan
+                        scp_custom_content_ubuntu "$UBUNTU_USER" "$IP" \
+                            || { echo -e "${RED}❌ [Phase1] SCP failed for $IP${NC}"; exit 1; }
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                             ${UBUNTU_USER}@${IP} \
                             "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
@@ -1645,10 +1588,8 @@ run_phase_1() {
                     fi
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/RHEL/${ORG_PREFIX^^}] Scanning $IP...${NC}"
-                        scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                            "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" \
-                            ${GHOST_USER}@${IP}:/tmp/ \
-                            || { echo -e "${RED}❌ [Phase1] SCP of custom content failed for $IP${NC}"; exit 1; }
+                        scp_custom_content_rhel "$GHOST_USER" "$IP" \
+                            || { echo -e "${RED}❌ [Phase1] SCP failed for $IP${NC}"; exit 1; }
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                             ${GHOST_USER}@${IP} \
                             "sudo env OSCAP_CPE_DICT_PATH=\$(find /usr/share/xml/scap/ssg/content/ \
@@ -1710,10 +1651,8 @@ run_phase_1() {
                     fi
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Rocky/${ORG_PREFIX^^}] Scanning $IP...${NC}"
-                        scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                            "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" \
-                            ${GHOST_USER}@${IP}:/tmp/ \
-                            || { echo -e "${RED}❌ [Phase1] SCP of custom content failed for $IP${NC}"; exit 1; }
+                        scp_custom_content_rhel "$GHOST_USER" "$IP" \
+                            || { echo -e "${RED}❌ [Phase1] SCP failed for $IP${NC}"; exit 1; }
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                             ${GHOST_USER}@${IP} \
                             "sudo /usr/bin/oscap xccdf eval \
@@ -1778,10 +1717,8 @@ run_phase_1() {
                     fi
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Alma/${ORG_PREFIX^^}] Scanning $IP...${NC}"
-                        scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                            "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" \
-                            ${GHOST_USER}@${IP}:/tmp/ \
-                            || { echo -e "${RED}❌ [Phase1] SCP of custom content failed for $IP${NC}"; exit 1; }
+                        scp_custom_content_rhel "$GHOST_USER" "$IP" \
+                            || { echo -e "${RED}❌ [Phase1] SCP failed for $IP${NC}"; exit 1; }
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                             ${GHOST_USER}@${IP} \
                             "sudo /usr/bin/oscap xccdf eval \
@@ -1856,6 +1793,13 @@ run_phase_1() {
 
 # ======================================================
 # PHASE 2/3: REMEDIATION
+# FIX: Three root-cause fixes applied here:
+#   1. Absolute path for playbook — working-dir shifts in CI/CD
+#      caused "not found" silent skips
+#   2. Re-SCP custom XCCDF/OVAL before Ansible runs — the files
+#      must exist on the VM for any XCCDF-driven tasks in the playbook
+#   3. Capture ansible-playbook rc BEFORE echo — echo always returns 0
+#      so the old code masked every Ansible failure
 # ======================================================
 run_remediation() {
     echo -e "\n${BOLD}🛠️  PHASE 2 & 3: Executing Remediation (Hardened SSH)...${NC}"
@@ -1864,7 +1808,7 @@ run_remediation() {
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
             for IP in "${UBUNTU_MACHINES[@]}"; do
                 (
-                    echo -e "${CYAN}🛠️  [Remediation/Ubuntu] Starting on ${IP}...${NC}"
+                    echo -e "${CYAN}🛠️  [Remediation/Ubuntu/CIS] Starting on ${IP}...${NC}"
                     timeout $REMEDIATION_TIMEOUT_SEC \
                         ssh $REMEDIATION_SSH_OPTS ${UBUNTU_USER}@${IP} \
                         "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ \
@@ -1874,35 +1818,71 @@ run_remediation() {
                              --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\""
                     rc=$?
                     case $rc in
-                        124) echo -e "${RED}⏱️  [Remediation/Ubuntu] TIMEOUT on ${IP}${NC}" ;;
-                        255) echo -e "${RED}🔌 [Remediation/Ubuntu] SSH dropped on ${IP}${NC}" ;;
-                        0|2) echo -e "${GREEN}✅ [Remediation/Ubuntu] ${IP} done (rc=${rc})${NC}" ;;
-                        *)   echo -e "${YELLOW}⚠️  [Remediation/Ubuntu] ${IP} rc=${rc}${NC}" ;;
+                        124) echo -e "${RED}⏱️  [Remediation/Ubuntu/CIS] TIMEOUT on ${IP}${NC}" ;;
+                        255) echo -e "${RED}🔌 [Remediation/Ubuntu/CIS] SSH dropped on ${IP}${NC}" ;;
+                        0|2) echo -e "${GREEN}✅ [Remediation/Ubuntu/CIS] ${IP} done (rc=${rc})${NC}" ;;
+                        *)   echo -e "${YELLOW}⚠️  [Remediation/Ubuntu/CIS] ${IP} rc=${rc}${NC}" ;;
                     esac
                 ) &
             done
             wait
         fi
+
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [ "$RUN_ORG" == true ]; then
-            # Guard 1: verify playbook exists
+
+            # ── Workspace diagnostic ──────────────────────────────────
+            echo -e "${CYAN}=== WORKSPACE CHECK ===${NC}"
+            echo "  Script dir      : ${SCRIPT_DIR}"
+            echo "  Playbook path   : ${UBUNTU_CUSTOM_PLAYBOOK}"
+            echo "  XCCDF path      : ${UBUNTU_CUSTOM_XCCDF}"
+            echo "  OVAL path       : ${UBUNTU_CUSTOM_OVAL}"
+            ls -la "${SCRIPT_DIR}/ubuntu-custom/" 2>/dev/null \
+                || echo -e "${RED}  ubuntu-custom/ MISSING from ${SCRIPT_DIR}${NC}"
+            echo -e "${CYAN}========================${NC}"
+
+            # ── Guard: playbook must exist ────────────────────────────
             if [ ! -f "$UBUNTU_CUSTOM_PLAYBOOK" ]; then
-                echo -e "${RED}❌ [Remediation/Ubuntu/ORG] Playbook not found: $UBUNTU_CUSTOM_PLAYBOOK${NC}"
-                echo -e "${YELLOW}   Files in ubuntu-custom/: $(ls ubuntu-custom/ 2>/dev/null || echo 'directory missing')${NC}"
-            else
-                # Guard 2: re-SCP custom content before remediation
-                for IP in "${UBUNTU_MACHINES[@]}"; do
-                    echo -e "${CYAN}📤 [Remediation/Ubuntu/ORG] SCPing custom content to ${IP}...${NC}"
-                    scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-                        "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" \
-                        ${UBUNTU_USER}@${IP}:/tmp/ \
-                        || echo -e "${RED}❌ SCP failed for ${IP}${NC}"
-                done
-        
-                echo -e "${CYAN}🛠️  [Remediation/Ubuntu/ORG] Running playbook...${NC}"
-                ansible-playbook -i inventory.ini "$UBUNTU_CUSTOM_PLAYBOOK" \
-                    --limit ubuntu_nodes -v   # Remove >/dev/null so failures are visible
-                echo -e "${GREEN}✅ [Remediation/Ubuntu/ORG] Playbook complete (rc=$?)${NC}"
+                echo -e "${RED}❌ [Remediation/Ubuntu/ORG] Playbook not found: ${UBUNTU_CUSTOM_PLAYBOOK}${NC}"
+                echo -e "${RED}   Remediation cannot proceed — fix the path or add the playbook file.${NC}"
+                exit 1
             fi
+
+            # ── Guard: XCCDF/OVAL must exist ─────────────────────────
+            if [ ! -f "$UBUNTU_CUSTOM_XCCDF" ] || [ ! -f "$UBUNTU_CUSTOM_OVAL" ]; then
+                echo -e "${RED}❌ [Remediation/Ubuntu/ORG] XCCDF or OVAL file missing:${NC}"
+                echo -e "${RED}   XCCDF : ${UBUNTU_CUSTOM_XCCDF}${NC}"
+                echo -e "${RED}   OVAL  : ${UBUNTU_CUSTOM_OVAL}${NC}"
+                exit 1
+            fi
+
+            # ── Re-SCP custom content to every VM before Ansible runs ─
+            # FIX: Without this, the XCCDF was missing from /tmp/ on the VM
+            # by the time Ansible's oscap tasks needed it, causing silent
+            # task failures that looked like success.
+            for IP in "${UBUNTU_MACHINES[@]}"; do
+                echo -e "${CYAN}📤 [Remediation/Ubuntu/ORG] SCPing custom content to ${IP}...${NC}"
+                scp_custom_content_ubuntu "$UBUNTU_USER" "$IP" \
+                    || { echo -e "${RED}❌ [Remediation/Ubuntu/ORG] SCP failed for ${IP} — aborting${NC}"; exit 1; }
+            done
+
+            # ── Run Ansible with full output (no /dev/null suppression) ─
+            echo -e "${CYAN}🛠️  [Remediation/Ubuntu/ORG] Running Ansible playbook...${NC}"
+            ANSIBLE_HOST_KEY_CHECKING=False \
+            ansible-playbook \
+                -i inventory.ini \
+                "$UBUNTU_CUSTOM_PLAYBOOK" \
+                --limit ubuntu_nodes \
+                --ssh-extra-args="-o StrictHostKeyChecking=no -o BatchMode=yes" \
+                -v
+            # FIX: capture rc BEFORE any echo — echo always returns 0
+            ANSIBLE_RC=$?
+
+            if [ $ANSIBLE_RC -ne 0 ]; then
+                echo -e "${RED}❌ [Remediation/Ubuntu/ORG] Playbook FAILED (rc=${ANSIBLE_RC})${NC}"
+                echo -e "${RED}   Check the Ansible output above for the failing task.${NC}"
+                exit $ANSIBLE_RC
+            fi
+            echo -e "${GREEN}✅ [Remediation/Ubuntu/ORG] Playbook complete (rc=${ANSIBLE_RC})${NC}"
         fi
     fi
 
@@ -1910,7 +1890,7 @@ run_remediation() {
         if [ ${#RHEL_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
             for IP in "${RHEL_MACHINES[@]}"; do
                 (
-                    echo -e "${CYAN}🛠️  [Remediation/RHEL] Starting on ${IP}...${NC}"
+                    echo -e "${CYAN}🛠️  [Remediation/RHEL/CIS] Starting on ${IP}...${NC}"
                     timeout $REMEDIATION_TIMEOUT_SEC \
                         ssh $REMEDIATION_SSH_OPTS ${GHOST_USER}@${IP} \
                         "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ \
@@ -1920,17 +1900,26 @@ run_remediation() {
                              --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\""
                     rc=$?
                     case $rc in
-                        124) echo -e "${RED}⏱️  [Remediation/RHEL] TIMEOUT on ${IP}${NC}" ;;
-                        255) echo -e "${RED}🔌 [Remediation/RHEL] SSH dropped on ${IP}${NC}" ;;
-                        0|2) echo -e "${GREEN}✅ [Remediation/RHEL] ${IP} done (rc=${rc})${NC}" ;;
-                        *)   echo -e "${YELLOW}⚠️  [Remediation/RHEL] ${IP} rc=${rc}${NC}" ;;
+                        124) echo -e "${RED}⏱️  [Remediation/RHEL/CIS] TIMEOUT on ${IP}${NC}" ;;
+                        255) echo -e "${RED}🔌 [Remediation/RHEL/CIS] SSH dropped on ${IP}${NC}" ;;
+                        0|2) echo -e "${GREEN}✅ [Remediation/RHEL/CIS] ${IP} done (rc=${rc})${NC}" ;;
+                        *)   echo -e "${YELLOW}⚠️  [Remediation/RHEL/CIS] ${IP} rc=${rc}${NC}" ;;
                     esac
                 ) &
             done
             wait
         fi
         if [ ${#RHEL_MACHINES[@]} -gt 0 ] && [ "$RUN_ORG" == true ]; then
-            ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rhel_nodes
+            for IP in "${RHEL_MACHINES[@]}"; do
+                scp_custom_content_rhel "$GHOST_USER" "$IP" || true
+            done
+            ANSIBLE_HOST_KEY_CHECKING=False \
+            ansible-playbook -i inventory.ini "$RHEL_CUSTOM_PLAYBOOK" \
+                --limit rhel_nodes -v
+            ANSIBLE_RC=$?
+            [ $ANSIBLE_RC -ne 0 ] && \
+                echo -e "${RED}❌ [Remediation/RHEL/ORG] Playbook FAILED (rc=${ANSIBLE_RC})${NC}" || \
+                echo -e "${GREEN}✅ [Remediation/RHEL/ORG] Playbook complete${NC}"
         fi
     fi
 
@@ -1939,7 +1928,7 @@ run_remediation() {
             if [ "$RUN_CIS" == true ]; then
                 for IP in "${ROCKY_MACHINES[@]}"; do
                     (
-                        echo -e "${CYAN}🛠️  [Remediation/Rocky] Starting on ${IP}...${NC}"
+                        echo -e "${CYAN}🛠️  [Remediation/Rocky/CIS] Starting on ${IP}...${NC}"
                         timeout $REMEDIATION_TIMEOUT_SEC \
                             ssh $REMEDIATION_SSH_OPTS ${GHOST_USER}@${IP} "
                             ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
@@ -1955,17 +1944,26 @@ run_remediation() {
                         "
                         rc=$?
                         case $rc in
-                            124) echo -e "${RED}⏱️  [Remediation/Rocky] TIMEOUT on ${IP}${NC}" ;;
-                            255) echo -e "${RED}🔌 [Remediation/Rocky] SSH dropped on ${IP}${NC}" ;;
-                            0|2) echo -e "${GREEN}✅ [Remediation/Rocky] ${IP} done (rc=${rc})${NC}" ;;
-                            *)   echo -e "${YELLOW}⚠️  [Remediation/Rocky] ${IP} rc=${rc}${NC}" ;;
+                            124) echo -e "${RED}⏱️  [Remediation/Rocky/CIS] TIMEOUT on ${IP}${NC}" ;;
+                            255) echo -e "${RED}🔌 [Remediation/Rocky/CIS] SSH dropped on ${IP}${NC}" ;;
+                            0|2) echo -e "${GREEN}✅ [Remediation/Rocky/CIS] ${IP} done (rc=${rc})${NC}" ;;
+                            *)   echo -e "${YELLOW}⚠️  [Remediation/Rocky/CIS] ${IP} rc=${rc}${NC}" ;;
                         esac
                     ) &
                 done
                 wait
             fi
             if [ "$RUN_ORG" == true ]; then
-                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit rocky_nodes
+                for IP in "${ROCKY_MACHINES[@]}"; do
+                    scp_custom_content_rhel "$GHOST_USER" "$IP" || true
+                done
+                ANSIBLE_HOST_KEY_CHECKING=False \
+                ansible-playbook -i inventory.ini "$RHEL_CUSTOM_PLAYBOOK" \
+                    --limit rocky_nodes -v
+                ANSIBLE_RC=$?
+                [ $ANSIBLE_RC -ne 0 ] && \
+                    echo -e "${RED}❌ [Remediation/Rocky/ORG] Playbook FAILED (rc=${ANSIBLE_RC})${NC}" || \
+                    echo -e "${GREEN}✅ [Remediation/Rocky/ORG] Playbook complete${NC}"
             fi
         fi
     fi
@@ -1975,7 +1973,7 @@ run_remediation() {
             if [ "$RUN_CIS" == true ]; then
                 for IP in "${ALMA_MACHINES[@]}"; do
                     (
-                        echo -e "${CYAN}🛠️  [Remediation/Alma] Starting on ${IP}...${NC}"
+                        echo -e "${CYAN}🛠️  [Remediation/Alma/CIS] Starting on ${IP}...${NC}"
                         timeout $REMEDIATION_TIMEOUT_SEC \
                             ssh $REMEDIATION_SSH_OPTS ${GHOST_USER}@${IP} "
                             ALMA_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
@@ -1996,17 +1994,26 @@ run_remediation() {
                         "
                         rc=$?
                         case $rc in
-                            124) echo -e "${RED}⏱️  [Remediation/Alma] TIMEOUT on ${IP}${NC}" ;;
-                            255) echo -e "${RED}🔌 [Remediation/Alma] SSH dropped on ${IP}${NC}" ;;
-                            0|2) echo -e "${GREEN}✅ [Remediation/Alma] ${IP} done (rc=${rc})${NC}" ;;
-                            *)   echo -e "${YELLOW}⚠️  [Remediation/Alma] ${IP} rc=${rc}${NC}" ;;
+                            124) echo -e "${RED}⏱️  [Remediation/Alma/CIS] TIMEOUT on ${IP}${NC}" ;;
+                            255) echo -e "${RED}🔌 [Remediation/Alma/CIS] SSH dropped on ${IP}${NC}" ;;
+                            0|2) echo -e "${GREEN}✅ [Remediation/Alma/CIS] ${IP} done (rc=${rc})${NC}" ;;
+                            *)   echo -e "${YELLOW}⚠️  [Remediation/Alma/CIS] ${IP} rc=${rc}${NC}" ;;
                         esac
                     ) &
                 done
                 wait
             fi
             if [ "$RUN_ORG" == true ]; then
-                ansible-playbook -i inventory.ini $RHEL_CUSTOM_PLAYBOOK --limit alma_nodes
+                for IP in "${ALMA_MACHINES[@]}"; do
+                    scp_custom_content_rhel "$GHOST_USER" "$IP" || true
+                done
+                ANSIBLE_HOST_KEY_CHECKING=False \
+                ansible-playbook -i inventory.ini "$RHEL_CUSTOM_PLAYBOOK" \
+                    --limit alma_nodes -v
+                ANSIBLE_RC=$?
+                [ $ANSIBLE_RC -ne 0 ] && \
+                    echo -e "${RED}❌ [Remediation/Alma/ORG] Playbook FAILED (rc=${ANSIBLE_RC})${NC}" || \
+                    echo -e "${GREEN}✅ [Remediation/Alma/ORG] Playbook complete${NC}"
             fi
         fi
     fi
@@ -2039,8 +2046,13 @@ run_remediation() {
                     wait_for_winrm "$IP" || \
                         echo -e "${YELLOW}⚠️  [Remediation/Win/${ORG_PREFIX^^}] WinRM not ready on $IP${NC}"
                 done
+                ANSIBLE_HOST_KEY_CHECKING=False \
                 ansible-playbook -i inventory.ini "$WIN_CUSTOM_PLAYBOOK" \
-                    --limit windows_nodes
+                    --limit windows_nodes -v
+                ANSIBLE_RC=$?
+                [ $ANSIBLE_RC -ne 0 ] && \
+                    echo -e "${RED}❌ [Remediation/Win/ORG] Playbook FAILED (rc=${ANSIBLE_RC})${NC}" || \
+                    echo -e "${GREEN}✅ [Remediation/Win/ORG] Playbook complete${NC}"
             fi
 
             if [ "$RUN_CIS" == true ] && [ "${WIN_REBOOT_AFTER_REMEDIATION}" == "true" ]; then
@@ -2072,6 +2084,11 @@ run_remediation() {
 
 # ======================================================
 # PHASE 4: VERIFICATION
+# FIX: Re-SCP custom XCCDF/OVAL before every ORG after-scan.
+#      Previously the XCCDF was missing from /tmp/ on the VM
+#      by Phase 4 (cleanup or simple absence after reboot),
+#      causing oscap to fail silently and the after-report to
+#      be empty or a copy of the before-report.
 # ======================================================
 run_phase_4() {
     echo -e "\n${BOLD}🔄 PHASE 4: Verification Scans (SCP install → scan)...${NC}"
@@ -2085,30 +2102,51 @@ run_phase_4() {
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
             for IP in "${UBUNTU_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$UBUNTU_USER" || { echo -e "${RED}❌ [Phase4/Ubuntu] SSH unreachable: $IP${NC}"; exit 1; }
-                    ensure_linux_scap_tools "$UBUNTU_USER" "$IP" "apt" || { echo -e "${RED}❌ [Phase4/Ubuntu] Tools missing on $IP${NC}"; exit 1; }
+                    wait_for_ssh "$IP" "$UBUNTU_USER" || {
+                        echo -e "${RED}❌ [Phase4/Ubuntu] SSH unreachable: $IP${NC}"; exit 1
+                    }
+                    ensure_linux_scap_tools "$UBUNTU_USER" "$IP" "apt" || {
+                        echo -e "${RED}❌ [Phase4/Ubuntu] Tools missing on $IP${NC}"; exit 1
+                    }
                     UBUNTU_VER=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
                         "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
                     UBUNTU_VER=${UBUNTU_VER:-2404}
                     UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
+
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
                         ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
-                            "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE --report ${REMOTE} $UBUNTU_CIS_XCCDF"
+                            "sudo oscap xccdf eval \
+                             --profile $UBUNTU_CIS_PROFILE \
+                             --report ${REMOTE} $UBUNTU_CIS_XCCDF"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
-                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" "Ubuntu/CIS" || \
+                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" \
+                            "Ubuntu/CIS" || \
                             echo -e "${RED}❌ [Phase4/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
                     fi
+
                     if [ "$RUN_ORG" == true ]; then
+                        # FIX: Always re-SCP before the after-scan — the XCCDF
+                        # may have been removed by cleanup or was never present
+                        # after a reboot.
+                        echo -e "${CYAN}📤 [Phase4/Ubuntu/ORG] Re-SCPing custom content to ${IP}...${NC}"
+                        scp_custom_content_ubuntu "$UBUNTU_USER" "$IP" || {
+                            echo -e "${RED}❌ [Phase4/Ubuntu/ORG] SCP failed for ${IP} — skipping after-scan${NC}"
+                            exit 1
+                        }
                         REMOTE="/tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html"
                         LOCAL="./report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html"
                         ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
-                            "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report ${REMOTE} /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
+                            "sudo oscap xccdf eval \
+                             --profile $CUSTOM_XCCDF_PROFILE \
+                             --report ${REMOTE} \
+                             /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
-                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" "Ubuntu/${ORG_PREFIX^^}" || \
+                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" \
+                            "Ubuntu/${ORG_PREFIX^^}" || \
                             echo -e "${RED}❌ [Phase4/Ubuntu/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
                     fi
                 ) &
@@ -2121,27 +2159,43 @@ run_phase_4() {
         if [ ${#RHEL_MACHINES[@]} -gt 0 ]; then
             for IP in "${RHEL_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/RHEL] SSH unreachable: $IP${NC}"; exit 1; }
-                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/RHEL] Tools missing on $IP${NC}"; exit 1; }
+                    wait_for_ssh "$IP" "$GHOST_USER" || {
+                        echo -e "${RED}❌ [Phase4/RHEL] SSH unreachable: $IP${NC}"; exit 1
+                    }
+                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || {
+                        echo -e "${RED}❌ [Phase4/RHEL] Tools missing on $IP${NC}"; exit 1
+                    }
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_RHEL_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_RHEL_${IP}.html"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
-                            "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                             sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report ${REMOTE} \"\$TARGET_XML\""
+                            "TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
+                                 -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                             sudo /usr/bin/oscap xccdf eval \
+                                 --profile $RHEL_CIS_PROFILE \
+                                 --report ${REMOTE} \"\$TARGET_XML\""
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "RHEL/CIS" || \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
+                            "RHEL/CIS" || \
                             echo -e "${RED}❌ [Phase4/RHEL/CIS] oscap failed on $IP (rc=$rc)${NC}"
                     fi
                     if [ "$RUN_ORG" == true ]; then
+                        scp_custom_content_rhel "$GHOST_USER" "$IP" || {
+                            echo -e "${RED}❌ [Phase4/RHEL/ORG] SCP failed for ${IP} — skipping after-scan${NC}"
+                            exit 1
+                        }
                         REMOTE="/tmp/report_after_${ORG_PREFIX^^}_RHEL_${IP}.html"
                         LOCAL="./report_after_${ORG_PREFIX^^}_RHEL_${IP}.html"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
-                            "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                            "sudo /usr/bin/oscap xccdf eval \
+                             --profile $CUSTOM_XCCDF_PROFILE \
+                             --report ${REMOTE} \
+                             /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "RHEL/${ORG_PREFIX^^}" || \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
+                            "RHEL/${ORG_PREFIX^^}" || \
                             echo -e "${RED}❌ [Phase4/RHEL/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
                     fi
                 ) &
@@ -2154,30 +2208,47 @@ run_phase_4() {
         if [ ${#ROCKY_MACHINES[@]} -gt 0 ]; then
             for IP in "${ROCKY_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/Rocky] SSH unreachable: $IP${NC}"; exit 1; }
-                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/Rocky] Tools missing on $IP${NC}"; exit 1; }
+                    wait_for_ssh "$IP" "$GHOST_USER" || {
+                        echo -e "${RED}❌ [Phase4/Rocky] SSH unreachable: $IP${NC}"; exit 1
+                    }
+                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || {
+                        echo -e "${RED}❌ [Phase4/Rocky] Tools missing on $IP${NC}"; exit 1
+                    }
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_ROCKY_${IP}.html"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} "
                             ROCKY_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                             TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-rl\${ROCKY_VER}-ds.xml\"
-                            [ ! -f \"\$TARGET_XML\" ] && TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                            sudo /usr/bin/oscap xccdf eval --profile $RHEL_CIS_PROFILE --report ${REMOTE} \"\$TARGET_XML\"
+                            [ ! -f \"\$TARGET_XML\" ] && \
+                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
+                                    -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                            sudo /usr/bin/oscap xccdf eval \
+                                --profile $RHEL_CIS_PROFILE \
+                                --report ${REMOTE} \"\$TARGET_XML\"
                         "
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Rocky/CIS" || \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
+                            "Rocky/CIS" || \
                             echo -e "${RED}❌ [Phase4/Rocky/CIS] oscap failed on $IP (rc=$rc)${NC}"
                     fi
                     if [ "$RUN_ORG" == true ]; then
+                        scp_custom_content_rhel "$GHOST_USER" "$IP" || {
+                            echo -e "${RED}❌ [Phase4/Rocky/ORG] SCP failed for ${IP} — skipping after-scan${NC}"
+                            exit 1
+                        }
                         REMOTE="/tmp/report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html"
                         LOCAL="./report_after_${ORG_PREFIX^^}_ROCKY_${IP}.html"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
-                            "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                            "sudo /usr/bin/oscap xccdf eval \
+                             --profile $CUSTOM_XCCDF_PROFILE \
+                             --report ${REMOTE} \
+                             /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Rocky/${ORG_PREFIX^^}" || \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
+                            "Rocky/${ORG_PREFIX^^}" || \
                             echo -e "${RED}❌ [Phase4/Rocky/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
                     fi
                 ) &
@@ -2190,31 +2261,52 @@ run_phase_4() {
         if [ ${#ALMA_MACHINES[@]} -gt 0 ]; then
             for IP in "${ALMA_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$GHOST_USER" || { echo -e "${RED}❌ [Phase4/Alma] SSH unreachable: $IP${NC}"; exit 1; }
-                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || { echo -e "${RED}❌ [Phase4/Alma] Tools missing on $IP${NC}"; exit 1; }
+                    wait_for_ssh "$IP" "$GHOST_USER" || {
+                        echo -e "${RED}❌ [Phase4/Alma] SSH unreachable: $IP${NC}"; exit 1
+                    }
+                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "dnf" || {
+                        echo -e "${RED}❌ [Phase4/Alma] Tools missing on $IP${NC}"; exit 1
+                    }
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_ALMA_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_ALMA_${IP}.html"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} "
                             ALMA_VER=\$(source /etc/os-release && echo \${VERSION_ID%%.*})
                             TARGET_XML=\"/usr/share/xml/scap/ssg/content/ssg-almalinux\${ALMA_VER}-ds.xml\"
-                            [ ! -f \"\$TARGET_XML\" ] && TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
-                            if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"; else ALMA_PROF=\"$RHEL_CIS_PROFILE\"; fi
-                            sudo /usr/bin/oscap xccdf eval --profile \$ALMA_PROF --report ${REMOTE} \"\$TARGET_XML\"
+                            [ ! -f \"\$TARGET_XML\" ] && \
+                                TARGET_XML=\$(find /usr/share/xml/scap/ssg/content/ \
+                                    -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
+                            if ! grep -q \"$RHEL_CIS_PROFILE\" \"\$TARGET_XML\"; then
+                                ALMA_PROF=\"xccdf_org.ssgproject.content_profile_cis\"
+                            else
+                                ALMA_PROF=\"$RHEL_CIS_PROFILE\"
+                            fi
+                            sudo /usr/bin/oscap xccdf eval \
+                                --profile \$ALMA_PROF \
+                                --report ${REMOTE} \"\$TARGET_XML\"
                         "
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Alma/CIS" || \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
+                            "Alma/CIS" || \
                             echo -e "${RED}❌ [Phase4/Alma/CIS] oscap failed on $IP (rc=$rc)${NC}"
                     fi
                     if [ "$RUN_ORG" == true ]; then
+                        scp_custom_content_rhel "$GHOST_USER" "$IP" || {
+                            echo -e "${RED}❌ [Phase4/Alma/ORG] SCP failed for ${IP} — skipping after-scan${NC}"
+                            exit 1
+                        }
                         REMOTE="/tmp/report_after_${ORG_PREFIX^^}_ALMA_${IP}.html"
                         LOCAL="./report_after_${ORG_PREFIX^^}_ALMA_${IP}.html"
                         ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
-                            "sudo /usr/bin/oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE --report ${REMOTE} /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                            "sudo /usr/bin/oscap xccdf eval \
+                             --profile $CUSTOM_XCCDF_PROFILE \
+                             --report ${REMOTE} \
+                             /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
-                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Alma/${ORG_PREFIX^^}" || \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
+                            "Alma/${ORG_PREFIX^^}" || \
                             echo -e "${RED}❌ [Phase4/Alma/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
                     fi
                 ) &
@@ -2231,7 +2323,8 @@ run_phase_4() {
             }
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
-                    if [ -f /tmp/.win_hung_hosts ] && grep -qx "$IP" /tmp/.win_hung_hosts 2>/dev/null; then
+                    if [ -f /tmp/.win_hung_hosts ] && \
+                       grep -qx "$IP" /tmp/.win_hung_hosts 2>/dev/null; then
                         echo -e "${RED}⏭️  [Phase4/Win] ${IP} flagged hung after remediation — skipping verify scan${NC}"
                         exit 0
                     fi
@@ -2306,11 +2399,13 @@ run_cleanup() {
                 -o ControlMaster=no -o ControlPath=none \
                 ${UBUNTU_USER}@${IP} "$remove_deb" >/dev/null 2>&1 || true
             VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            [ -n "$VM_NAME" ] && az vm run-command invoke \
-                -g "$RG_NAME" -n "$VM_NAME" \
-                --command-id RunShellScript \
-                --scripts "userdel -r ${UBUNTU_USER} 2>/dev/null || true" \
-                -o none >/dev/null 2>&1 || true &
+            if [ -n "$VM_NAME" ] && [ "${CLOUD_PROVIDER}" == "azure" ]; then
+                az vm run-command invoke \
+                    -g "$RG_NAME" -n "$VM_NAME" \
+                    --command-id RunShellScript \
+                    --scripts "userdel -r ${UBUNTU_USER} 2>/dev/null || true" \
+                    -o none >/dev/null 2>&1 || true &
+            fi
         done
     fi
 
@@ -2320,11 +2415,13 @@ run_cleanup() {
                 -o ControlMaster=no -o ControlPath=none \
                 ${GHOST_USER}@${IP} "$remove_rpm" >/dev/null 2>&1 || true
             VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            [ -n "$VM_NAME" ] && az vm run-command invoke \
-                -g "$RG_NAME" -n "$VM_NAME" \
-                --command-id RunShellScript \
-                --scripts "userdel -r ${GHOST_USER} 2>/dev/null || true" \
-                -o none >/dev/null 2>&1 || true &
+            if [ -n "$VM_NAME" ] && [ "${CLOUD_PROVIDER}" == "azure" ]; then
+                az vm run-command invoke \
+                    -g "$RG_NAME" -n "$VM_NAME" \
+                    --command-id RunShellScript \
+                    --scripts "userdel -r ${GHOST_USER} 2>/dev/null || true" \
+                    -o none >/dev/null 2>&1 || true &
+            fi
         done
     fi
 
@@ -2334,11 +2431,13 @@ run_cleanup() {
                 -o ControlMaster=no -o ControlPath=none \
                 ${GHOST_USER}@${IP} "$remove_rpm" >/dev/null 2>&1 || true
             VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            [ -n "$VM_NAME" ] && az vm run-command invoke \
-                -g "$RG_NAME" -n "$VM_NAME" \
-                --command-id RunShellScript \
-                --scripts "userdel -r ${GHOST_USER} 2>/dev/null || true" \
-                -o none >/dev/null 2>&1 || true &
+            if [ -n "$VM_NAME" ] && [ "${CLOUD_PROVIDER}" == "azure" ]; then
+                az vm run-command invoke \
+                    -g "$RG_NAME" -n "$VM_NAME" \
+                    --command-id RunShellScript \
+                    --scripts "userdel -r ${GHOST_USER} 2>/dev/null || true" \
+                    -o none >/dev/null 2>&1 || true &
+            fi
         done
     fi
 
@@ -2348,18 +2447,20 @@ run_cleanup() {
                 -o ControlMaster=no -o ControlPath=none \
                 ${GHOST_USER}@${IP} "$remove_rpm" >/dev/null 2>&1 || true
             VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            [ -n "$VM_NAME" ] && az vm run-command invoke \
-                -g "$RG_NAME" -n "$VM_NAME" \
-                --command-id RunShellScript \
-                --scripts "userdel -r ${GHOST_USER} 2>/dev/null || true" \
-                -o none >/dev/null 2>&1 || true &
+            if [ -n "$VM_NAME" ] && [ "${CLOUD_PROVIDER}" == "azure" ]; then
+                az vm run-command invoke \
+                    -g "$RG_NAME" -n "$VM_NAME" \
+                    --command-id RunShellScript \
+                    --scripts "userdel -r ${GHOST_USER} 2>/dev/null || true" \
+                    -o none >/dev/null 2>&1 || true &
+            fi
         done
     fi
 
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         for IP in "${WINDOWS_MACHINES[@]}"; do
             VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            if [ -n "$VM_NAME" ]; then
+            if [ -n "$VM_NAME" ] && [ "${CLOUD_PROVIDER}" == "azure" ]; then
                 NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" \
                     --query "networkProfile.networkInterfaces[0].id" -o tsv)
                 NSG_ID=$(az network nic show --ids "$NIC_ID" \
