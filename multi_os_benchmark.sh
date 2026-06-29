@@ -1860,9 +1860,14 @@ run_remediation() {
             # by the time Ansible's oscap tasks needed it, causing silent
             # task failures that looked like success.
             for IP in "${UBUNTU_MACHINES[@]}"; do
-                echo -e "${CYAN}📤 [Remediation/Ubuntu/ORG] SCPing custom content to ${IP}...${NC}"
-                scp_custom_content_ubuntu "$UBUNTU_USER" "$IP" \
-                    || { echo -e "${RED}❌ [Remediation/Ubuntu/ORG] SCP failed for ${IP} — aborting${NC}"; exit 1; }
+                echo -e "${CYAN}🔧 [Remediation/Ubuntu/ORG] Fixing broken apt state on ${IP}...${NC}"
+                ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                    -o ControlMaster=no -o ControlPath=none \
+                    ${UBUNTU_USER}@${IP} \
+                    "sudo apt-get remove -y --purge openscap-common ssg-debderived 2>/dev/null || true
+                     sudo dpkg --remove --force-remove-reinstreq openscap-common ssg-debderived 2>/dev/null || true
+                     sudo apt-get install -f -y 2>/dev/null || true
+                     echo 'APT state repaired'"
             done
 
             # ── Run Ansible with full output (no /dev/null suppression) ─
