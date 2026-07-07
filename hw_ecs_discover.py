@@ -123,7 +123,7 @@ def main():
 
     # ── Paginated fetch ───────────────────────────────────────────────────
     all_servers_raw = []
-    offset = 1  
+    offset = 0  
 
     while True:
         try:
