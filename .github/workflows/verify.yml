@@ -1,35 +1,29 @@
-- name: '🔎 Verify Phase 5 Cleanup (oscap leftovers)'
-        if: ${{ github.event.inputs.cleanup_mode == 'true' && matrix.os_target.os != 'Windows' }}
+name: 🔍 Verify oscap Cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      ssh_user:
+        description: 'SSH user to connect as'
+        required: true
+        default: 'ubuntu'
+      target_ip:
+        description: 'IP address of the ECS server to check'
+        required: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: '📥 Checkout'
+        uses: actions/checkout@v4
+
+      - name: '🔑 Setup SSH Key'
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
+
+      - name: '🔍 Run Verification'
         run: |
           chmod +x verify_cleanup.sh
-          FAILED=0
-
-          # Map target OS -> ansible inventory group + SSH user
-          case "$TARGET_OS" in
-            Ubuntu) GROUP="ubuntu_nodes"; SSH_USER="$LINUX_ADMIN_USER" ;;
-            RHEL|Rocky|Alma) GROUP="${TARGET_OS,,}_nodes"; SSH_USER="$GHOST_USER" ;;
-            *) echo "Skipping verify — no Linux group for $TARGET_OS"; exit 0 ;;
-          esac
-
-          # Pull IPs for this OS group out of inventory.ini
-          IPS=$(awk -v grp="[$GROUP]" '
-            $0==grp {found=1; next}
-            /^\[/{found=0}
-            found && NF {print $1}
-          ' inventory.ini)
-
-          if [ -z "$IPS" ]; then
-            echo "ℹ️  No hosts found in [$GROUP] — nothing to verify."
-            exit 0
-          fi
-
-          for IP in $IPS; do
-            echo "=================================================="
-            ./verify_cleanup.sh "$SSH_USER" "$IP" || FAILED=1
-          done
-
-          if [ "$FAILED" -eq 1 ]; then
-            echo "❌ One or more hosts still have oscap leftovers."
-            exit 1
-          fi
-          echo "✅ All ${TARGET_OS} hosts verified clean."
+          ./verify_cleanup.sh "${{ github.event.inputs.ssh_user }}" "${{ github.event.inputs.target_ip }}"
