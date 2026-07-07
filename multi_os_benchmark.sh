@@ -2153,6 +2153,9 @@ run_phase_4() {
                              --report ${REMOTE} $UBUNTU_CIS_XCCDF > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
+                            p=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            f=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            echo -e "${GREEN}📊 [Phase4/Ubuntu/${ORG_PREFIX^^}] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
                             fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" \
                             "Ubuntu/CIS" || \
                             echo -e "${RED}❌ [Phase4/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
