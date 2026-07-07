@@ -2421,7 +2421,14 @@ run_cleanup() {
     echo -e "${CYAN}   VM stays HARDENED — oscap tools/files removed. Audit user is kept for future runs.${NC}"
 
     local remove_rpm='
-        sudo rpm -e --nodeps openscap openscap-scanner scap-security-guide 2>/dev/null || true
+        echo "Searching for all openscap/scap-security-guide related packages..."
+        PKGS=$(rpm -qa | grep -E "openscap|scap-security-guide")
+        if [ -n "$PKGS" ]; then
+            echo "Removing: $PKGS"
+            sudo rpm -e --nodeps $PKGS 2>/dev/null || true
+        else
+            echo "No matching packages found."
+        fi
         sudo rm -rf /tmp/scap_offline
         sudo rm -f /tmp/report_before_*.html /tmp/report_after_*.html /tmp/report_remediation_*.html
         sudo rm -f /tmp/oscap_console_*.log
@@ -2431,8 +2438,16 @@ run_cleanup() {
     '
 
     local remove_deb='
-        sudo dpkg -r --force-remove-reinstreq openscap-scanner ssg-base ssg-debderived 2>/dev/null || true
-        sudo apt-get purge -y openscap-scanner ssg-base ssg-debderived 2>/dev/null || true
+        echo "Searching for all openscap/ssg related packages..."
+        PKGS=$(dpkg -l | grep -E "openscap|ssg-" | awk "{print \$2}")
+        if [ -n "$PKGS" ]; then
+            echo "Removing: $PKGS"
+            sudo apt-get purge -y $PKGS 2>/dev/null || true
+            sudo dpkg --purge --force-all $PKGS 2>/dev/null || true
+        else
+            echo "No matching packages found."
+        fi
+        sudo apt-get autoremove -y 2>/dev/null || true
         sudo rm -rf /tmp/scap_offline
         sudo rm -f /tmp/report_before_*.html /tmp/report_after_*.html /tmp/report_remediation_*.html
         sudo rm -f /tmp/oscap_console_*.log
