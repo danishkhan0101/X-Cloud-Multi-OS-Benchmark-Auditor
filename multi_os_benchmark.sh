@@ -2467,10 +2467,6 @@ run_cleanup() {
         done
     fi
 
-    # ── Local runner-side report cleanup ────────────────────────────────
-    rm -f ./report_before_*.html ./report_after_*.html ./report_remediation_*.html 2>/dev/null || true
-    rm -f ./heimdall_before_*.json ./heimdall_after_*.json 2>/dev/null || true
-
     wait
     echo -e "\n${GREEN}✅ [Phase 5] All oscap tools, content, temp/report files, and logs removed.${NC}"
     echo -e "${GREEN}   Audit user + sudo access kept in place for future scheduled runs.${NC}"
