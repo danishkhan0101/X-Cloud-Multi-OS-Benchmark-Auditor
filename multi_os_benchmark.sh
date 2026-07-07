@@ -1507,9 +1507,12 @@ run_phase_1() {
                             ${UBUNTU_USER}@${IP} \
                             "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE \
                              --report /tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html \
-                             $UBUNTU_CIS_XCCDF"
+                             $UBUNTU_CIS_XCCDF > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
+                            p=$(ssh -n ${UBUNTU_USER}@${IP} "grep -c '^pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            f=$(ssh -n ${UBUNTU_USER}@${IP} "grep -c '^fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            echo -e "${GREEN}📊 [Phase1/Ubuntu/CIS] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
                             fetch_remote_report "$UBUNTU_USER" "$IP" \
                                 "/tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html" \
                                 "./report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html" \
@@ -1527,9 +1530,12 @@ run_phase_1() {
                             ${UBUNTU_USER}@${IP} \
                             "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
                              --report /tmp/report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html \
-                             /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
+                             /tmp/$(basename $UBUNTU_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
+                            p=$(ssh -n ${UBUNTU_USER}@${IP} "grep -c '^pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            f=$(ssh -n ${UBUNTU_USER}@${IP} "grep -c '^fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            echo -e "${GREEN}📊 [Phase1/Ubuntu/${ORG_PREFIX^^}] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
                             fetch_remote_report "$UBUNTU_USER" "$IP" \
                                 "/tmp/report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html" \
                                 "./report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html" \
@@ -1561,9 +1567,12 @@ run_phase_1() {
                              sudo /usr/bin/oscap xccdf eval \
                                  --profile $RHEL_CIS_PROFILE \
                                  --report /tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html \
-                                 \"\$TARGET_XML\""
+                                 \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
+                            p=$(ssh -n ${GHOST_USER}@${IP} "grep -c '^pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            f=$(ssh -n ${GHOST_USER}@${IP} "grep -c '^fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            echo -e "${GREEN}📊 [Phase1/RHEL/CIS] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
                             fetch_remote_report "$GHOST_USER" "$IP" \
                                 "/tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html" \
                                 "./report_before_CIS_L${OS_LVL}_RHEL_${IP}.html" \
@@ -1583,9 +1592,12 @@ run_phase_1() {
                              /usr/bin/oscap xccdf eval \
                                  --profile $CUSTOM_XCCDF_PROFILE \
                                  --report /tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html \
-                                 /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                                 /tmp/$(basename $RHEL_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
+                            p=$(ssh -n ${GHOST_USER}@${IP} "grep -c '^pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            f=$(ssh -n ${GHOST_USER}@${IP} "grep -c '^fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            echo -e "${GREEN}📊 [Phase1/RHEL/${ORG_PREFIX^^}] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
                             fetch_remote_report "$GHOST_USER" "$IP" \
                                 "/tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html" \
                                 "./report_before_${ORG_PREFIX^^}_RHEL_${IP}.html" \
@@ -1623,7 +1635,7 @@ run_phase_1() {
                             sudo /usr/bin/oscap xccdf eval \
                                 --profile $RHEL_CIS_PROFILE \
                                 --report /tmp/report_before_CIS_L${OS_LVL}_ROCKY_${IP}.html \
-                                \"\$TARGET_XML\"
+                                \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1
                         "
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
@@ -1644,8 +1656,11 @@ run_phase_1() {
                             "sudo /usr/bin/oscap xccdf eval \
                                  --profile $CUSTOM_XCCDF_PROFILE \
                                  --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html \
-                                 /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                                 /tmp/$(basename $RHEL_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
+                        p=$(ssh -n ${GHOST_USER}@${IP} "grep -c '^pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                        f=$(ssh -n ${GHOST_USER}@${IP} "grep -c '^fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                        echo -e "${GREEN}📊 [Phase1/Rocky/${ORG_PREFIX^^}] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             fetch_remote_report "$GHOST_USER" "$IP" \
                                 "/tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html" \
@@ -1689,7 +1704,7 @@ run_phase_1() {
                             sudo /usr/bin/oscap xccdf eval \
                                 --profile \$ALMA_PROF \
                                 --report /tmp/report_before_CIS_L${OS_LVL}_ALMA_${IP}.html \
-                                \"\$TARGET_XML\"
+                                \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1
                         "
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
@@ -1710,7 +1725,7 @@ run_phase_1() {
                             "sudo /usr/bin/oscap xccdf eval \
                                  --profile $CUSTOM_XCCDF_PROFILE \
                                  --report /tmp/report_before_${ORG_PREFIX^^}_ALMA_${IP}.html \
-                                 /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                                 /tmp/$(basename $RHEL_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             fetch_remote_report "$GHOST_USER" "$IP" \
@@ -1801,7 +1816,7 @@ run_remediation() {
                              -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1)
                          sudo /usr/bin/oscap xccdf eval --remediate \
                              --profile $UBUNTU_CIS_PROFILE \
-                             --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\""
+                             --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\" > /tmp/oscap_console_${IP}.log 2>&1"
                     rc=$?
                     case $rc in
                         124) echo -e "${RED}⏱️  [Remediation/Ubuntu/CIS] TIMEOUT on ${IP}${NC}" ;;
@@ -1888,7 +1903,7 @@ run_remediation() {
                              -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
                          sudo /usr/bin/oscap xccdf eval --remediate \
                              --profile $RHEL_CIS_PROFILE \
-                             --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\""
+                             --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\" > /tmp/oscap_console_${IP}.log 2>&1"
                     rc=$?
                     case $rc in
                         124) echo -e "${RED}⏱️  [Remediation/RHEL/CIS] TIMEOUT on ${IP}${NC}" ;;
@@ -1931,7 +1946,7 @@ run_remediation() {
                             sudo /usr/bin/oscap xccdf eval --remediate \
                                 --profile $RHEL_CIS_PROFILE \
                                 --report /tmp/report_remediation_CIS_ROCKY_${IP}.html \
-                                \"\$TARGET_XML\"
+                                \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1
                         "
                         rc=$?
                         case $rc in
@@ -1981,7 +1996,7 @@ run_remediation() {
                             sudo /usr/bin/oscap xccdf eval --remediate \
                                 --profile \$ALMA_PROF \
                                 --report /tmp/report_remediation_CIS_ALMA_${IP}.html \
-                                \"\$TARGET_XML\"
+                                \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1
                         "
                         rc=$?
                         case $rc in
@@ -2110,7 +2125,7 @@ run_phase_4() {
                         ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
                             "sudo oscap xccdf eval \
                              --profile $UBUNTU_CIS_PROFILE \
-                             --report ${REMOTE} $UBUNTU_CIS_XCCDF"
+                             --report ${REMOTE} $UBUNTU_CIS_XCCDF > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
                             fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" \
@@ -2133,7 +2148,7 @@ run_phase_4() {
                             "sudo oscap xccdf eval \
                              --profile $CUSTOM_XCCDF_PROFILE \
                              --report ${REMOTE} \
-                             /tmp/$(basename $UBUNTU_CUSTOM_XCCDF)"
+                             /tmp/$(basename $UBUNTU_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
                             fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" \
@@ -2164,7 +2179,7 @@ run_phase_4() {
                                  -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
                              sudo /usr/bin/oscap xccdf eval \
                                  --profile $RHEL_CIS_PROFILE \
-                                 --report ${REMOTE} \"\$TARGET_XML\""
+                                 --report ${REMOTE} \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
                             fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
@@ -2182,7 +2197,7 @@ run_phase_4() {
                             "sudo /usr/bin/oscap xccdf eval \
                              --profile $CUSTOM_XCCDF_PROFILE \
                              --report ${REMOTE} \
-                             /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                             /tmp/$(basename $RHEL_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
                             fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
@@ -2216,7 +2231,7 @@ run_phase_4() {
                                     -name 'ssg-rhel*-ds.xml' | sort -V | tail -n 1)
                             sudo /usr/bin/oscap xccdf eval \
                                 --profile $RHEL_CIS_PROFILE \
-                                --report ${REMOTE} \"\$TARGET_XML\"
+                                --report ${REMOTE} \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1
                         "
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
@@ -2235,7 +2250,7 @@ run_phase_4() {
                             "sudo /usr/bin/oscap xccdf eval \
                              --profile $CUSTOM_XCCDF_PROFILE \
                              --report ${REMOTE} \
-                             /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                             /tmp/$(basename $RHEL_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
                             fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
@@ -2274,7 +2289,7 @@ run_phase_4() {
                             fi
                             sudo /usr/bin/oscap xccdf eval \
                                 --profile \$ALMA_PROF \
-                                --report ${REMOTE} \"\$TARGET_XML\"
+                                --report ${REMOTE} \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1
                         "
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
@@ -2293,7 +2308,7 @@ run_phase_4() {
                             "sudo /usr/bin/oscap xccdf eval \
                              --profile $CUSTOM_XCCDF_PROFILE \
                              --report ${REMOTE} \
-                             /tmp/$(basename $RHEL_CUSTOM_XCCDF)"
+                             /tmp/$(basename $RHEL_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
                             fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
