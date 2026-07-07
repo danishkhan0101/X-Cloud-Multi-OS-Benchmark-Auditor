@@ -997,6 +997,18 @@ cloud_vm_run_powershell() {
     esac
 }
 
+# ======================================================
+# HELPER: cloud_vm_run_shell
+# NOTE (SSH key migration): For huaweicloud this is a plain keyed SSH call
+#   (BatchMode=yes → fails fast, never prompts for a password). There is no
+#   Huawei equivalent of Azure's `az vm run-command` (an out-of-band control
+#   plane channel) wired up in this script, so this call can only ever
+#   succeed if "${LINUX_ADMIN_USER:-root}" already trusts the runner's
+#   public key. That trust must be established OUTSIDE this pipeline —
+#   e.g. baked into the ECS image or injected via cloud-init/user-data at
+#   instance-creation time. The pipeline no longer pushes a password to
+#   establish it at runtime (see fleet-commander.yml).
+# ======================================================
 cloud_vm_run_shell() {
     local ip="$1"
     local script="$2"
@@ -1329,6 +1341,15 @@ fi
 
 # ======================================================
 # PHASE 0.3: AUTO-HEALER
+# NOTE (SSH key migration): the blocks below are a *self-heal*, not the
+# primary bootstrap path. They only fire if the dedicated audit account
+# (UBUNTU_USER / GHOST_USER) can't already be reached — and for Huawei
+# Cloud, the recovery call (cloud_vm_run_shell) itself needs SSH key trust
+# for LINUX_ADMIN_USER to already exist (see cloud_vm_run_shell above).
+# In other words: this heals a missing *audit* account, it cannot bootstrap
+# SSH access to a VM from zero. The precondition — LINUX_ADMIN_USER's key
+# trusted via cloud-init/user-data at ECS creation — must hold for Huawei
+# before this pipeline runs at all.
 # ======================================================
 echo -e "\n${CYAN}⚙️  PHASE 0.3: PARALLEL INFRASTRUCTURE BOOTSTRAPPING${NC}"
 RUNNER_IP=$(curl -s https://api.ipify.org)
