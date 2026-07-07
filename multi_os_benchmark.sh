@@ -1251,7 +1251,7 @@ huaweicloud)
         HW_ECS_TAG_KEY="${HW_ECS_TAG_KEY}" \
         HW_ECS_TAG_VAL="${HW_ECS_TAG_VAL}" \
         HW_EPS_ID="${HW_EPS_ID}" \
-        python3 "${SCRIPT_DIR}/hw_ecs_discover.py"
+        python3 "${SCRIPT_DIR}/hw_ecs_discover.py" --tsv
     )
     _hw_rc=$?
 
@@ -1260,49 +1260,14 @@ huaweicloud)
         [ -n "${HW_EPS_ID}" ] && \
             echo -e "${YELLOW}   ⚠️  HW_EPS_ID='${HW_EPS_ID}' is set — verify instances belong to this enterprise project.${NC}"
     else
-        _hw_tmp=$(mktemp /tmp/hw_ecs_XXXXXX.json)
-        echo "$HW_RAW" > "$_hw_tmp"
-
-        while IFS=$'\t' read -r vm_name ip os_type power offer srv_id; do
+        # hw_ecs_discover.py --tsv emits 5 columns:
+        #   os_type, img_name, name, target_ip, srv_id
+        # (it already filters to ACTIVE/RUNNING before printing, so there is
+        # no separate "power" column — we pass a literal "running" to _map_vm)
+        while IFS=$'\t' read -r os_type offer vm_name ip srv_id; do
             IP_TO_VM_ID["$ip"]="$srv_id"
-            _map_vm "$vm_name" "$ip" "$os_type" "$power" "$offer"
-        done < <(python3 -c "
-import json, sys, os
-with open(sys.argv[1]) as fh:
-    data = json.load(fh)
-os.unlink(sys.argv[1])
-
-tag_key = os.environ.get('HW_ECS_TAG_KEY', '')
-tag_val = os.environ.get('HW_ECS_TAG_VAL', '')
-
-for s in data.get('servers', []):
-    name       = s.get('name', '')
-    srv_id     = s.get('id', '')
-    status     = s.get('status', '')
-    meta       = s.get('metadata') or {}
-    os_type    = meta.get('os_type', 'Linux')
-    image_name = (s.get('image') or {}).get('name', '').lower()
-
-    if tag_key:
-        tags = {t.get('key', ''): t.get('value', '') for t in (s.get('tags') or [])}
-        if tag_val and tags.get(tag_key, '') != tag_val:
-            continue
-
-    public_ip = ''
-    for addrs in (s.get('addresses') or {}).values():
-        for a in addrs:
-            if a.get('OS-EXT-IPS:type') == 'floating':
-                public_ip = a.get('addr', '')
-                break
-        if public_ip:
-            break
-
-    if not public_ip:
-        continue
-
-    power = 'running' if status == 'ACTIVE' else status.lower()
-    print(f'{name}\t{public_ip}\t{os_type}\t{power}\t{image_name}\t{srv_id}')
-" "$_hw_tmp")
+            _map_vm "$vm_name" "$ip" "$os_type" "running" "$offer"
+        done <<< "$HW_RAW"
     fi
     ;;
 esac
