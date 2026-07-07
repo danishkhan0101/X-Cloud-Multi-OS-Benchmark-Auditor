@@ -2418,114 +2418,62 @@ run_phase_4() {
 # ======================================================
 run_cleanup() {
     echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP${NC}"
-    echo -e "${CYAN}   VM stays HARDENED — only SCAP tools + audit user are removed.${NC}"
+    echo -e "${CYAN}   VM stays HARDENED — oscap tools/files removed. Audit user is kept for future runs.${NC}"
 
-    local remove_rpm="sudo rpm -e --nodeps \
-        openscap openscap-scanner scap-security-guide 2>/dev/null || true; \
-        sudo rm -rf /tmp/scap_offline /tmp/report_*.html"
+    local remove_rpm='
+        sudo rpm -e --nodeps openscap openscap-scanner scap-security-guide 2>/dev/null || true
+        sudo rm -rf /tmp/scap_offline
+        sudo rm -f /tmp/report_before_*.html /tmp/report_after_*.html /tmp/report_remediation_*.html
+        sudo rm -f /tmp/oscap_console_*.log
+        sudo rm -f /tmp/*_xccdf.xml /tmp/*_rules.xml /tmp/*.xml
+        sudo rm -rf /usr/share/xml/scap/ssg/content/*
+        echo "oscap cleanup complete"
+    '
 
-    local remove_deb="sudo dpkg -r openscap-scanner ssg-base 2>/dev/null || true; \
-        sudo rm -rf /tmp/scap_offline /tmp/report_*.html"
+    local remove_deb='
+        sudo dpkg -r --force-remove-reinstreq openscap-scanner ssg-base ssg-debderived 2>/dev/null || true
+        sudo apt-get purge -y openscap-scanner ssg-base ssg-debderived 2>/dev/null || true
+        sudo rm -rf /tmp/scap_offline
+        sudo rm -f /tmp/report_before_*.html /tmp/report_after_*.html /tmp/report_remediation_*.html
+        sudo rm -f /tmp/oscap_console_*.log
+        sudo rm -f /tmp/*_xccdf.xml /tmp/*_rules.xml /tmp/*.xml
+        sudo rm -rf /usr/share/xml/scap/ssg/content/*
+        echo "oscap cleanup complete"
+    '
 
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
         for IP in "${UBUNTU_MACHINES[@]}"; do
+            echo -e "${CYAN}🧹 [Cleanup/Ubuntu] Removing oscap artifacts on ${IP}...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                 -o ControlMaster=no -o ControlPath=none \
-                ${UBUNTU_USER}@${IP} "$remove_deb" >/dev/null 2>&1 || true
-            VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            if [ -n "$VM_NAME" ] && [ "${CLOUD_PROVIDER}" == "azure" ]; then
-                az vm run-command invoke \
-                    -g "$RG_NAME" -n "$VM_NAME" \
-                    --command-id RunShellScript \
-                    --scripts "userdel -r ${UBUNTU_USER} 2>/dev/null || true" \
-                    -o none >/dev/null 2>&1 || true &
-            fi
+                ${UBUNTU_USER}@${IP} "$remove_deb" 2>&1 || \
+                echo -e "${YELLOW}⚠️  [Cleanup/Ubuntu] Some steps may have failed on ${IP} — check manually${NC}"
         done
     fi
 
-    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rhel" ]]; then
-        for IP in "${RHEL_MACHINES[@]}"; do
+    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" =~ ^(rhel|rocky|alma)$ ]]; then
+        for IP in "${RHEL_MACHINES[@]}" "${ROCKY_MACHINES[@]}" "${ALMA_MACHINES[@]}"; do
+            echo -e "${CYAN}🧹 [Cleanup/RHEL-family] Removing oscap artifacts on ${IP}...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                 -o ControlMaster=no -o ControlPath=none \
-                ${GHOST_USER}@${IP} "$remove_rpm" >/dev/null 2>&1 || true
-            VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            if [ -n "$VM_NAME" ] && [ "${CLOUD_PROVIDER}" == "azure" ]; then
-                az vm run-command invoke \
-                    -g "$RG_NAME" -n "$VM_NAME" \
-                    --command-id RunShellScript \
-                    --scripts "userdel -r ${GHOST_USER} 2>/dev/null || true" \
-                    -o none >/dev/null 2>&1 || true &
-            fi
-        done
-    fi
-
-    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "rocky" ]]; then
-        for IP in "${ROCKY_MACHINES[@]}"; do
-            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-                -o ControlMaster=no -o ControlPath=none \
-                ${GHOST_USER}@${IP} "$remove_rpm" >/dev/null 2>&1 || true
-            VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            if [ -n "$VM_NAME" ] && [ "${CLOUD_PROVIDER}" == "azure" ]; then
-                az vm run-command invoke \
-                    -g "$RG_NAME" -n "$VM_NAME" \
-                    --command-id RunShellScript \
-                    --scripts "userdel -r ${GHOST_USER} 2>/dev/null || true" \
-                    -o none >/dev/null 2>&1 || true &
-            fi
-        done
-    fi
-
-    if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "alma" ]]; then
-        for IP in "${ALMA_MACHINES[@]}"; do
-            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-                -o ControlMaster=no -o ControlPath=none \
-                ${GHOST_USER}@${IP} "$remove_rpm" >/dev/null 2>&1 || true
-            VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            if [ -n "$VM_NAME" ] && [ "${CLOUD_PROVIDER}" == "azure" ]; then
-                az vm run-command invoke \
-                    -g "$RG_NAME" -n "$VM_NAME" \
-                    --command-id RunShellScript \
-                    --scripts "userdel -r ${GHOST_USER} 2>/dev/null || true" \
-                    -o none >/dev/null 2>&1 || true &
-            fi
+                ${GHOST_USER}@${IP} "$remove_rpm" 2>&1 || \
+                echo -e "${YELLOW}⚠️  [Cleanup/RHEL-family] Some steps may have failed on ${IP} — check manually${NC}"
         done
     fi
 
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         for IP in "${WINDOWS_MACHINES[@]}"; do
-            VM_NAME="${IP_TO_VM_NAME[$IP]}"
-            if [ -n "$VM_NAME" ] && [ "${CLOUD_PROVIDER}" == "azure" ]; then
-                NIC_ID=$(az vm show -g "$RG_NAME" -n "$VM_NAME" \
-                    --query "networkProfile.networkInterfaces[0].id" -o tsv)
-                NSG_ID=$(az network nic show --ids "$NIC_ID" \
-                    --query "networkSecurityGroup.id" -o tsv)
-                if [ -n "$NSG_ID" ]; then
-                    NSG_NAME=$(basename "$NSG_ID")
-                    az network nsg rule delete -g "$RG_NAME" \
-                        --nsg-name "$NSG_NAME" \
-                        --name "Allow_WinRM_Runner_Only" \
-                        -o none >/dev/null 2>&1 || true
-                fi
-                az vm run-command invoke -g "$RG_NAME" -n "$VM_NAME" \
-                    --command-id RunPowerShellScript \
-                    --scripts "Stop-Service WinRM -WarningAction SilentlyContinue
-                               Set-Service WinRM -StartupType Disabled
-                               Remove-ItemProperty \
-                                   -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' \
-                                   -Name 'LocalAccountTokenFilterPolicy' \
-                                   -Force -ErrorAction SilentlyContinue
-                               Disable-NetFirewallRule \
-                                   -DisplayGroup 'Windows Remote Management' \
-                                   -ErrorAction SilentlyContinue
-                               Remove-LocalUser -Name '$AUDIT_USER' \
-                                   -ErrorAction SilentlyContinue" \
-                    -o none >/dev/null 2>&1 || true
-            fi
+            echo -e "${CYAN}ℹ️  [Cleanup/Windows] No file/tool removal defined for Windows targets — audit user + WinRM config left as-is.${NC}"
         done
     fi
 
+    # ── Local runner-side report cleanup ────────────────────────────────
+    rm -f ./report_before_*.html ./report_after_*.html ./report_remediation_*.html 2>/dev/null || true
+    rm -f ./heimdall_before_*.json ./heimdall_after_*.json 2>/dev/null || true
+
     wait
-    echo -e "\n${GREEN}✅ [Phase 5] Tools removed. VM remains HARDENED. Audit user deleted.${NC}"
+    echo -e "\n${GREEN}✅ [Phase 5] All oscap tools, content, temp/report files, and logs removed.${NC}"
+    echo -e "${GREEN}   Audit user + sudo access kept in place for future scheduled runs.${NC}"
 }
 
 # ======================================================
