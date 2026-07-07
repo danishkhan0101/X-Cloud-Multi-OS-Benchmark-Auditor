@@ -63,8 +63,8 @@ def get_target_ip(server):
 
 
 def tag_matches(server, tag_key, tag_val):
-    """Return True if tag filtering is disabled OR the server has the matching tag."""
-    if not tag_key or not tag_val:
+    """Return True if tag filtering is disabled, set to 'all', OR the server has the matching tag."""
+    if not tag_key or not tag_val or tag_val.lower() == "all":
         return True
     
     raw_tags = server.get("tags") or []
