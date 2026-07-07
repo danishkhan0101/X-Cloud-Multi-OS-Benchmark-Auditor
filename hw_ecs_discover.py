@@ -153,7 +153,7 @@ def main():
 
         if len(page) < 100:   
             break
-        offset += 1
+        offset += len(page)
 
     # ── Serialise SDK objects → plain dicts ───────────────────────────────
     try:
