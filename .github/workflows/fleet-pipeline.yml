@@ -470,36 +470,6 @@ jobs:
             pip install huaweicloudsdkcore huaweicloudsdkecs --quiet
             python3 -c "import huaweicloudsdkecs; print('✅ SDK import OK')"
           fi
-      # ── Push SSH Key via Password ───────────────────────────────────────
-      - name: '🔑 Inject SSH Key to Target VM (Huawei Cloud Fix)'
-        if: matrix.os_target.os != 'Windows' && env.CLOUD_PROVIDER == 'huaweicloud'
-        env:
-          VM_SSH_PASSWORD: ${{ secrets.VM_SSH_PASSWORD }}
-          TARGET_USER: ${{ vars.LINUX_ADMIN_USER || 'root' }}
-          TARGET_IP: ${{ matrix.os_target.ip }}
-        run: |
-          echo "Pushing SSH key to $TARGET_IP as $TARGET_USER..."
-          sshpass -p "$VM_SSH_PASSWORD" ssh-copy-id \
-            -f -o StrictHostKeyChecking=no \
-            -i ~/.ssh/id_rsa.pub \
-            "$TARGET_USER@$TARGET_IP"
-          echo "✅ Key injected! Testing key-based login..."
-          ssh -o StrictHostKeyChecking=no -o BatchMode=yes \
-            -o ConnectTimeout=15 \
-            "$TARGET_USER@$TARGET_IP" \
-            "echo '✅ SUCCESS! Logged into OS:'; cat /etc/os-release | grep PRETTY_NAME"
-
-      # ── Push SSH Key via Password ───────────────────────────────────────
-      - name: '🔑 Inject SSH Key to Target VM (Huawei Cloud Fix)'
-        if: matrix.os_target.os != 'Windows' && env.CLOUD_PROVIDER == 'huaweicloud'
-        env:
-          VM_SSH_PASSWORD: ${{ secrets.VM_SSH_PASSWORD }}
-          TARGET_USER: ${{ vars.LINUX_ADMIN_USER || 'root' }}
-          TARGET_IP: ${{ matrix.os_target.ip }}
-        run: |
-          echo "Pushing SSH key to $TARGET_IP as $TARGET_USER..."
-          sshpass -p "$VM_SSH_PASSWORD" ssh-copy-id -f -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa.pub "$TARGET_USER@$TARGET_IP"
-          echo "✅ Key injected! Runner can now connect passwordlessly."
       
       # ── Windows toolchain ───────────────────────────────────────────────
       - name: '🛠️ Install Windows Tools (Cinc Auditor + Ansible + pywinrm)'
