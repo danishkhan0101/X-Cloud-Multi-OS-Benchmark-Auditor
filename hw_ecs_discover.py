@@ -172,14 +172,20 @@ def main():
             name = s.get("name") or "unknown_name"
             status = str(s.get("status", "")).upper()
             
+            # DEBUG
+            log(f"DEBUG server={name} status={status} tags={s.get('tags')} eps={s.get('enterprise_project_id')}")
+            
             if status not in ("ACTIVE", "RUNNING"):
+                log(f"DEBUG SKIP {name}: status '{status}' not ACTIVE/RUNNING")
                 continue
             
             if not tag_matches(s, tag_key, tag_val):
+                log(f"DEBUG SKIP {name}: tag_matches failed (looking for {tag_key}={tag_val}, got tags={s.get('tags')})")
                 continue
             
             target_ip = get_target_ip(s)
             if not target_ip:
+                log(f"DEBUG SKIP {name}: get_target_ip returned empty; addresses={s.get('addresses')}")
                 continue
             
             srv_id    = s.get("id") or "unknown_id"
