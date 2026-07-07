@@ -136,6 +136,8 @@ def main():
                 req.enterprise_project_id = eps_id
                 
             resp       = client.list_servers_details(req)
+            log(f"DEBUG raw resp.servers count: {len(resp.servers or [])}, total_count if present: {getattr(resp, 'count', 'n/a')}")
+
         except exceptions.ClientRequestException as e:
             if e.status_code == 401:
                 log(f"❌ 401 Unauthorized — error_code={e.error_code}")
