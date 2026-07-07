@@ -1276,12 +1276,37 @@ if [ "$H_TARGET_IP" != "all" ] && [ -n "$H_TARGET_IP" ]; then
     echo -e "${MAGENTA}🎯 MATRIX SHARDING: Isolating to node $H_TARGET_IP${NC}"
     UBUNTU_MACHINES=(); RHEL_MACHINES=(); ROCKY_MACHINES=()
     ALMA_MACHINES=();   WINDOWS_MACHINES=()
+
     SHARD_VM_NAME="${IP_TO_VM_NAME[$H_TARGET_IP]:-}"
     if [ -z "$SHARD_VM_NAME" ]; then
-        SHARD_VM_NAME=$(az vm list -d -g "$RG_NAME" \
-            --query "[?publicIps=='${H_TARGET_IP}'].name | [0]" -o tsv 2>/dev/null)
-        [ -n "$SHARD_VM_NAME" ] && IP_TO_VM_NAME["$H_TARGET_IP"]="$SHARD_VM_NAME"
+        case "${CLOUD_PROVIDER}" in
+        azure)
+            SHARD_VM_NAME=$(az vm list -d -g "$RG_NAME" \
+                --query "[?publicIps=='${H_TARGET_IP}'].name | [0]" -o tsv 2>/dev/null)
+            [ -n "$SHARD_VM_NAME" ] && IP_TO_VM_NAME["$H_TARGET_IP"]="$SHARD_VM_NAME"
+            ;;
+        huaweicloud)
+            HW_SHARD_RAW=$(
+                HUAWEICLOUD_ACCESS_KEY="${HUAWEICLOUD_ACCESS_KEY}" \
+                HUAWEICLOUD_SECRET_KEY="${HUAWEICLOUD_SECRET_KEY}" \
+                HW_PROJECT_ID="${HW_PROJECT_ID}" \
+                HW_ECS_ENDPOINT="${HW_ECS_ENDPOINT}" \
+                HW_EPS_ID="${HW_EPS_ID}" \
+                python3 "${SCRIPT_DIR}/hw_ecs_discover.py" --tsv
+            )
+            while IFS=$'\t' read -r os_type offer vm_name ip srv_id; do
+                [ "$ip" == "$H_TARGET_IP" ] || continue
+                IP_TO_VM_NAME["$ip"]="$vm_name"
+                IP_TO_VM_ID["$ip"]="$srv_id"
+                SHARD_VM_NAME="$vm_name"
+            done <<< "$HW_SHARD_RAW"
+            if [ -z "$SHARD_VM_NAME" ]; then
+                echo -e "${YELLOW}⚠️  [HuaweiCloud] Could not resolve VM name/ID for ${H_TARGET_IP} — reboot/power-state helpers will no-op for this host.${NC}"
+            fi
+            ;;
+        esac
     fi
+
     case "${H_TARGET_OS,,}" in
         ubuntu)  UBUNTU_MACHINES=("$H_TARGET_IP")  ;;
         rhel)    RHEL_MACHINES=("$H_TARGET_IP")    ;;
@@ -1510,8 +1535,8 @@ run_phase_1() {
                              $UBUNTU_CIS_XCCDF > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            p=$(ssh -n ${UBUNTU_USER}@${IP} "grep -c '^pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
-                            f=$(ssh -n ${UBUNTU_USER}@${IP} "grep -c '^fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            p=$(ssh -n ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            f=$(ssh -n ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
                             echo -e "${GREEN}📊 [Phase1/Ubuntu/CIS] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
                             fetch_remote_report "$UBUNTU_USER" "$IP" \
                                 "/tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html" \
@@ -1533,8 +1558,8 @@ run_phase_1() {
                              /tmp/$(basename $UBUNTU_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            p=$(ssh -n ${UBUNTU_USER}@${IP} "grep -c '^pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
-                            f=$(ssh -n ${UBUNTU_USER}@${IP} "grep -c '^fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            p=$(ssh -n ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            f=$(ssh -n ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
                             echo -e "${GREEN}📊 [Phase1/Ubuntu/${ORG_PREFIX^^}] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
                             fetch_remote_report "$UBUNTU_USER" "$IP" \
                                 "/tmp/report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html" \
@@ -1570,8 +1595,8 @@ run_phase_1() {
                                  \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            p=$(ssh -n ${GHOST_USER}@${IP} "grep -c '^pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
-                            f=$(ssh -n ${GHOST_USER}@${IP} "grep -c '^fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            p=$(ssh -n ${GHOST_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            f=$(ssh -n ${GHOST_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
                             echo -e "${GREEN}📊 [Phase1/RHEL/CIS] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
                             fetch_remote_report "$GHOST_USER" "$IP" \
                                 "/tmp/report_before_CIS_L${OS_LVL}_RHEL_${IP}.html" \
@@ -1595,8 +1620,8 @@ run_phase_1() {
                                  /tmp/$(basename $RHEL_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            p=$(ssh -n ${GHOST_USER}@${IP} "grep -c '^pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
-                            f=$(ssh -n ${GHOST_USER}@${IP} "grep -c '^fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            p=$(ssh -n ${GHOST_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            f=$(ssh -n ${GHOST_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
                             echo -e "${GREEN}📊 [Phase1/RHEL/${ORG_PREFIX^^}] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
                             fetch_remote_report "$GHOST_USER" "$IP" \
                                 "/tmp/report_before_${ORG_PREFIX^^}_RHEL_${IP}.html" \
@@ -1658,8 +1683,8 @@ run_phase_1() {
                                  --report /tmp/report_before_${ORG_PREFIX^^}_ROCKY_${IP}.html \
                                  /tmp/$(basename $RHEL_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
-                        p=$(ssh -n ${GHOST_USER}@${IP} "grep -c '^pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
-                        f=$(ssh -n ${GHOST_USER}@${IP} "grep -c '^fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                        p=$(ssh -n ${GHOST_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                        f=$(ssh -n ${GHOST_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
                         echo -e "${GREEN}📊 [Phase1/Rocky/${ORG_PREFIX^^}] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             fetch_remote_report "$GHOST_USER" "$IP" \
