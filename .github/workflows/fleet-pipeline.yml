@@ -24,6 +24,18 @@ name: 🛡️ Fleet Commander Pipeline
 # │    private endpoint ecs.my-kualalumpur-1.alphaedge.tmone.com.my.       │
 # │    SDK + endpoint confirmed working from GH Actions hosted runners.    │
 # └────────────────────────────────────────────────────────────────────────┘
+#
+# SSH (Linux, both clouds): key-only, no password secret.
+#   Azure  → runner's public key is pushed via `az vm run-command`
+#            (an out-of-band control-plane channel; see cloud_vm_run_shell
+#            in multi_os_benchmark.sh) — works even on a brand-new VM.
+#   Huawei → has no such channel in this pipeline, so the runner's public
+#            key (secrets.UBUNTU_SSH_KEY) must already be authorized for
+#            LINUX_ADMIN_USER on the ECS instance — provision it via
+#            cloud-init/user-data at instance creation (baked into the
+#            golden image), not at pipeline runtime.
+#   VM_SSH_PASSWORD is no longer used anywhere in this workflow — remove
+#   it from repo secrets if it's still set.
 
 on:
   workflow_dispatch:
@@ -438,6 +450,14 @@ jobs:
           PYEOF
 
       # ── SSH (Linux only) ────────────────────────────────────────────────
+      # Key-only, for both clouds. Azure trusts the runner's public key via
+      # `az vm run-command` (an out-of-band control-plane channel — see
+      # cloud_vm_run_shell in multi_os_benchmark.sh), which works even on a
+      # brand-new VM with no prior SSH access. Huawei Cloud has no such
+      # channel, so its VMs must already trust this same public key for
+      # LINUX_ADMIN_USER — provisioned via cloud-init/user-data at ECS
+      # creation time (baked into the golden image), not injected here.
+      # No password secret is used — VM_SSH_PASSWORD has been removed.
       - name: '🔑 Setup SSH Key'
         if: matrix.os_target.os != 'Windows'
         uses: webfactory/ssh-agent@v0.9.0
@@ -459,7 +479,6 @@ jobs:
         if: matrix.os_target.os != 'Windows'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y sshpass
           python3 -m pip install --user --upgrade pip
           python3 -m pip install --user 'ansible>=10.0.0,<11.0.0'
           echo "$HOME/.local/bin" >> $GITHUB_PATH
@@ -470,7 +489,38 @@ jobs:
             pip install huaweicloudsdkcore huaweicloudsdkecs --quiet
             python3 -c "import huaweicloudsdkecs; print('✅ SDK import OK')"
           fi
-      
+
+      # ── Verify SSH key trust (Huawei Cloud, per-node strategy only) ─────
+      # Replaces the old password-based "Inject SSH Key" steps (which used
+      # sshpass + ssh-copy-id with a VM_SSH_PASSWORD secret — removed).
+      # This step injects nothing; it only confirms the runner's key
+      # (already loaded above) is trusted, and fails fast with a clear
+      # message if it isn't, rather than letting the failure surface deep
+      # inside multi_os_benchmark.sh later.
+      # Guarded on ip != 'all' because in the default "os-grouped" strategy
+      # matrix.os_target.ip is literally the string "all" — multi_os_benchmark.sh
+      # discovers real IPs itself at runtime, so there's no single host to
+      # verify here. Per-host SSH failures in that mode are already reported
+      # clearly by the script (e.g. "Tool Guard" / SSH-unreachable messages).
+      - name: '🔎 Verify SSH Key Trust (Huawei Cloud)'
+        if: matrix.os_target.os != 'Windows' && env.CLOUD_PROVIDER == 'huaweicloud' && matrix.os_target.ip != 'all'
+        env:
+          TARGET_USER: ${{ vars.LINUX_ADMIN_USER || 'root' }}
+          TARGET_IP: ${{ matrix.os_target.ip }}
+        run: |
+          echo "Verifying key-based SSH to $TARGET_USER@$TARGET_IP..."
+          if ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 \
+               "$TARGET_USER@$TARGET_IP" \
+               "echo '✅ Key trust confirmed on:'; cat /etc/os-release | grep PRETTY_NAME"; then
+            echo "✅ $TARGET_IP already trusts the runner's key — no password needed."
+          else
+            echo "❌ $TARGET_USER@$TARGET_IP does not trust the runner's SSH key."
+            echo "   Add the runner's public key (secrets.UBUNTU_SSH_KEY) to"
+            echo "   ~/.ssh/authorized_keys for '$TARGET_USER' via cloud-init/user-data"
+            echo "   at ECS creation time — this pipeline no longer injects it at runtime."
+            exit 1
+          fi
+
       # ── Windows toolchain ───────────────────────────────────────────────
       - name: '🛠️ Install Windows Tools (Cinc Auditor + Ansible + pywinrm)'
         if: matrix.os_target.os == 'Windows'
