@@ -1751,9 +1751,18 @@ run_phase_1() {
                             || { echo -e "${RED}❌ [Phase1] SCP failed for $IP${NC}"; exit 1; }
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                             ${GHOST_USER}@${IP} \
-                            "OSCAP_BIN=\$(command -v oscap 2>/dev/null)
-                             if [ -z \"\$OSCAP_BIN\" ]; then
-                                 echo '[FATAL] oscap not found in PATH' >> /tmp/oscap_console_${IP}.log
+                            "echo \"[DEBUG] PATH=\$PATH\"
+                             OSCAP_BIN=''
+                             for candidate in /usr/bin/oscap /bin/oscap /usr/local/bin/oscap; do
+                                 if [ -x \"\$candidate\" ]; then
+                                     OSCAP_BIN=\"\$candidate\"
+                                     break
+                                 fi
+                             done
+                             if [ -z \"\$OSCAP_BIN\" ]; then    
+                                 echo '[FATAL] oscap binary not found at any known path' >> /tmp/oscap_console_${IP}.log
+                                 echo \"[DEBUG] rpm -ql openscap-scanner:\" >> /tmp/oscap_console_${IP}.log
+                                 rpm -ql openscap-scanner >> /tmp/oscap_console_${IP}.log 2>&1 || true
                                  exit 127
                              fi
                              sudo \$OSCAP_BIN xccdf eval \
