@@ -1751,21 +1751,20 @@ run_phase_1() {
                             || { echo -e "${RED}❌ [Phase1] SCP failed for $IP${NC}"; exit 1; }
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                             ${GHOST_USER}@${IP} \
-                            "echo \"[DEBUG] PATH=\$PATH\"
-                             OSCAP_BIN=''
-                             for candidate in /usr/bin/oscap /bin/oscap /usr/local/bin/oscap; do
-                                 if [ -x \"\$candidate\" ]; then
-                                     OSCAP_BIN=\"\$candidate\"
-                                     break
-                                 fi
-                             done
-                             if [ -z \"\$OSCAP_BIN\" ]; then    
-                                 echo '[FATAL] oscap binary not found at any known path' >> /tmp/oscap_console_${IP}.log
-                                 echo \"[DEBUG] rpm -ql openscap-scanner:\" >> /tmp/oscap_console_${IP}.log
-                                 rpm -ql openscap-scanner >> /tmp/oscap_console_${IP}.log 2>&1 || true
-                                 exit 127
-                             fi
-                             sudo \$OSCAP_BIN xccdf eval \
+                            "echo '[DEBUG] PATH='\$PATH
+                             echo '[DEBUG] which oscap (user):' \$(command -v oscap 2>&1)
+                             echo '[DEBUG] ls -la /usr/bin/oscap:'
+                             ls -la /usr/bin/oscap 2>&1
+                             echo '[DEBUG] file /usr/bin/oscap:'
+                             file /usr/bin/oscap 2>&1
+                             echo '[DEBUG] sudo which oscap:'
+                             sudo which oscap 2>&1
+                             echo '[DEBUG] sudo -i command -v oscap:'
+                             sudo -i command -v oscap 2>&1
+                             echo '[DEBUG] direct sudo /usr/bin/oscap --version:'
+                             sudo /usr/bin/oscap --version 2>&1
+                             echo '=== Now attempting real scan ==='
+                             sudo /usr/bin/oscap xccdf eval \
                                  --profile $CUSTOM_XCCDF_PROFILE \
                                  --report /tmp/report_before_${ORG_PREFIX^^}_ALMA_${IP}.html \
                                  /tmp/$(basename $RHEL_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
