@@ -1739,6 +1739,10 @@ run_phase_1() {
                                 "Alma/CIS-before"
                         else
                             echo -e "${RED}❌ [Phase1/Alma/CIS] oscap failed on $IP (rc=$rc)${NC}"
+                            fetch_remote_report "$GHOST_USER" "$IP" \
+                                "/tmp/oscap_console_${IP}.log" \
+                                "./oscap_console_ALMA_${IP}_FAILURE.log" \
+                                "Alma/CIS-failure-log"
                         fi
                     fi
                     if [ "$RUN_ORG" == true ]; then
@@ -1747,7 +1751,12 @@ run_phase_1() {
                             || { echo -e "${RED}❌ [Phase1] SCP failed for $IP${NC}"; exit 1; }
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                             ${GHOST_USER}@${IP} \
-                            "sudo /usr/bin/oscap xccdf eval \
+                            "OSCAP_BIN=\$(command -v oscap 2>/dev/null)
+                             if [ -z \"\$OSCAP_BIN\" ]; then
+                                 echo '[FATAL] oscap not found in PATH' >> /tmp/oscap_console_${IP}.log
+                                 exit 127
+                             fi
+                             sudo \$OSCAP_BIN xccdf eval \
                                  --profile $CUSTOM_XCCDF_PROFILE \
                                  --report /tmp/report_before_${ORG_PREFIX^^}_ALMA_${IP}.html \
                                  /tmp/$(basename $RHEL_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
@@ -1759,6 +1768,10 @@ run_phase_1() {
                                 "Alma/${ORG_PREFIX^^}-before"
                         else
                             echo -e "${RED}❌ [Phase1/Alma/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
+                            fetch_remote_report "$GHOST_USER" "$IP" \
+                                "/tmp/oscap_console_${IP}.log" \
+                                "./oscap_console_ALMA_${IP}_FAILURE.log" \
+                                "Alma/${ORG_PREFIX^^}-failure-log"
                         fi
                     fi
                 ) &
