@@ -150,8 +150,12 @@ prefetch_scap_packages() {
             docker run --rm \
                 -v "${SCAP_CACHE_DIR}/alma9:/output" \
                 almalinux:9 \
-                bash -c "dnf install -y --downloadonly --downloaddir=/output \
-                         openscap-scanner scap-security-guide libtool-ltdl 2>/dev/null" \
+                bash -c "
+                    dnf install -y dnf-plugins-core 2>/dev/null
+                    dnf install -y --downloadonly --downloaddir=/output \
+                        openscap-scanner scap-security-guide 2>/dev/null
+                    dnf download --downloaddir=/output --resolve libtool-ltdl 2>/dev/null
+                " \
                 && echo -e "${GREEN}   ✅ Alma9 cached${NC}" \
                 || echo -e "${RED}   ❌ Alma9 fetch failed${NC}"
         else
