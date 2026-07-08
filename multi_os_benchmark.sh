@@ -151,7 +151,7 @@ prefetch_scap_packages() {
                 -v "${SCAP_CACHE_DIR}/alma9:/output" \
                 almalinux:9 \
                 bash -c "dnf install -y --downloadonly --downloaddir=/output \
-                         openscap-scanner scap-security-guide 2>/dev/null" \
+                         openscap-scanner scap-security-guide libtool-ltdl 2>/dev/null" \
                 && echo -e "${GREEN}   ✅ Alma9 cached${NC}" \
                 || echo -e "${RED}   ❌ Alma9 fetch failed${NC}"
         else
@@ -549,6 +549,8 @@ ensure_linux_scap_tools() {
 
         command -v oscap >/dev/null 2>&1 \
             || { echo '[FATAL] oscap missing after offline install'; exit 10; }
+        oscap --version >/dev/null 2>&1 \
+            || { echo '[FATAL] oscap found but failed to execute (likely missing shared library):'; oscap --version; exit 12; }
         ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1 \
             || { echo '[FATAL] SCAP content datastreams missing'; exit 11; }
         echo '[OK] SCAP tools installed offline successfully'
