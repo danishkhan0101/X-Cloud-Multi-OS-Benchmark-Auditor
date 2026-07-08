@@ -150,12 +150,8 @@ prefetch_scap_packages() {
             docker run --rm \
                 -v "${SCAP_CACHE_DIR}/alma9:/output" \
                 almalinux:9 \
-                bash -c "
-                    dnf install -y dnf-plugins-core 2>/dev/null
-                    dnf install -y --downloadonly --downloaddir=/output \
-                        openscap-scanner scap-security-guide 2>/dev/null
-                    dnf download --downloaddir=/output --resolve libtool-ltdl 2>/dev/null
-                " \
+                bash -c "dnf install -y --downloadonly --downloaddir=/output \
+                         openscap-scanner scap-security-guide 2>/dev/null" \
                 && echo -e "${GREEN}   ✅ Alma9 cached${NC}" \
                 || echo -e "${RED}   ❌ Alma9 fetch failed${NC}"
         else
@@ -553,8 +549,21 @@ ensure_linux_scap_tools() {
 
         command -v oscap >/dev/null 2>&1 \
             || { echo '[FATAL] oscap missing after offline install'; exit 10; }
-        oscap --version >/dev/null 2>&1 \
-            || { echo '[FATAL] oscap found but failed to execute (likely missing shared library):'; oscap --version; exit 12; }
+
+        oscap --version >/dev/null 2>&1
+        if [ \$? -ne 0 ]; then
+            echo '[WARN] oscap present but failed to run — checking for missing shared libs...'
+            oscap --version 2>&1
+            if oscap --version 2>&1 | grep -q 'libltdl'; then
+                echo '[INFO] Attempting targeted online fix: installing libtool-ltdl from VM repos...'
+                sudo dnf install -y libtool-ltdl 2>&1
+                oscap --version >/dev/null 2>&1 \
+                    || { echo '[FATAL] oscap still broken after libtool-ltdl install'; exit 12; }
+            else
+                echo '[FATAL] oscap broken for an unrelated reason (see above)'; exit 13
+            fi
+        fi
+
         ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1 \
             || { echo '[FATAL] SCAP content datastreams missing'; exit 11; }
         echo '[OK] SCAP tools installed offline successfully'
