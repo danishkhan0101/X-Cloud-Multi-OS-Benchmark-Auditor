@@ -1,19 +1,143 @@
-name: 🔍 Verify oscap Cleanup
+name: 🔍 Verify oscap Cleanup (Auto-Discovery)
 
 on:
   workflow_dispatch:
     inputs:
-      ssh_user:
-        description: 'SSH user to connect as'
+      cloud_provider:
+        description: '☁️ Cloud Provider'
         required: true
-        default: 'ubuntu'
-      target_ip:
-        description: 'IP address of the ECS server to check'
-        required: true
+        default: 'huaweicloud'
+        type: choice
+        options:
+          - azure
+          - huaweicloud
+      target_os:
+        description: '🖥️ Limit to OS (optional)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ubuntu
+          - rhel
+          - rocky
+          - alma
 
 jobs:
-  verify:
+  discover:
     runs-on: ubuntu-latest
+    outputs:
+      hosts: ${{ steps.discover.outputs.hosts }}
+    env:
+      CLOUD_PROVIDER: ${{ github.event.inputs.cloud_provider }}
+      HW_REGION: ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
+      HW_PROJECT_ID: ${{ vars.HW_PROJECT_ID }}
+      HW_ECS_TAG_KEY: ${{ vars.HW_ECS_TAG_KEY || '' }}
+      HW_ECS_TAG_VAL: ''
+      HW_EPS_ID: ${{ vars.HW_EPS_ID }}
+      HUAWEICLOUD_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
+      HUAWEICLOUD_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
+      AZURE_RG_NAME: ${{ vars.AZURE_RG_NAME }}
+      LINUX_ADMIN_USER: ${{ vars.LINUX_ADMIN_USER || 'root' }}
+      GHOST_USER: ${{ vars.GHOST_USER }}
+
+    steps:
+      - name: '📥 Checkout'
+        uses: actions/checkout@v4
+
+      - name: '🔐 [Azure] Login'
+        if: github.event.inputs.cloud_provider == 'azure'
+        uses: azure/login@v2
+        with:
+          creds: >-
+            {"clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+             "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+             "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+             "tenantId":"${{ secrets.AZURE_TENANT_ID }}"}
+
+      - name: '🔐 [HuaweiCloud] Install SDK'
+        if: github.event.inputs.cloud_provider == 'huaweicloud'
+        run: pip install huaweicloudsdkcore huaweicloudsdkecs --quiet
+
+      - name: '📡 Discover Hosts + Build JSON'
+        id: discover
+        run: |
+          HOSTS="[]"
+
+          if [ "$CLOUD_PROVIDER" == "azure" ]; then
+            echo "📡 [Azure] Querying VMs in [$AZURE_RG_NAME]..."
+            VM_DATA=$(az vm list -d -g "$AZURE_RG_NAME" \
+              --query "[?powerState=='VM running'].[storageProfile.osDisk.osType,storageProfile.imageReference.offer,name,publicIps]" \
+              -o tsv)
+            HOSTS_JSON="["
+            while IFS=$'\t' read -r os offer name ip; do
+              ip=$(echo "$ip" | tr -d '\r' | xargs)
+              [ -z "$ip" ] || [ "$ip" == "None" ] && continue
+              offer_l="${offer,,}"; name_l="${name,,}"
+              if [[ "$offer_l" == *"rocky"* || "$name_l" == *"rocky"* ]]; then nodeos="rocky"; user="$GHOST_USER"
+              elif [[ "$offer_l" == *"alma"* || "$name_l" == *"alma"* ]]; then nodeos="alma"; user="$GHOST_USER"
+              elif [[ "$offer_l" == *"rhel"* || "$name_l" == *"rhel"* ]]; then nodeos="rhel"; user="$GHOST_USER"
+              elif [[ "$os" == *"Linux"* || "$os" == *"linux"* ]]; then nodeos="ubuntu"; user="$LINUX_ADMIN_USER"
+              else continue
+              fi
+              HOSTS_JSON+="{\"os\":\"$nodeos\",\"ip\":\"$ip\",\"user\":\"$user\"},"
+            done <<< "$VM_DATA"
+            HOSTS_JSON="${HOSTS_JSON%,}]"
+            [ "$HOSTS_JSON" == "]" ] && HOSTS_JSON="[]"
+            HOSTS="$HOSTS_JSON"
+          fi
+
+          if [ "$CLOUD_PROVIDER" == "huaweicloud" ]; then
+            HW_ECS_ENDPOINT="https://ecs.${HW_REGION}.alphaedge.tmone.com.my"
+            echo "📡 [HuaweiCloud] Querying ECS via SDK [${HW_ECS_ENDPOINT}]..."
+            HW_RAW=$(
+              HUAWEICLOUD_ACCESS_KEY="$HUAWEICLOUD_ACCESS_KEY" \
+              HUAWEICLOUD_SECRET_KEY="$HUAWEICLOUD_SECRET_KEY" \
+              HW_PROJECT_ID="$HW_PROJECT_ID" \
+              HW_ECS_ENDPOINT="$HW_ECS_ENDPOINT" \
+              HW_ECS_TAG_KEY="$HW_ECS_TAG_KEY" \
+              HW_ECS_TAG_VAL="$HW_ECS_TAG_VAL" \
+              HW_EPS_ID="$HW_EPS_ID" \
+              python3 hw_ecs_discover.py --tsv
+            )
+            HOSTS_JSON="["
+            if [ -n "$HW_RAW" ]; then
+              while IFS=$'\t' read -r os_type offer name ip srv_id; do
+                ip=$(echo "$ip" | tr -d '\r' | xargs)
+                [ -z "$ip" ] || [ "$ip" == "None" ] && continue
+                offer_l="${offer,,}"; name_l="${name,,}"
+                if [[ "$os_type" == *"Windows"* || "$os_type" == *"windows"* ]]; then continue; fi
+                if [[ "$offer_l" == *"rocky"* || "$name_l" == *"rocky"* ]]; then nodeos="rocky"; user="$GHOST_USER"
+                elif [[ "$offer_l" == *"alma"* || "$name_l" == *"alma"* ]]; then nodeos="alma"; user="$GHOST_USER"
+                elif [[ "$offer_l" == *"rhel"* || "$name_l" == *"rhel"* ]]; then nodeos="rhel"; user="$GHOST_USER"
+                else nodeos="ubuntu"; user="$LINUX_ADMIN_USER"
+                fi
+                HOSTS_JSON+="{\"os\":\"$nodeos\",\"ip\":\"$ip\",\"user\":\"$user\"},"
+              done <<< "$HW_RAW"
+            fi
+            HOSTS_JSON="${HOSTS_JSON%,}]"
+            [ "$HOSTS_JSON" == "]" ] && HOSTS_JSON="[]"
+            HOSTS="$HOSTS_JSON"
+          fi
+
+          # Optional OS filter
+          TARGET_OS="${{ github.event.inputs.target_os }}"
+          if [ "$TARGET_OS" != "all" ]; then
+            HOSTS=$(echo "$HOSTS" | jq -c --arg os "$TARGET_OS" '[.[] | select(.os == $os)]')
+          fi
+
+          echo "✅ Discovered hosts: $HOSTS"
+          echo "hosts=$HOSTS" >> $GITHUB_OUTPUT
+
+  verify:
+    needs: discover
+    if: ${{ needs.discover.outputs.hosts != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: ${{ fromJSON(needs.discover.outputs.hosts) }}
+
     steps:
       - name: '📥 Checkout'
         uses: actions/checkout@v4
@@ -23,7 +147,18 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
 
-      - name: '🔍 Run Verification'
+      - name: '🔍 Run Verification (${{ matrix.host.os }} @ ${{ matrix.host.ip }})'
         run: |
           chmod +x verify_cleanup.sh
-          ./verify_cleanup.sh "${{ github.event.inputs.ssh_user }}" "${{ github.event.inputs.target_ip }}"
+          echo "Checking ${{ matrix.host.os }} host: ${{ matrix.host.user }}@${{ matrix.host.ip }}"
+          ./verify_cleanup.sh "${{ matrix.host.user }}" "${{ matrix.host.ip }}"
+
+  summary:
+    needs: verify
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: '📊 Summary'
+        run: |
+          echo "Verification run complete."
+          echo "Check the 'verify' job matrix above — any red ❌ means that host still has oscap leftovers."
