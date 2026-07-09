@@ -505,9 +505,14 @@ jobs:
       - name: '🔎 Verify SSH Key Trust (Huawei Cloud)'
         if: matrix.os_target.os != 'Windows' && env.CLOUD_PROVIDER == 'huaweicloud' && matrix.os_target.ip != 'all'
         env:
-          TARGET_USER: ${{ vars.LINUX_ADMIN_USER || 'root' }}
           TARGET_IP: ${{ matrix.os_target.ip }}
         run: |
+          case "${{ matrix.os_target.os }}" in
+            Ubuntu) TARGET_USER="${{ vars.LINUX_ADMIN_USER || 'ubuntu' }}" ;;
+            RHEL|Rocky|Alma) TARGET_USER="${{ vars.GHOST_USER }}" ;;
+            *) TARGET_USER="${{ vars.LINUX_ADMIN_USER || 'root' }}" ;;
+          esac
+
           echo "Verifying key-based SSH to $TARGET_USER@$TARGET_IP..."
           if ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 \
                "$TARGET_USER@$TARGET_IP" \
