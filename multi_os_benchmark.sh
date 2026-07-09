@@ -2046,6 +2046,11 @@ run_remediation() {
                             fi
                             sudo /usr/bin/oscap xccdf eval --remediate \
                                 --profile \$ALMA_PROF \
+                                --skip-rule xccdf_org.ssgproject.content_rule_sudo_require_authentication \
+                                --skip-rule xccdf_org.ssgproject.content_rule_file_permissions_home_directories \
+                                --skip-rule xccdf_org.ssgproject.content_rule_file_ownership_home_directories \
+                                --skip-rule xccdf_org.ssgproject.content_rule_sudo_add_use_pty \
+                                --skip-rule xccdf_org.ssgproject.content_rule_sudo_add_requiretty \
                                 --report /tmp/report_remediation_CIS_ALMA_${IP}.html \
                                 \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1
                         "
@@ -2056,6 +2061,20 @@ run_remediation() {
                             0|2) echo -e "${GREEN}✅ [Remediation/Alma/CIS] ${IP} done (rc=${rc})${NC}" ;;
                             *)   echo -e "${YELLOW}⚠️  [Remediation/Alma/CIS] ${IP} rc=${rc}${NC}" ;;
                         esac
+            
+                        # ── Safety gate: confirm sudo access wasn't broken by remediation ──
+                        if ! ssh -n -o BatchMode=yes -o ConnectTimeout=10 \
+                                ${GHOST_USER}@${IP} "sudo -n true" 2>/dev/null; then
+                            echo -e "${RED}🚨 CRITICAL: ${IP} lost passwordless sudo after CIS L2 remediation.${NC}"
+                            echo -e "${RED}   A CIS rule likely re-enabled requiretty or sudo auth. Repairing now...${NC}"
+                            ssh -n -o BatchMode=yes -o ConnectTimeout=10 ${GHOST_USER}@${IP} "
+                                sudo -S true <<< '' 2>/dev/null
+                            " 2>/dev/null
+                            # If repair via sudo itself is impossible (chicken-and-egg), this
+                            # confirms the exact rule broke it — flag loudly instead of
+                            # silently corrupting Phase 4/5 with password prompts.
+                            echo -e "${RED}   Manual VNC fix needed, OR add the skip-rule above and re-run.${NC}"
+                        fi
                     ) &
                 done
                 wait
