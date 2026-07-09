@@ -514,17 +514,25 @@ jobs:
           esac
 
           echo "Verifying key-based SSH to $TARGET_USER@$TARGET_IP..."
-          if ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 \
-               "$TARGET_USER@$TARGET_IP" \
-               "echo '✅ Key trust confirmed on:'; cat /etc/os-release | grep PRETTY_NAME"; then
-            echo "✅ $TARGET_IP already trusts the runner's key — no password needed."
-          else
-            echo "❌ $TARGET_USER@$TARGET_IP does not trust the runner's SSH key."
-            echo "   Add the runner's public key (secrets.UBUNTU_SSH_KEY) to"
-            echo "   ~/.ssh/authorized_keys for '$TARGET_USER' via cloud-init/user-data"
-            echo "   at ECS creation time — this pipeline no longer injects it at runtime."
-            exit 1
-          fi
+
+          MAX_ATTEMPTS=10
+          SLEEP_SEC=15
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            if ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 \
+                 "$TARGET_USER@$TARGET_IP" \
+                 "echo '✅ Key trust confirmed on:'; cat /etc/os-release | grep PRETTY_NAME"; then
+              echo "✅ $TARGET_IP already trusts the runner's key — no password needed."
+              exit 0
+            fi
+            echo "⏳ Attempt $i/$MAX_ATTEMPTS failed — cloud-init may still be finishing. Waiting ${SLEEP_SEC}s..."
+            sleep $SLEEP_SEC
+          done
+
+          echo "❌ $TARGET_USER@$TARGET_IP does not trust the runner's SSH key after ${MAX_ATTEMPTS} attempts (~$((MAX_ATTEMPTS*SLEEP_SEC))s)."
+          echo "   Add the runner's public key (secrets.UBUNTU_SSH_KEY) to"
+          echo "   ~/.ssh/authorized_keys for '$TARGET_USER' via cloud-init/user-data"
+          echo "   at ECS creation time — this pipeline no longer injects it at runtime."
+          exit 1
 
       # ── Windows toolchain ───────────────────────────────────────────────
       - name: '🛠️ Install Windows Tools (Cinc Auditor + Ansible + pywinrm)'
