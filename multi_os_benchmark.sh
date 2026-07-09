@@ -447,13 +447,21 @@ ensure_linux_scap_tools() {
         return 0
     fi
 
-    local distro_id distro_ver cache_key
-    read -r distro_id distro_ver <<< "$(ssh -n \
+    local distro_id distro_ver cache_key distro_raw distro_err
+    distro_raw="$(ssh -n \
         -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ControlMaster=no -o ControlPath=none \
         -o ConnectTimeout=10 \
         "${user}@${ip}" \
-        "source /etc/os-release && echo \"\$ID \${VERSION_ID%%.*}\"" 2>/dev/null)"
+        '. /etc/os-release && echo "$ID ${VERSION_ID%%.*}"' 2>&1)"
+    distro_err=$?
+    read -r distro_id distro_ver <<< "$distro_raw"
+
+    if [ -z "$distro_id" ] || [ -z "$distro_ver" ]; then
+        echo -e "${RED}❌ [Tool Guard] Could not determine distro on ${ip} (ssh rc=${distro_err}). Raw output:${NC}"
+        echo -e "${RED}   ${distro_raw}${NC}"
+        return 1
+    fi
 
     case "${distro_id}${distro_ver}" in
         rhel9)       cache_key="rhel9"      ;;
