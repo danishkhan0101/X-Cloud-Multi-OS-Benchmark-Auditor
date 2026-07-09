@@ -437,7 +437,6 @@ ensure_linux_scap_tools() {
     local pkg_mgr="$3"
 
     if ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-           -o ControlMaster=no -o ControlPath=none \
            -o ConnectTimeout=10 \
            "${user}@${ip}" \
            "command -v oscap >/dev/null 2>&1 && \
@@ -450,7 +449,6 @@ ensure_linux_scap_tools() {
     local distro_id distro_ver cache_key distro_raw distro_err
     distro_raw="$(ssh -n \
         -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o ControlMaster=no -o ControlPath=none \
         -o ConnectTimeout=10 \
         "${user}@${ip}" \
         '. /etc/os-release && echo "$ID ${VERSION_ID%%.*}"' 2>&1)"
@@ -496,12 +494,10 @@ ensure_linux_scap_tools() {
     echo -e "${CYAN}📦 [Tool Guard] Pushing ${cache_key} packages → ${ip} (SCP/port 22)${NC}"
 
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o ControlMaster=no -o ControlPath=none \
         "${user}@${ip}" \
         "sudo mkdir -p /tmp/scap_offline && sudo chmod 777 /tmp/scap_offline" 2>/dev/null
 
     scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o ControlMaster=no -o ControlPath=none \
         -o ConnectTimeout=10 \
         "${cache_dir}"/* "${user}@${ip}:/tmp/scap_offline/"
 
@@ -549,7 +545,6 @@ ensure_linux_scap_tools() {
     fi
 
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o ControlMaster=no -o ControlPath=none \
         "${user}@${ip}" "
         set +e
         ${install_cmd}
@@ -597,7 +592,6 @@ scp_custom_content_ubuntu() {
     local ip="$2"
     echo -e "${CYAN}📤 [SCP] Pushing custom XCCDF/OVAL to ${ip}...${NC}"
     scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o ControlMaster=no -o ControlPath=none \
         -o ConnectTimeout=10 \
         "$UBUNTU_CUSTOM_OVAL" "$UBUNTU_CUSTOM_XCCDF" \
         "${user}@${ip}:/tmp/"
@@ -615,7 +609,6 @@ scp_custom_content_rhel() {
     local ip="$2"
     echo -e "${CYAN}📤 [SCP] Pushing custom RHEL XCCDF/OVAL to ${ip}...${NC}"
     scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o ControlMaster=no -o ControlPath=none \
         -o ConnectTimeout=10 \
         "$RHEL_CUSTOM_OVAL" "$RHEL_CUSTOM_XCCDF" \
         "${user}@${ip}:/tmp/"
@@ -871,13 +864,10 @@ fetch_remote_report() {
     local tag="$5"
 
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o ControlMaster=no -o ControlPath=none \
-        -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
         -o ConnectTimeout=10 \
         "${user}@${ip}" "sudo chmod 644 ${remote} 2>/dev/null" >/dev/null 2>&1
 
     scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o ControlMaster=no -o ControlPath=none \
         -o ConnectTimeout=10 \
         "${user}@${ip}:${remote}" "${local_path}" >/dev/null 2>&1
     if [ $? -eq 0 ] && [ -s "${local_path}" ]; then
@@ -886,7 +876,6 @@ fetch_remote_report() {
 
     echo -e "${YELLOW}🔄 [Fetch/${tag}] SCP failed — falling back to sudo cat on ${ip}${NC}"
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o ControlMaster=no -o ControlPath=none \
         -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
         -o ConnectTimeout=10 \
         "${user}@${ip}" "sudo cat ${remote}" > "${local_path}" 2>/dev/null
@@ -914,7 +903,6 @@ wait_for_ssh() {
         sleep 10
     done
 }
-
 # ======================================================
 # HELPER: wait_for_winrm
 # ======================================================
@@ -2074,6 +2062,7 @@ run_remediation() {
                                 --skip-rule xccdf_org.ssgproject.content_rule_selinux_state \
                                 --skip-rule xccdf_org.ssgproject.content_rule_selinux_not_disabled \
                                 --skip-rule xccdf_org.ssgproject.content_rule_grub2_enable_selinux \
+                                --skip-rule xccdf_org.ssgproject.content_rule_sshd_set_maxstartups \
                                 --report /tmp/report_remediation_CIS_ALMA_${IP}.html \
                                 \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1
                         "
@@ -2193,7 +2182,6 @@ run_phase_4() {
     echo -e "\n${BOLD}🔄 PHASE 4: Verification Scans (SCP install → scan)...${NC}"
 
     local SCAN_SSH_OPTS="-n -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o ControlMaster=no -o ControlPath=none \
         -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
         -o ConnectTimeout=10"
 
@@ -2528,7 +2516,6 @@ run_cleanup() {
         for IP in "${UBUNTU_MACHINES[@]}"; do
             echo -e "${CYAN}🧹 [Cleanup/Ubuntu] Removing oscap artifacts on ${IP}...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-                -o ControlMaster=no -o ControlPath=none \
                 ${UBUNTU_USER}@${IP} "$remove_deb" 2>&1 || \
                 echo -e "${YELLOW}⚠️  [Cleanup/Ubuntu] Some steps may have failed on ${IP} — check manually${NC}"
         done
@@ -2538,7 +2525,6 @@ run_cleanup() {
         for IP in "${RHEL_MACHINES[@]}" "${ROCKY_MACHINES[@]}" "${ALMA_MACHINES[@]}"; do
             echo -e "${CYAN}🧹 [Cleanup/RHEL-family] Removing oscap artifacts on ${IP}...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-                -o ControlMaster=no -o ControlPath=none \
                 ${GHOST_USER}@${IP} "$remove_rpm" 2>&1 || \
                 echo -e "${YELLOW}⚠️  [Cleanup/RHEL-family] Some steps may have failed on ${IP} — check manually${NC}"
         done
