@@ -512,6 +512,7 @@ jobs:
             RHEL|Rocky|Alma) TARGET_USER="${{ vars.GHOST_USER }}" ;;
             *) TARGET_USER="${{ vars.LINUX_ADMIN_USER || 'root' }}" ;;
           esac
+          ROOT_USER="${{ vars.LINUX_ADMIN_USER || 'root' }}"
 
           echo "Verifying key-based SSH to $TARGET_USER@$TARGET_IP..."
 
@@ -521,17 +522,31 @@ jobs:
             if ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 \
                  "$TARGET_USER@$TARGET_IP" \
                  "echo '✅ Key trust confirmed on:'; cat /etc/os-release | grep PRETTY_NAME"; then
-              echo "✅ $TARGET_IP already trusts the runner's key — no password needed."
+              echo "✅ $TARGET_IP already trusts the runner's key as $TARGET_USER — no password needed."
               exit 0
             fi
-            echo "⏳ Attempt $i/$MAX_ATTEMPTS failed — cloud-init may still be finishing. Waiting ${SLEEP_SEC}s..."
+            echo "⏳ Attempt $i/$MAX_ATTEMPTS: $TARGET_USER not reachable yet — waiting ${SLEEP_SEC}s (cloud-init / self-heal may still be running)..."
             sleep $SLEEP_SEC
           done
 
-          echo "❌ $TARGET_USER@$TARGET_IP does not trust the runner's SSH key after ${MAX_ATTEMPTS} attempts (~$((MAX_ATTEMPTS*SLEEP_SEC))s)."
-          echo "   Add the runner's public key (secrets.UBUNTU_SSH_KEY) to"
-          echo "   ~/.ssh/authorized_keys for '$TARGET_USER' via cloud-init/user-data"
-          echo "   at ECS creation time — this pipeline no longer injects it at runtime."
+          # $TARGET_USER never came up — but this pipeline can self-heal
+          # missing audit accounts (Phase 0.3 in multi_os_benchmark.sh),
+          # as long as ROOT is reachable via key. Check that instead of
+          # failing outright.
+          echo "⚠️  $TARGET_USER@$TARGET_IP unreachable after ${MAX_ATTEMPTS} attempts."
+          echo "🔎 Falling back to check root trust — pipeline can self-heal ${TARGET_USER} from root..."
+
+          if ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 \
+               "$ROOT_USER@$TARGET_IP" \
+               "echo '✅ Root key trust confirmed'"; then
+            echo "✅ $ROOT_USER@$TARGET_IP trusts the runner's key — Phase 0.3 auto-healer will create/repair ${TARGET_USER}."
+            exit 0
+          fi
+
+          echo "❌ Neither $TARGET_USER nor $ROOT_USER@$TARGET_IP trust the runner's SSH key."
+          echo "   This means the pipeline cannot bootstrap this VM at all — the runner's"
+          echo "   public key was never authorized for root/admin via cloud-init/user-data"
+          echo "   at ECS creation time. Add it there before recreating this instance."
           exit 1
 
       # ── Windows toolchain ───────────────────────────────────────────────
