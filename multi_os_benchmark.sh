@@ -1996,6 +1996,13 @@ run_remediation() {
                             [ -z \"\$TARGET_XML\" ] && exit 99
                             sudo /usr/bin/oscap xccdf eval --remediate \
                                 --profile $RHEL_CIS_PROFILE \
+                                --skip-rule xccdf_org.ssgproject.content_rule_sudo_require_authentication \
+                                --skip-rule xccdf_org.ssgproject.content_rule_file_permissions_home_directories \
+                                --skip-rule xccdf_org.ssgproject.content_rule_file_ownership_home_directories \
+                                --skip-rule xccdf_org.ssgproject.content_rule_sudo_add_use_pty \
+                                --skip-rule xccdf_org.ssgproject.content_rule_sudo_add_requiretty \
+                                --skip-rule xccdf_org.ssgproject.content_rule_sudo_remove_nopasswd \
+                                --skip-rule xccdf_org.ssgproject.content_rule_sshd_limit_user_access \
                                 --report /tmp/report_remediation_CIS_ROCKY_${IP}.html \
                                 \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1
                         "
@@ -2051,6 +2058,8 @@ run_remediation() {
                                 --skip-rule xccdf_org.ssgproject.content_rule_file_ownership_home_directories \
                                 --skip-rule xccdf_org.ssgproject.content_rule_sudo_add_use_pty \
                                 --skip-rule xccdf_org.ssgproject.content_rule_sudo_add_requiretty \
+                                --skip-rule xccdf_org.ssgproject.content_rule_sudo_remove_nopasswd \
+                                --skip-rule xccdf_org.ssgproject.content_rule_sshd_limit_user_access \
                                 --report /tmp/report_remediation_CIS_ALMA_${IP}.html \
                                 \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1
                         "
