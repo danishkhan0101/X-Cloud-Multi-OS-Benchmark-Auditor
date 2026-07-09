@@ -2063,6 +2063,9 @@ run_remediation() {
                                 --skip-rule xccdf_org.ssgproject.content_rule_service_firewalld_enabled \
                                 --skip-rule xccdf_org.ssgproject.content_rule_firewalld_loopback_traffic_restricted \
                                 --skip-rule xccdf_org.ssgproject.content_rule_firewalld_loopback_traffic_trusted \
+                                --skip-rule xccdf_org.ssgproject.content_rule_selinux_state \
+                                --skip-rule xccdf_org.ssgproject.content_rule_selinux_not_disabled \
+                                --skip-rule xccdf_org.ssgproject.content_rule_grub2_enable_selinux \
                                 --report /tmp/report_remediation_CIS_ALMA_${IP}.html \
                                 \"\$TARGET_XML\" > /tmp/oscap_console_${IP}.log 2>&1
                         "
