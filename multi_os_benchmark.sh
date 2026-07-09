@@ -1434,6 +1434,19 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" =~ ^(rhel|rocky|alma)$ ]]; t
                                systemctl restart sshd" || true
                 sleep 15
             fi
+
+            # ── Guard: ensure MaxStartups never regresses to a value that
+            #    triggers "kex_exchange_identification: Connection reset by
+            #    peer" under this pipeline's connection volume. Runs on
+            #    every host every time, not just on bootstrap, so it also
+            #    self-heals a value already hardened by an earlier run
+            #    before this guard existed.
+            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                "${GHOST_USER}@${ip}" \
+                "sudo grep -q '^MaxStartups 100:' /etc/ssh/sshd_config.d/00-maxstartups-override.conf 2>/dev/null || {
+                    echo 'MaxStartups 100:30:200' | sudo tee /etc/ssh/sshd_config.d/00-maxstartups-override.conf >/dev/null
+                    sudo systemctl reload sshd
+                }" 2>/dev/null
         ) &
     done
 fi
