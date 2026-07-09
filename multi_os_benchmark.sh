@@ -982,6 +982,23 @@ cloud_add_port_rule() {
         ;;
     huaweicloud)
         [ -z "$vm_id" ] && { echo -e "${YELLOW}⚠️  [HW] No ECS ID for ${ip}${NC}"; return 1; }
+        local sg_id
+        sg_id=$(timeout 30 hcloud ECS ListServerSecurityGroups \
+            --server-id "$vm_id" \
+            --cli-region "${HW_REGION}" \
+            --cli-output json 2>/dev/null \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('security_groups',[{}])[0].get('id',''))" 2>/dev/null)
+        [ -z "$sg_id" ] && { echo -e "${YELLOW}⚠️  [HW] No security group found for ${ip}${NC}"; return 1; }
+        timeout 30 hcloud VPC CreateSecurityGroupRule \
+            --security_group_id "$sg_id" \
+            --body.security_group_rule.direction "ingress" \
+            --body.security_group_rule.protocol "tcp" \
+            --body.security_group_rule.ethertype "IPv4" \
+            --body.security_group_rule.port_range_min "$port" \
+            --body.security_group_rule.port_range_max "$port" \
+            --body.security_group_rule.remote_ip_prefix "${runner_ip}/32" \
+            --cli-region "${HW_REGION}" \
+            --cli-output json >/dev/null 2>&1 || true
         ;;
     esac
 }
@@ -2481,7 +2498,7 @@ run_cleanup() {
         PKGS=$(rpm -qa | grep -E "openscap|scap-security-guide")
         if [ -n "$PKGS" ]; then
             echo "Removing: $PKGS"
-            sudo rpm -e --nodeps $PKGS 2>/dev/null || true
+            sudo dnf remove -y $PKGS 2>/dev/null || sudo rpm -e --nodeps $PKGS 2>/dev/null || true
         else
             echo "No matching packages found."
         fi
@@ -2490,6 +2507,9 @@ run_cleanup() {
         sudo rm -f /tmp/oscap_console_*.log
         sudo rm -f /tmp/*_xccdf.xml /tmp/*_rules.xml /tmp/*.xml
         sudo rm -rf /usr/share/xml/scap/ssg/content/*
+        echo "--- Post-cleanup sshd health check ---"
+        systemctl is-active sshd || echo "[WARN] sshd not active after cleanup!"
+        ss -tlnp 2>/dev/null | grep -q ":22 " && echo "[OK] port 22 listening" || echo "[WARN] port 22 NOT listening!"
         echo "oscap cleanup complete"
     '
 
