@@ -1973,7 +1973,10 @@ run_remediation() {
                              --skip-rule xccdf_org.ssgproject.content_rule_set_ufw_default_rule \
                              --skip-rule xccdf_org.ssgproject.content_rule_ufw_rules_for_open_ports \
                              --skip-rule xccdf_org.ssgproject.content_rule_ufw_only_required_services \
-                             --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\" > /tmp/oscap_console_${IP}.log 2>&1"
+                             --skip-rule xccdf_org.ssgproject.content_rule_set_ufw_loopback_traffic \
+                             --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\" > /tmp/oscap_console_${IP}.log 2>&1
+                         sudo ufw allow 22/tcp 2>/dev/null || true
+                         sudo ufw reload 2>/dev/null || true"
                     rc=$?
                     case $rc in
                         124) echo -e "${RED}⏱️  [Remediation/Ubuntu/CIS] TIMEOUT on ${IP}${NC}" ;;
