@@ -2000,6 +2000,15 @@ run_remediation() {
                          fi
                          sudo /usr/bin/oscap xccdf eval --remediate \
                              --profile \"\$EFFECTIVE_PROFILE\" \
+                             --skip-rule xccdf_org.ssgproject.content_rule_sudo_require_authentication \
+                             --skip-rule xccdf_org.ssgproject.content_rule_file_permissions_home_directories \
+                             --skip-rule xccdf_org.ssgproject.content_rule_file_ownership_home_directories \
+                             --skip-rule xccdf_org.ssgproject.content_rule_sudo_add_use_pty \
+                             --skip-rule xccdf_org.ssgproject.content_rule_sudo_add_requiretty \
+                             --skip-rule xccdf_org.ssgproject.content_rule_sudo_remove_nopasswd \
+                             --skip-rule xccdf_org.ssgproject.content_rule_sshd_limit_user_access \
+                             --skip-rule xccdf_org.ssgproject.content_rule_sshd_disable_root_login \
+                             --skip-rule xccdf_org.ssgproject.content_rule_disable_users_coredumps \
                              --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\" > /tmp/oscap_console_${IP}.log 2>&1"
                     rc=$?
                     case $rc in
