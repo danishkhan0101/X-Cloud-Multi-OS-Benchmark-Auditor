@@ -1,105 +1,126 @@
-name: 🔍 Debug - Huawei Cloud SG Rule Commands
+name: 🔍 Debug - Huawei Cloud SG Rule SDK Methods
 
 on:
   workflow_dispatch:
     inputs:
       security_group_id:
-        description: '(Optional) Real SG ID to test List against — leave blank to only inspect --cli-help'
+        description: '(Optional) Real SG ID to test List against — leave blank to only inspect SDK methods'
         required: false
-        type: string
-      hw_region:
-        description: 'Huawei Cloud region'
-        required: false
-        default: 'my-kualalumpur-1'
         type: string
 
 permissions:
   contents: read
 
 jobs:
-  inspect-hcloud-sg-commands:
+  inspect-vpc-sdk:
     runs-on: ubuntu-latest
+    env:
+      HUAWEICLOUD_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
+      HUAWEICLOUD_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
+      HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
+      HW_REGION:              ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
+      HW_VPC_ENDPOINT:        ${{ vars.HW_VPC_ENDPOINT }}  # e.g. https://vpc.my-kualalumpur-1.alphaedge.tmone.com.my
+
     steps:
-      - name: '📦 Install hcloud (KooCLI)'
+      - name: '📦 Install Huawei Cloud VPC SDK'
         run: |
-          curl -sSL https://mirrors.huaweicloud.com/koocli/koocli_install.sh | bash || \
-          curl -sSL https://obs-koocli.obs.cn-north-4.myhuaweicloud.com/koocli_install.sh | bash
-          echo "$HOME/.hcloud/bin" >> $GITHUB_PATH
-          source ~/.bashrc || true
-          hcloud --cli-version || true
+          pip install huaweicloudsdkcore huaweicloudsdkvpc --quiet
+          python3 -c "import huaweicloudsdkvpc; print('✅ huaweicloudsdkvpc import OK')"
 
-      - name: '🔐 Configure hcloud credentials'
-        env:
-          HUAWEICLOUD_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
-          HUAWEICLOUD_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
+      - name: '📜 List all client methods on VpcClient (security-group related)'
         run: |
-          hcloud configure set \
-            --cli-mode=AKSK \
-            --cli-access-key="$HUAWEICLOUD_ACCESS_KEY" \
-            --cli-secret-key="$HUAWEICLOUD_SECRET_KEY" \
-            --cli-region="${{ github.event.inputs.hw_region }}" || true
+          python3 - <<'PYEOF'
+          from huaweicloudsdkvpc.v2 import VpcClient
 
-      - name: '📜 List ALL VPC actions'
-        run: |
-          echo "=== FULL VPC ACTION LIST ==="
-          hcloud VPC --cli-help || true
+          methods = [m for m in dir(VpcClient) if not m.startswith('_')]
+          sg_methods = [m for m in methods if 'security_group' in m.lower()]
 
-      - name: '🔎 Grep for security-group-rule related actions'
-        run: |
-          echo "=== Filtered: 'securitygrouprule' ==="
-          hcloud VPC --cli-help | grep -i "securitygrouprule" || echo "No matches for 'securitygrouprule'"
-          echo ""
-          echo "=== Filtered: 'security' (broader) ==="
-          hcloud VPC --cli-help | grep -i "security" || echo "No matches for 'security'"
+          print("=== ALL VpcClient methods containing 'security_group' ===")
+          for m in sorted(sg_methods):
+              print(" -", m)
 
-      - name: '📖 Show --cli-help for likely List action'
-        run: |
-          for ACTION in ListSecurityGroupRules ListSecurityGroupRuleDetail ShowSecurityGroupRule ListSecurityGroupRuleDetails; do
-            echo "=== Trying: hcloud VPC ${ACTION} --cli-help ==="
-            hcloud VPC "${ACTION}" --cli-help 2>&1 || echo "  (action not found)"
-            echo ""
-          done
+          print("")
+          print("=== ALL VpcClient methods (full list, for reference) ===")
+          for m in sorted(methods):
+              print(" -", m)
+          PYEOF
 
-      - name: '📖 Show --cli-help for likely Delete action'
+      - name: '📖 Inspect request/response models for likely List/Delete calls'
         run: |
-          for ACTION in DeleteSecurityGroupRule RemoveSecurityGroupRule; do
-            echo "=== Trying: hcloud VPC ${ACTION} --cli-help ==="
-            hcloud VPC "${ACTION}" --cli-help 2>&1 || echo "  (action not found)"
-            echo ""
-          done
+          python3 - <<'PYEOF'
+          import importlib
 
-      - name: '📖 Show --cli-help for Create action (already used in script)'
-        run: |
-          echo "=== hcloud VPC CreateSecurityGroupRule --cli-help ==="
-          hcloud VPC CreateSecurityGroupRule --cli-help || true
+          candidates_list = [
+              "ListSecurityGroupRulesRequest",
+              "ListSecurityGroupRuleRequest",
+          ]
+          candidates_delete = [
+              "DeleteSecurityGroupRuleRequest",
+          ]
+
+          mod = importlib.import_module("huaweicloudsdkvpc.v2")
+
+          print("=== Checking for List request models ===")
+          for name in candidates_list:
+              obj = getattr(mod, name, None)
+              if obj:
+                  print(f"✅ Found: {name}")
+                  print("   Fields:", [f for f in dir(obj) if not f.startswith('_')])
+              else:
+                  print(f"❌ Not found: {name}")
+
+          print("")
+          print("=== Checking for Delete request models ===")
+          for name in candidates_delete:
+              obj = getattr(mod, name, None)
+              if obj:
+                  print(f"✅ Found: {name}")
+                  print("   Fields:", [f for f in dir(obj) if not f.startswith('_')])
+              else:
+                  print(f"❌ Not found: {name}")
+          PYEOF
 
       - name: '🧪 Live test — List rules against a real SG (read-only, optional)'
         if: ${{ github.event.inputs.security_group_id != '' }}
         run: |
-          echo "=== Live ListSecurityGroupRules test against SG: ${{ github.event.inputs.security_group_id }} ==="
-          hcloud VPC ListSecurityGroupRules \
-            --security_group_id "${{ github.event.inputs.security_group_id }}" \
-            --cli-region "${{ github.event.inputs.hw_region }}" \
-            --cli-output json | tee /tmp/sg_rules_output.json || true
-          echo ""
-          echo "=== Field names present in response (top-level keys of first rule) ==="
-          python3 /tmp/parse_sg_rules.py
-
-      - name: '📝 Write SG-rule parser script'
-        if: ${{ github.event.inputs.security_group_id != '' }}
-        run: |
-          cat > /tmp/parse_sg_rules.py <<'PYEOF'
+          python3 - <<'PYEOF'
+          import os
           import json
+          from huaweicloudsdkcore.auth.credentials import BasicCredentials
+          from huaweicloudsdkcore.exceptions import exceptions
+          from huaweicloudsdkvpc.v2 import VpcClient, ListSecurityGroupRulesRequest
+
+          ak         = os.environ["HUAWEICLOUD_ACCESS_KEY"]
+          sk         = os.environ["HUAWEICLOUD_SECRET_KEY"]
+          project_id = os.environ["HW_PROJECT_ID"]
+          endpoint   = os.environ.get("HW_VPC_ENDPOINT", "")
+          sg_id      = "${{ github.event.inputs.security_group_id }}"
+
+          if not endpoint:
+              print("❌ HW_VPC_ENDPOINT not set — set it as a repo variable, e.g.")
+              print("   https://vpc.my-kualalumpur-1.alphaedge.tmone.com.my")
+              exit(1)
 
           try:
-              with open('/tmp/sg_rules_output.json') as f:
-                  d = json.load(f)
-              rules = d.get('security_group_rules', d.get('rules', []))
+              client = (
+                  VpcClient.new_builder()
+                  .with_credentials(BasicCredentials(ak, sk, project_id))
+                  .with_endpoint(endpoint)
+                  .build()
+              )
+              req = ListSecurityGroupRulesRequest()
+              req.security_group_id = sg_id
+              resp = client.list_security_group_rules(req)
+
+              rules = resp.security_group_rules or []
+              print(f"✅ {len(rules)} rule(s) returned")
               if rules:
-                  print('First rule keys:', list(rules[0].keys()))
-                  print('First rule sample:', json.dumps(rules[0], indent=2))
-              else:
-                  print('No rules returned, or key name differs — inspect raw JSON above.')
+                  first = rules[0]
+                  d = first.to_dict() if hasattr(first, "to_dict") else vars(first)
+                  print("First rule fields:", list(d.keys()))
+                  print(json.dumps(d, indent=2, default=str))
+          except exceptions.ClientRequestException as e:
+              print(f"❌ API error {e.status_code}: {e.error_code} — {e.error_msg}")
           except Exception as e:
-              print('Could not parse JSON:', e)
+              print(f"❌ Unexpected error: {e}")
           PYEOF
