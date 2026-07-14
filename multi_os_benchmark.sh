@@ -495,6 +495,12 @@ ensure_linux_scap_tools() {
 
     echo -e "${CYAN}📦 [Tool Guard] Pushing ${cache_key} packages → ${ip} (SCP/port 22)${NC}"
 
+    # Never let openssl/openssl-libs RPMs leave the runner's cache dir —
+    # closes the gap in the rpm -Uvh fallback below, which has no --exclude.
+    find "${cache_dir}" -maxdepth 1 -name '*.rpm' \
+        \( -iname 'openssl-[0-9]*' -o -iname 'openssl-libs-*' \) \
+        -exec echo "   ⛔ Excluding from push: {}" \; -exec rm -f {} \;
+
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
         "${user}@${ip}" \
         "sudo mkdir -p /tmp/scap_offline && sudo chmod 777 /tmp/scap_offline" 2>/dev/null
@@ -541,6 +547,7 @@ ensure_linux_scap_tools() {
         '
     else
         install_cmd="sudo dnf install -y --disablerepo='*' --allowerasing \
+                         --exclude=openssl-libs --exclude=openssl \
                          /tmp/scap_offline/*.rpm 2>/dev/null || \
                      sudo rpm -Uvh --nodeps --replacepkgs \
                          /tmp/scap_offline/*.rpm 2>/dev/null || true"
