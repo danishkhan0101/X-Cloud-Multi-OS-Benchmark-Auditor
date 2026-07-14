@@ -190,7 +190,7 @@ jobs:
           HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
         run: |
           echo "📦 Installing Huawei Cloud Python SDK..."
-          pip install huaweicloudsdkcore huaweicloudsdkecs --quiet
+          pip install huaweicloudsdkcore huaweicloudsdkecs huaweicloudsdkvpc --quiet
 
           echo "🔍 Verifying AK/SK against private ECS endpoint..."
           export HW_ECS_ENDPOINT="https://ecs.${HW_REGION}.alphaedge.tmone.com.my"
@@ -416,7 +416,7 @@ jobs:
           HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
         run: |
           echo "📦 Installing Huawei Cloud Python SDK..."
-          pip install huaweicloudsdkcore huaweicloudsdkecs --quiet
+          pip install huaweicloudsdkcore huaweicloudsdkecs huaweicloudsdkvpc --quiet
 
           echo "🔍 Verifying AK/SK against private ECS endpoint..."
           export HW_ECS_ENDPOINT="https://ecs.${HW_REGION}.alphaedge.tmone.com.my"
@@ -487,7 +487,7 @@ jobs:
 
           if [ "$CLOUD_PROVIDER" == "huaweicloud" ]; then
             echo "📦 Installing Huawei Cloud Python SDK for runtime use..."
-            pip install huaweicloudsdkcore huaweicloudsdkecs --quiet
+            pip install huaweicloudsdkcore huaweicloudsdkecs huaweicloudsdkvpc --quiet
             python3 -c "import huaweicloudsdkecs; print('✅ SDK import OK')"
           fi
 
@@ -506,7 +506,7 @@ jobs:
           # runs regardless of OS target and imports huaweicloudsdkecs.
           if [ "$CLOUD_PROVIDER" == "huaweicloud" ]; then
             echo "📦 Installing Huawei Cloud Python SDK for runtime use..."
-            pip install huaweicloudsdkcore huaweicloudsdkecs --quiet
+            pip install huaweicloudsdkcore huaweicloudsdkecs huaweicloudsdkvpc --quiet
             python3 -c "import huaweicloudsdkecs; print('✅ SDK import OK')"
           fi
 
