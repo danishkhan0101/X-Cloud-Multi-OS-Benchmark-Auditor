@@ -1632,15 +1632,30 @@ run_phase_1() {
                         "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
                     UBUNTU_VER=${RAW_VER:-2404}
                     UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
+                    
                     EFFECTIVE_UBUNTU_CIS_PROFILE="$UBUNTU_CIS_PROFILE"
-
+                    PROFILE_OK=true
+                    
+                    # Dump every profile ID once so fallback logic + diagnostics both use real data
+                    AVAILABLE_PROFILES=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                        ${UBUNTU_USER}@${IP} \
+                        "oscap info '$UBUNTU_CIS_XCCDF' 2>/dev/null | grep -oE 'xccdf_org\.ssgproject\.content_profile_[a-zA-Z0-9_]+'")
+                    
                     if [ "$RUN_CIS" == true ] && [ "$OS_LVL" == "2" ]; then
-                        if ! ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-                                ${UBUNTU_USER}@${IP} \
-                                "oscap info '$UBUNTU_CIS_XCCDF' 2>/dev/null | grep -q '$UBUNTU_CIS_PROFILE'"; then
+                        if ! echo "$AVAILABLE_PROFILES" | grep -qx "$UBUNTU_CIS_PROFILE"; then
                             echo -e "${YELLOW}⚠️  [Phase1/Ubuntu] Level 2 profile not found in ssg-ubuntu${UBUNTU_VER}-ds.xml — falling back to Level 1${NC}"
                             EFFECTIVE_UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level1_server"
                         fi
+                    fi
+                    
+                    # NEW: verify whatever profile we've landed on (L1 or L2) actually exists
+                    if ! echo "$AVAILABLE_PROFILES" | grep -qx "$EFFECTIVE_UBUNTU_CIS_PROFILE"; then
+                        echo -e "${RED}❌ [Phase1/Ubuntu] Neither requested nor fallback profile exists in this datastream.${NC}"
+                        echo -e "${RED}   Requested : $UBUNTU_CIS_PROFILE${NC}"
+                        echo -e "${RED}   Fallback  : $EFFECTIVE_UBUNTU_CIS_PROFILE${NC}"
+                        echo -e "${RED}   Available profiles in ssg-ubuntu${UBUNTU_VER}-ds.xml:${NC}"
+                        echo "$AVAILABLE_PROFILES" | sed 's/^/     /'
+                        PROFILE_OK=false
                     fi
                     
                     if [ "$RUN_CIS" == true ]; then
@@ -2333,13 +2348,17 @@ run_phase_4() {
                              --profile $EFFECTIVE_UBUNTU_CIS_PROFILE_P4 \
                              --report ${REMOTE} $UBUNTU_CIS_XCCDF > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
-                        [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
+                        if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
                             p=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
                             f=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
                             echo -e "${GREEN}📊 [Phase4/Ubuntu/${ORG_PREFIX^^}] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
-                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" \
-                            "Ubuntu/CIS" || \
+                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" "Ubuntu/CIS"
+                        else
                             echo -e "${RED}❌ [Phase4/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
+                            # NEW: surface the real error instead of leaving it to a blind fetch attempt
+                            ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "cat /tmp/oscap_console_${IP}.log" 2>/dev/null \
+                                | tail -20 | sed 's/^/     /'
+                        fi
                     fi
 
                     if [ "$RUN_ORG" == true ]; then
