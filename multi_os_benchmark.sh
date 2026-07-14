@@ -545,23 +545,24 @@ ensure_linux_scap_tools() {
                 command -v oscap >/dev/null 2>&1 || \
                     sudo apt-get install -y --no-install-recommends libopenscap8 2>/dev/null || true
             fi
-            if ! ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1; then
-                if ls /tmp/scap_offline/ssg-*-ds.xml >/dev/null 2>&1; then
-                    sudo mkdir -p /usr/share/xml/scap/ssg/content
-                    sudo cp -f /tmp/scap_offline/ssg-*-ds.xml \
-                        /usr/share/xml/scap/ssg/content/ 2>/dev/null || true
-                elif ls /tmp/scap_offline/ssg-debderived*.deb >/dev/null 2>&1; then
-                    _deb_extract=$(mktemp -d /tmp/ssg_deb_XXXXXX)
-                    dpkg-deb -x /tmp/scap_offline/ssg-debderived*.deb \
-                        "$_deb_extract" 2>/dev/null || true
-                    sudo mkdir -p /usr/share/xml/scap/ssg/content
-                    find "$_deb_extract" -name "ssg-ubuntu*-ds.xml" \
-                        -exec sudo cp -f {} /usr/share/xml/scap/ssg/content/ \;
-                    rm -rf "$_deb_extract"
-                else
-                    sudo apt-get install -y --no-install-recommends \
-                        ssg-base ssg-debderived 2>/dev/null || true
-                fi
+
+            # FIX: always copy any datastreams we pushed, regardless of whether
+            # dpkg already dropped its own (older/incomplete) set from ssg-debderived.
+            if ls /tmp/scap_offline/ssg-*-ds.xml >/dev/null 2>&1; then
+                sudo mkdir -p /usr/share/xml/scap/ssg/content
+                sudo cp -f /tmp/scap_offline/ssg-*-ds.xml \
+                    /usr/share/xml/scap/ssg/content/ 2>/dev/null || true
+            elif ls /tmp/scap_offline/ssg-debderived*.deb >/dev/null 2>&1; then
+                _deb_extract=$(mktemp -d /tmp/ssg_deb_XXXXXX)
+                dpkg-deb -x /tmp/scap_offline/ssg-debderived*.deb \
+                    "$_deb_extract" 2>/dev/null || true
+                sudo mkdir -p /usr/share/xml/scap/ssg/content
+                find "$_deb_extract" -name "ssg-ubuntu*-ds.xml" \
+                    -exec sudo cp -f {} /usr/share/xml/scap/ssg/content/ \;
+                rm -rf "$_deb_extract"
+            elif ! ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1; then
+                sudo apt-get install -y --no-install-recommends \
+                    ssg-base ssg-debderived 2>/dev/null || true
             fi
         '
     else
