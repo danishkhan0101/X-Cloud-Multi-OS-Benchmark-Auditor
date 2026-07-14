@@ -1613,11 +1613,22 @@ run_phase_1() {
                         "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
                     UBUNTU_VER=${RAW_VER:-2404}
                     UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
+                    EFFECTIVE_UBUNTU_CIS_PROFILE="$UBUNTU_CIS_PROFILE"
+
+                    if [ "$RUN_CIS" == true ] && [ "$OS_LVL" == "2" ]; then
+                        if ! ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                                ${UBUNTU_USER}@${IP} \
+                                "oscap info '$UBUNTU_CIS_XCCDF' 2>/dev/null | grep -q '$UBUNTU_CIS_PROFILE'"; then
+                            echo -e "${YELLOW}⚠️  [Phase1/Ubuntu] Level 2 profile not found in ssg-ubuntu${UBUNTU_VER}-ds.xml — falling back to Level 1${NC}"
+                            EFFECTIVE_UBUNTU_CIS_PROFILE="xccdf_org.ssgproject.content_profile_cis_level1_server"
+                        fi
+                    fi
+                    
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Ubuntu/CIS L${OS_LVL}] Scanning $IP...${NC}"
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                             ${UBUNTU_USER}@${IP} \
-                            "sudo oscap xccdf eval --profile $UBUNTU_CIS_PROFILE \
+                            "sudo oscap xccdf eval --profile $EFFECTIVE_UBUNTU_CIS_PROFILE \
                              --report /tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html \
                              $UBUNTU_CIS_XCCDF > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
@@ -1631,6 +1642,10 @@ run_phase_1() {
                                 "Ubuntu/CIS-before"
                         else
                             echo -e "${RED}❌ [Phase1/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
+                            fetch_remote_report "$UBUNTU_USER" "$IP" \
+                                "/tmp/oscap_console_${IP}.log" \
+                                "./oscap_console_UBUNTU_${IP}_FAILURE.log" \
+                                "Ubuntu/CIS-failure-log"
                         fi
                     fi
                     if [ "$RUN_ORG" == true ]; then
@@ -1939,8 +1954,13 @@ run_remediation() {
                         ssh $REMEDIATION_SSH_OPTS ${UBUNTU_USER}@${IP} \
                         "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ \
                              -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1)
+                         EFFECTIVE_PROFILE='$UBUNTU_CIS_PROFILE'
+                         if [ '$OS_LVL' == '2' ] && ! oscap info \"\$XML_FILE\" 2>/dev/null | grep -q '$UBUNTU_CIS_PROFILE'; then
+                             echo '[WARN] Level 2 profile not found — falling back to Level 1' >&2
+                             EFFECTIVE_PROFILE='xccdf_org.ssgproject.content_profile_cis_level1_server'
+                         fi
                          sudo /usr/bin/oscap xccdf eval --remediate \
-                             --profile $UBUNTU_CIS_PROFILE \
+                             --profile \"\$EFFECTIVE_PROFILE\" \
                              --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\" > /tmp/oscap_console_${IP}.log 2>&1"
                     rc=$?
                     case $rc in
@@ -2281,9 +2301,17 @@ run_phase_4() {
                     if [ "$RUN_CIS" == true ]; then
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
+                        EFFECTIVE_UBUNTU_CIS_PROFILE_P4="$UBUNTU_CIS_PROFILE"
+                        if [ "$OS_LVL" == "2" ]; then
+                            if ! ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
+                                    "oscap info '$UBUNTU_CIS_XCCDF' 2>/dev/null | grep -q '$UBUNTU_CIS_PROFILE'"; then
+                                echo -e "${YELLOW}⚠️  [Phase4/Ubuntu] Level 2 profile not found — falling back to Level 1${NC}"
+                                EFFECTIVE_UBUNTU_CIS_PROFILE_P4="xccdf_org.ssgproject.content_profile_cis_level1_server"
+                            fi
+                        fi
                         ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
                             "sudo oscap xccdf eval \
-                             --profile $UBUNTU_CIS_PROFILE \
+                             --profile $EFFECTIVE_UBUNTU_CIS_PROFILE_P4 \
                              --report ${REMOTE} $UBUNTU_CIS_XCCDF > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
