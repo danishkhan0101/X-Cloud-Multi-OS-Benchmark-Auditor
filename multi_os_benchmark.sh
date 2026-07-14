@@ -305,7 +305,7 @@ prefetch_scap_packages() {
             if ls "${SCAP_CACHE_DIR}/ubuntu2204/ssg-ubuntu2204-ds.xml" >/dev/null 2>&1; then
                 echo -e "${YELLOW}   ⚠️  No 2404 datastream available — using 2204 as fallback for ubuntu2404 cache${NC}"
                 cp -f "${SCAP_CACHE_DIR}/ubuntu2204/ssg-ubuntu2204-ds.xml" \
-                    "${SCAP_CACHE_DIR}/ubuntu2404/" 2>/dev/null || true
+                    "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" 2>/dev/null || true
             fi
         fi
     fi
