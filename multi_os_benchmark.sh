@@ -269,41 +269,30 @@ prefetch_scap_packages() {
         rm -rf "${ds_tmp}"
 
         if ! ls "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" >/dev/null 2>&1; then
-            echo -e "${YELLOW}   ⚠️  2404 datastream not in noble ssg-debderived — trying jammy...${NC}"
-            local ds_tmp22
-            ds_tmp22=$(mktemp -d /tmp/ssg_ds22_XXXXXX)
-            chmod 777 "${ds_tmp22}"
-            docker run --rm \
-                -v "${ds_tmp22}:/output" \
-                ubuntu:22.04 \
-                bash -c "
-                    export DEBIAN_FRONTEND=noninteractive
-                    apt-get update -qq 2>/dev/null
-                    echo 'deb http://archive.ubuntu.com/ubuntu jammy universe' \
-                        >> /etc/apt/sources.list
-                    echo 'deb http://archive.ubuntu.com/ubuntu jammy-updates universe' \
-                        >> /etc/apt/sources.list
-                    apt-get update -qq 2>/dev/null
-                    apt-get install -y --no-install-recommends \
-                        ssg-debderived ssg-base 2>/dev/null || true
-                    find /usr/share/xml/scap/ssg/content/ \
-                        -name 'ssg-ubuntu*-ds.xml' \
-                        -exec cp -v {} /output/ \; 2>/dev/null || true
-                " 2>/dev/null || true
-
-            for _ds_file in "${ds_tmp22}"/ssg-ubuntu*-ds.xml; do
-                [ -f "$_ds_file" ] || continue
-                _fname=$(basename "$_ds_file")
-                [[ "$_fname" == *"2404"* ]] && \
-                    cp -f "$_ds_file" "${SCAP_CACHE_DIR}/ubuntu2404/" && \
-                    echo -e "${GREEN}   ✅ ${_fname} from jammy → ubuntu2404 cache${NC}"
-            done
-            rm -rf "${ds_tmp22}"
+            echo -e "${CYAN}   Fetching ssg-ubuntu2404-ds.xml from upstream ComplianceAsCode release...${NC}"
+            SSG_VER="${SSG_VER:-0.1.75}"   # pin/verify latest tag on releases page
+            curl -sL -o /tmp/scap-security-guide.tar.bz2 \
+                "https://github.com/ComplianceAsCode/content/releases/download/v${SSG_VER}/scap-security-guide-${SSG_VER}.tar.bz2"
+            if [ -s /tmp/scap-security-guide.tar.bz2 ]; then
+                tar -xjf /tmp/scap-security-guide.tar.bz2 -C /tmp \
+                    "scap-security-guide-${SSG_VER}/ssg-ubuntu2404-ds.xml" 2>/dev/null
+                found=$(find /tmp -name 'ssg-ubuntu2404-ds.xml' 2>/dev/null | head -1)
+                if [ -n "$found" ]; then
+                    cp -f "$found" "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml"
+                    echo -e "${GREEN}   ✅ Real ssg-ubuntu2404-ds.xml fetched from upstream release${NC}"
+                else
+                    echo -e "${RED}   ❌ ssg-ubuntu2404-ds.xml not found in tarball — check SSG_VER${NC}"
+                fi
+            else
+                echo -e "${RED}   ❌ Failed to download release tarball${NC}"
+            fi
+            rm -f /tmp/scap-security-guide.tar.bz2
         fi
-
+        
+        # only now fall back to the jammy hack if upstream fetch failed too
         if ! ls "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" >/dev/null 2>&1; then
             if ls "${SCAP_CACHE_DIR}/ubuntu2204/ssg-ubuntu2204-ds.xml" >/dev/null 2>&1; then
-                echo -e "${YELLOW}   ⚠️  No 2404 datastream available — using 2204 as fallback for ubuntu2404 cache${NC}"
+                echo -e "${YELLOW}   ⚠️  Upstream fetch failed too — using 2204 as last-resort fallback (results will be unreliable)${NC}"
                 cp -f "${SCAP_CACHE_DIR}/ubuntu2204/ssg-ubuntu2204-ds.xml" \
                     "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" 2>/dev/null || true
             fi
