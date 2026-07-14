@@ -366,6 +366,7 @@ jobs:
       HW_ECS_TAG_VAL:         ${{ github.event.inputs.environment_tag == 'all' && '' || github.event.inputs.environment_tag }}
       HW_VPC_ID:              ${{ vars.HW_VPC_ID }}
       HW_EPS_ID:              ${{ vars.HW_EPS_ID }}
+      HW_VPC_ENDPOINT:           ${{ vars.HW_VPC_ENDPOINT || format('https://vpc.{0}.alphaedge.tmone.com.my', vars.HW_REGION || 'my-kualalumpur-1') }}
       HUAWEICLOUD_ACCESS_KEY:  ${{ secrets.HW_ACCESS_KEY }}
       HUAWEICLOUD_SECRET_KEY:  ${{ secrets.HW_SECRET_KEY }}
       HUAWEICLOUD_REGION:     ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
