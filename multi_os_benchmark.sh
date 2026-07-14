@@ -292,17 +292,29 @@ prefetch_scap_packages() {
         if ! ls "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" >/dev/null 2>&1; then
             echo -e "${YELLOW}   ⚠️  Pre-built release lacks ubuntu2404 — building from source via Docker (this takes a few minutes)...${NC}"
             docker run --rm -v "${SCAP_CACHE_DIR}/ubuntu2404:/output" ubuntu:24.04 bash -c "
+                set -e
                 export DEBIAN_FRONTEND=noninteractive
                 apt-get update -qq
                 apt-get install -y --no-install-recommends git cmake make python3 python3-pip \
                     libxml2-utils xsltproc python3-jinja2 python3-yaml ca-certificates
                 git clone --depth 1 https://github.com/ComplianceAsCode/content.git /tmp/content
-                cd /tmp/content && mkdir build && cd build
-                cmake .. && make -j\$(nproc) ubuntu2404-content
-                find . -name 'ssg-ubuntu2404-ds.xml' -exec cp {} /output/ \;
-            " \
-                && echo -e "${GREEN}   ✅ Built ssg-ubuntu2404-ds.xml from source${NC}" \
-                || echo -e "${RED}   ❌ Source build failed${NC}"
+                mkdir -p /tmp/content/build
+                cd /tmp/content/build
+                cmake ..
+                make -j\$(nproc) ubuntu2404-content
+                FOUND=\$(find /tmp/content/build -name 'ssg-ubuntu2404-ds.xml' | head -1)
+                if [ -z \"\$FOUND\" ]; then
+                    echo '[FATAL] Build completed but ssg-ubuntu2404-ds.xml was not produced'
+                    exit 1
+                fi
+                cp -v \"\$FOUND\" /output/
+            "
+            _rc=$?
+            if [ $_rc -eq 0 ] && ls "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" >/dev/null 2>&1; then
+                echo -e "${GREEN}   ✅ Built ssg-ubuntu2404-ds.xml from source${NC}"
+            else
+                echo -e "${RED}   ❌ Source build failed (docker rc=${_rc}) — see output above for the real error${NC}"
+            fi
         fi
         # ══ END INSERTED BLOCK ══
 
