@@ -1013,6 +1013,39 @@ cloud_add_port_rule() {
     esac
 }
 
+# ======================================================
+# HELPER: reassert_ssh_rule_all_linux
+# Re-applies the port-22 SG rule for every discovered Linux IP right
+# before Ansible runs, regardless of distro. Covers the gap where the
+# Phase 0.3 rule may have been overwritten by the time remediation starts.
+# No-op on Azure (SG is NSG-based there and az vm run-command doesn't
+# have this race in the same way — safe to skip).
+# ======================================================
+reassert_ssh_rule_all_linux() {
+    [ "${CLOUD_PROVIDER}" != "huaweicloud" ] && return 0
+
+    local all_linux_ips=(
+        "${UBUNTU_MACHINES[@]}" "${RHEL_MACHINES[@]}"
+        "${ROCKY_MACHINES[@]}"  "${ALMA_MACHINES[@]}"
+    )
+    [ ${#all_linux_ips[@]} -eq 0 ] && return 0
+
+    local runner_ip
+    runner_ip="${RUNNER_IP:-$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null)}"
+    echo -e "${CYAN}🔁 [SG-Reassert] Refreshing port-22 rule for ${#all_linux_ips[@]} host(s) → runner ${runner_ip}${NC}"
+
+    for ip in "${all_linux_ips[@]}"; do
+        local sg_id="${IP_TO_SG_ID[$ip]:-}"
+        if [ -z "$sg_id" ]; then
+            echo -e "${YELLOW}⚠️  [SG-Reassert] No SG ID for ${ip} — skipping${NC}"
+            continue
+        fi
+        HW_VPC_ENDPOINT="${HW_VPC_ENDPOINT}" \
+        python3 "${SCRIPT_DIR}/hw_sg_rule_manage.py" \
+            --sg-id "$sg_id" --port 22 --remote-ip "$runner_ip" --protocol tcp
+    done
+}
+
 cloud_vm_run_powershell() {
     local ip="$1"
     local script="$2"
@@ -1894,6 +1927,8 @@ run_phase_1() {
 # ======================================================
 run_remediation() {
     echo -e "\n${BOLD}🛠️  PHASE 2 & 3: Executing Remediation (Hardened SSH)...${NC}"
+
+    reassert_ssh_rule_all_linux
 
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
