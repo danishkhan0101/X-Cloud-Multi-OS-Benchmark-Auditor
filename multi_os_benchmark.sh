@@ -18,7 +18,6 @@ CUSTOM_XCCDF_PROFILE="${CUSTOM_XCCDF_PROFILE:-xccdf_com.org_profile_lsb}"
 RG_NAME="${AZURE_RG_NAME:-DEFAULT_RG}"
 KV_NAME="${AZURE_KV_NAME:-YOUR-KEYVAULT-NAME}"
 SECRET_NAME="${AZURE_KV_SECRET:-AuditPassword}"
-UBUNTU_USER="${LINUX_ADMIN_USER:-ubuntu}"
 AUDIT_USER="${WINDOWS_ADMIN_USER:-Windows_Admin}"
 
 CLOUD_PROVIDER="${CLOUD_PROVIDER:-azure}"
@@ -1427,7 +1426,7 @@ fi
 # PHASE 0.3: AUTO-HEALER
 # NOTE (SSH key migration): the blocks below are a *self-heal*, not the
 # primary bootstrap path. They only fire if the dedicated audit account
-# (UBUNTU_USER / GHOST_USER) can't already be reached — and for Huawei
+# (GHOST_USER) can't already be reached — and for Huawei
 # Cloud, the recovery call (cloud_vm_run_shell) itself needs SSH key trust
 # for LINUX_ADMIN_USER to already exist (see cloud_vm_run_shell above).
 # In other words: this heals a missing *audit* account, it cannot bootstrap
@@ -1444,40 +1443,12 @@ fi
 
 declare -a WIN_BOOTSTRAP_PIDS=()
 
-if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
-    for ip in "${UBUNTU_MACHINES[@]}"; do
-        (
-            if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 \
-                    -o StrictHostKeyChecking=no ${UBUNTU_USER}@${ip} \
-                    "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
-                VM_NAME="${IP_TO_VM_NAME[$ip]}"
-                cloud_add_port_rule "$ip" 22 "Allow_SSH_Runner_Only"
-                PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
-                cloud_vm_run_shell "$ip" "useradd -m -s /bin/bash ${UBUNTU_USER} || true
-                               echo '${UBUNTU_USER} ALL=(ALL) NOPASSWD:ALL' \
-                                   > /etc/sudoers.d/99-${UBUNTU_USER}
-                               chmod 440 /etc/sudoers.d/99-${UBUNTU_USER}
-                               mkdir -p /home/${UBUNTU_USER}/.ssh
-                               echo '${PUB_KEY}' \
-                                   > /home/${UBUNTU_USER}/.ssh/authorized_keys
-                               chown -R ${UBUNTU_USER}:${UBUNTU_USER} \
-                                   /home/${UBUNTU_USER}/.ssh
-                               chmod 700 /home/${UBUNTU_USER}/.ssh
-                               chmod 600 /home/${UBUNTU_USER}/.ssh/authorized_keys
-                               systemctl restart sshd" || true
-                sleep 15
-            fi
-        ) &
-    done
-fi
-
-if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" =~ ^(rhel|rocky|alma)$ ]]; then
-    for ip in "${RHEL_MACHINES[@]}" "${ROCKY_MACHINES[@]}" "${ALMA_MACHINES[@]}"; do
+if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" =~ ^(ubuntu|rhel|rocky|alma)$ ]]; then
+    for ip in "${UBUNTU_MACHINES[@]}" "${RHEL_MACHINES[@]}" "${ROCKY_MACHINES[@]}" "${ALMA_MACHINES[@]}"; do
         (
             if [ "$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 \
                     -o StrictHostKeyChecking=no ${GHOST_USER}@${ip} \
                     "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
-                VM_NAME="${IP_TO_VM_NAME[$ip]}"
                 cloud_add_port_rule "$ip" 22 "Allow_SSH_Runner_Only"
                 PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
                 cloud_vm_run_shell "$ip" "useradd -m -s /bin/bash ${GHOST_USER} || true
@@ -1485,28 +1456,17 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" =~ ^(rhel|rocky|alma)$ ]]; t
                                    > /etc/sudoers.d/99-${GHOST_USER}
                                chmod 440 /etc/sudoers.d/99-${GHOST_USER}
                                mkdir -p /home/${GHOST_USER}/.ssh
-                               echo '${PUB_KEY}' \
-                                   > /home/${GHOST_USER}/.ssh/authorized_keys
-                               chown -R ${GHOST_USER}:${GHOST_USER} \
-                                   /home/${GHOST_USER}/.ssh
+                               echo '${PUB_KEY}' > /home/${GHOST_USER}/.ssh/authorized_keys
+                               chown -R ${GHOST_USER}:${GHOST_USER} /home/${GHOST_USER}/.ssh
                                chmod 700 /home/${GHOST_USER}/.ssh
                                chmod 600 /home/${GHOST_USER}/.ssh/authorized_keys
                                command -v restorecon &>/dev/null && \
-                                   restorecon -Rv /home/${GHOST_USER}/.ssh \
-                                   >/dev/null 2>&1 || true
-                               echo 'PubkeyAcceptedKeyTypes +ssh-rsa' \
-                                   > /etc/ssh/sshd_config.d/99-runner-key.conf \
-                                   2>/dev/null || true
+                                   restorecon -Rv /home/${GHOST_USER}/.ssh >/dev/null 2>&1 || true
                                systemctl restart sshd" || true
                 sleep 15
             fi
 
-            # ── Guard: ensure MaxStartups never regresses to a value that
-            #    triggers "kex_exchange_identification: Connection reset by
-            #    peer" under this pipeline's connection volume. Runs on
-            #    every host every time, not just on bootstrap, so it also
-            #    self-heals a value already hardened by an earlier run
-            #    before this guard existed.
+            # Same MaxStartups guard the RHEL block has — now applies to Ubuntu too
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
                 "${GHOST_USER}@${ip}" \
                 "sudo grep -q '^MaxStartups 100:' /etc/ssh/sshd_config.d/00-maxstartups-override.conf 2>/dev/null || {
@@ -1563,7 +1523,7 @@ fi
 # ======================================================
 echo "[ubuntu_nodes]" > inventory.ini
 for ip in "${UBUNTU_MACHINES[@]}"; do
-    echo "${ip} ansible_user=${UBUNTU_USER}" >> inventory.ini
+    echo "${ip} ansible_user=${GHOST_USER}" >> inventory.ini
 done
 echo -e "\n[rhel_nodes]" >> inventory.ini
 for ip in "${RHEL_MACHINES[@]}"; do
@@ -1624,12 +1584,12 @@ run_phase_1() {
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
             for IP in "${UBUNTU_MACHINES[@]}"; do
                 (
-                    if ! ensure_linux_scap_tools "$UBUNTU_USER" "$IP" "apt"; then
+                    if ! ensure_linux_scap_tools "$GHOST_USER" "$IP" "apt"; then
                         echo -e "${RED}❌ [Phase1/Ubuntu] Skipping $IP — tools unavailable.${NC}"
                         exit 1
                     fi
                     RAW_VER=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-                        ${UBUNTU_USER}@${IP} \
+                        ${GHOST_USER}@${IP} \
                         "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
                     UBUNTU_VER=${RAW_VER:-2404}
                     UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
@@ -1639,7 +1599,7 @@ run_phase_1() {
                     
                     # Dump every profile ID once so fallback logic + diagnostics both use real data
                     AVAILABLE_PROFILES=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-                        ${UBUNTU_USER}@${IP} \
+                        ${GHOST_USER}@${IP} \
                         "oscap info '$UBUNTU_CIS_XCCDF' 2>/dev/null | grep -oE 'xccdf_org\.ssgproject\.content_profile_[a-zA-Z0-9_]+'")
                     
                     if [ "$RUN_CIS" == true ] && [ "$OS_LVL" == "2" ]; then
@@ -1665,22 +1625,22 @@ run_phase_1() {
                         else
                             echo -e "${GREEN}🔎 [Phase1/Ubuntu/CIS L${OS_LVL}] Scanning $IP...${NC}"
                             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-                                ${UBUNTU_USER}@${IP} \
+                                ${GHOST_USER}@${IP} \
                                 "sudo oscap xccdf eval --profile $EFFECTIVE_UBUNTU_CIS_PROFILE \
                                  --report /tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html \
                                  $UBUNTU_CIS_XCCDF > /tmp/oscap_console_${IP}.log 2>&1"
                             rc=$?
                             if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                                p=$(ssh -n ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
-                                f=$(ssh -n ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                                p=$(ssh -n ${GHOST_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                                f=$(ssh -n ${GHOST_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
                                 echo -e "${GREEN}📊 [Phase1/Ubuntu/CIS] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
-                                fetch_remote_report "$UBUNTU_USER" "$IP" \
+                                fetch_remote_report "$GHOST_USER" "$IP" \
                                     "/tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html" \
                                     "./report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html" \
                                     "Ubuntu/CIS-before"
                             else
                                 echo -e "${RED}❌ [Phase1/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
-                                fetch_remote_report "$UBUNTU_USER" "$IP" \
+                                fetch_remote_report "$GHOST_USER" "$IP" \
                                     "/tmp/oscap_console_${IP}.log" \
                                     "./oscap_console_UBUNTU_${IP}_FAILURE.log" \
                                     "Ubuntu/CIS-failure-log"
@@ -1690,19 +1650,19 @@ run_phase_1() {
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Ubuntu/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         # FIX: use centralised SCP helper — always push before scan
-                        scp_custom_content_ubuntu "$UBUNTU_USER" "$IP" \
+                        scp_custom_content_ubuntu "$GHOST_USER" "$IP" \
                             || { echo -e "${RED}❌ [Phase1] SCP failed for $IP${NC}"; exit 1; }
                         ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-                            ${UBUNTU_USER}@${IP} \
+                            ${GHOST_USER}@${IP} \
                             "sudo oscap xccdf eval --profile $CUSTOM_XCCDF_PROFILE \
                              --report /tmp/report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html \
                              /tmp/$(basename $UBUNTU_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            p=$(ssh -n ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
-                            f=$(ssh -n ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            p=$(ssh -n ${GHOST_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                            f=$(ssh -n ${GHOST_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
                             echo -e "${GREEN}📊 [Phase1/Ubuntu/${ORG_PREFIX^^}] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
-                            fetch_remote_report "$UBUNTU_USER" "$IP" \
+                            fetch_remote_report "$GHOST_USER" "$IP" \
                                 "/tmp/report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html" \
                                 "./report_before_${ORG_PREFIX^^}_UBUNTU_${IP}.html" \
                                 "Ubuntu/${ORG_PREFIX^^}-before"
@@ -1990,7 +1950,7 @@ run_remediation() {
                 (
                     echo -e "${CYAN}🛠️  [Remediation/Ubuntu/CIS] Starting on ${IP}...${NC}"
                     timeout $REMEDIATION_TIMEOUT_SEC \
-                        ssh $REMEDIATION_SSH_OPTS ${UBUNTU_USER}@${IP} \
+                        ssh $REMEDIATION_SSH_OPTS ${GHOST_USER}@${IP} \
                         "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ \
                              -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1)
                          EFFECTIVE_PROFILE='$UBUNTU_CIS_PROFILE'
@@ -2007,7 +1967,6 @@ run_remediation() {
                              --skip-rule xccdf_org.ssgproject.content_rule_sudo_add_requiretty \
                              --skip-rule xccdf_org.ssgproject.content_rule_sudo_remove_nopasswd \
                              --skip-rule xccdf_org.ssgproject.content_rule_sshd_limit_user_access \
-                             --skip-rule xccdf_org.ssgproject.content_rule_sshd_disable_root_login \
                              --skip-rule xccdf_org.ssgproject.content_rule_disable_users_coredumps \
                              --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\" > /tmp/oscap_console_${IP}.log 2>&1"
                     rc=$?
@@ -2057,7 +2016,7 @@ run_remediation() {
                 echo -e "${CYAN}🔧 [Remediation/Ubuntu/ORG] Fixing broken apt state on ${IP}...${NC}"
                 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                     -o ControlMaster=no -o ControlPath=none \
-                    ${UBUNTU_USER}@${IP} \
+                    ${GHOST_USER}@${IP} \
                     "sudo apt-get remove -y --purge openscap-common ssg-debderived 2>/dev/null || true
                      sudo dpkg --remove --force-remove-reinstreq openscap-common ssg-debderived 2>/dev/null || true
                      sudo apt-get install -f -y 2>/dev/null || true
@@ -2335,13 +2294,13 @@ run_phase_4() {
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ]; then
             for IP in "${UBUNTU_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$UBUNTU_USER" || {
+                    wait_for_ssh "$IP" "$GHOST_USER" || {
                         echo -e "${RED}❌ [Phase4/Ubuntu] SSH unreachable: $IP${NC}"; exit 1
                     }
-                    ensure_linux_scap_tools "$UBUNTU_USER" "$IP" "apt" || {
+                    ensure_linux_scap_tools "$GHOST_USER" "$IP" "apt" || {
                         echo -e "${RED}❌ [Phase4/Ubuntu] Tools missing on $IP${NC}"; exit 1
                     }
-                    UBUNTU_VER=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
+                    UBUNTU_VER=$(ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
                         "source /etc/os-release && echo \${VERSION_ID//./}" 2>/dev/null)
                     UBUNTU_VER=${UBUNTU_VER:-2404}
                     UBUNTU_CIS_XCCDF="/usr/share/xml/scap/ssg/content/ssg-ubuntu${UBUNTU_VER}-ds.xml"
@@ -2352,7 +2311,7 @@ run_phase_4() {
                         EFFECTIVE_UBUNTU_CIS_PROFILE_P4="$UBUNTU_CIS_PROFILE"
                         PROFILE_OK_P4=true
                     
-                        AVAILABLE_PROFILES_P4=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
+                        AVAILABLE_PROFILES_P4=$(ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
                             "oscap info '$UBUNTU_CIS_XCCDF' 2>/dev/null | grep -oE 'xccdf_org\.ssgproject\.content_profile_[a-zA-Z0-9_]+'")
                     
                         if [ "$OS_LVL" == "2" ]; then
@@ -2371,19 +2330,19 @@ run_phase_4() {
                         if [ "$PROFILE_OK_P4" != true ]; then
                             echo -e "${RED}❌ [Phase4/Ubuntu/CIS] Skipping verify scan on $IP — no valid profile${NC}"
                         else
-                            ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
+                            ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
                                 "sudo oscap xccdf eval \
                                  --profile $EFFECTIVE_UBUNTU_CIS_PROFILE_P4 \
                                  --report ${REMOTE} $UBUNTU_CIS_XCCDF > /tmp/oscap_console_${IP}.log 2>&1"
                             rc=$?
                             if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                                p=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
-                                f=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                                p=$(ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                                f=$(ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
                                 echo -e "${GREEN}📊 [Phase4/Ubuntu/${ORG_PREFIX^^}] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
-                                fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" "Ubuntu/CIS"
+                                fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" "Ubuntu/CIS"
                             else
                                 echo -e "${RED}❌ [Phase4/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
-                                ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "cat /tmp/oscap_console_${IP}.log" 2>/dev/null \
+                                ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} "cat /tmp/oscap_console_${IP}.log" 2>/dev/null \
                                     | tail -20 | sed 's/^/     /'
                             fi
                         fi
@@ -2394,20 +2353,20 @@ run_phase_4() {
                         # may have been removed by cleanup or was never present
                         # after a reboot.
                         echo -e "${CYAN}📤 [Phase4/Ubuntu/ORG] Re-SCPing custom content to ${IP}...${NC}"
-                        scp_custom_content_ubuntu "$UBUNTU_USER" "$IP" || {
+                        scp_custom_content_ubuntu "$GHOST_USER" "$IP" || {
                             echo -e "${RED}❌ [Phase4/Ubuntu/ORG] SCP failed for ${IP} — skipping after-scan${NC}"
                             exit 1
                         }
                         REMOTE="/tmp/report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html"
                         LOCAL="./report_after_${ORG_PREFIX^^}_UBUNTU_${IP}.html"
-                        ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
+                        ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
                             "sudo oscap xccdf eval \
                              --profile $CUSTOM_XCCDF_PROFILE \
                              --report ${REMOTE} \
                              /tmp/$(basename $UBUNTU_CUSTOM_XCCDF) > /tmp/oscap_console_${IP}.log 2>&1"
                         rc=$?
                         [ $rc -eq 0 ] || [ $rc -eq 2 ] && \
-                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" \
+                            fetch_remote_report "$GHOST_USER" "$IP" "$REMOTE" "$LOCAL" \
                             "Ubuntu/${ORG_PREFIX^^}" || \
                             echo -e "${RED}❌ [Phase4/Ubuntu/${ORG_PREFIX^^}] oscap failed on $IP (rc=$rc)${NC}"
                     fi
@@ -2691,7 +2650,7 @@ run_cleanup() {
         for IP in "${UBUNTU_MACHINES[@]}"; do
             echo -e "${CYAN}🧹 [Cleanup/Ubuntu] Removing oscap artifacts on ${IP}...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-                ${UBUNTU_USER}@${IP} "$remove_deb" 2>&1 || \
+                ${GHOST_USER}@${IP} "$remove_deb" 2>&1 || \
                 echo -e "${YELLOW}⚠️  [Cleanup/Ubuntu] Some steps may have failed on ${IP} — check manually${NC}"
         done
     fi
