@@ -981,44 +981,25 @@ cloud_add_port_rule() {
             --access Allow --protocol Tcp -o none >/dev/null 2>&1 || true
         ;;
     huaweicloud)
-    [ -z "$vm_id" ] && { echo -e "${YELLOW}⚠️  [HW] No ECS ID for ${ip}${NC}"; return 1; }
-    local sg_id
-    sg_id=$(timeout 30 hcloud ECS ListServerSecurityGroups \
-        --server-id "$vm_id" \
-        --cli-region "${HW_REGION}" \
-        --cli-output json 2>/dev/null \
-        | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('security_groups',[{}])[0].get('id',''))" 2>/dev/null)
-    [ -z "$sg_id" ] && return 1
+        [ -z "$vm_id" ] && { echo -e "${YELLOW}⚠️  [HW] No ECS ID for ${ip}${NC}"; return 1; }
 
-    # NEW: remove any stale rule for this port before adding the new one
-    existing_rule_id=$(timeout 30 hcloud VPC ListSecurityGroupRules \
-        --security_group_id "$sg_id" \
-        --cli-region "${HW_REGION}" \
-        --cli-output json 2>/dev/null \
-        | python3 -c "
-import json,sys
-d=json.load(sys.stdin)
-for r in d.get('security_group_rules', []):
-    if r.get('port_range_min') == ${port} and r.get('direction') == 'ingress':
-        print(r['id']); break
-" 2>/dev/null)
-    if [ -n "$existing_rule_id" ]; then
-        timeout 30 hcloud VPC DeleteSecurityGroupRule \
-            --security_group_rule_id "$existing_rule_id" \
-            --cli-region "${HW_REGION}" >/dev/null 2>&1 || true
-    fi
+        # Need the SG ID attached to this ECS instance. There is no SDK
+        # "list SGs by server" shortcut confirmed yet, so this assumes
+        # HW_VPC_ID / a per-server SG lookup already resolved elsewhere.
+        # If you already resolve sg_id via ECS server details, wire it in here.
+        local sg_id="${IP_TO_SG_ID[$ip]:-}"
+        if [ -z "$sg_id" ]; then
+            echo -e "${YELLOW}⚠️  [HW] No SG ID resolved for ${ip} — skipping rule refresh${NC}"
+            return 1
+        fi
 
-    timeout 30 hcloud VPC CreateSecurityGroupRule \
-        --security_group_id "$sg_id" \
-        --body.security_group_rule.direction "ingress" \
-        --body.security_group_rule.protocol "tcp" \
-        --body.security_group_rule.ethertype "IPv4" \
-        --body.security_group_rule.port_range_min "$port" \
-        --body.security_group_rule.port_range_max "$port" \
-        --body.security_group_rule.remote_ip_prefix "${runner_ip}/32" \
-        --cli-region "${HW_REGION}" \
-        --cli-output json >/dev/null 2>&1 || true
-    ;;
+        python3 "${SCRIPT_DIR}/hw_sg_rule_manage.py" \
+            --sg-id "$sg_id" \
+            --port "$port" \
+            --remote-ip "$runner_ip" \
+            --protocol tcp
+        return $?
+        ;;
     esac
 }
 
@@ -1243,6 +1224,7 @@ ALMA_MACHINES=()
 WINDOWS_MACHINES=()
 declare -A IP_TO_VM_NAME
 declare -A IP_TO_VM_ID
+declare -A IP_TO_SG_ID
 
 _map_vm() {
     local vm_name="$1" ip="$2" os="$3" power="$4" offer="$5"
@@ -1311,8 +1293,9 @@ huaweicloud)
         #   os_type, img_name, name, target_ip, srv_id
         # (it already filters to ACTIVE/RUNNING before printing, so there is
         # no separate "power" column — we pass a literal "running" to _map_vm)
-        while IFS=$'\t' read -r os_type offer vm_name ip srv_id; do
+        while IFS=$'\t' read -r os_type offer vm_name ip srv_id sg_id; do
             IP_TO_VM_ID["$ip"]="$srv_id"
+            IP_TO_SG_ID["$ip"]="$sg_id"
             _map_vm "$vm_name" "$ip" "$os_type" "running" "$offer"
         done <<< "$HW_RAW"
     fi
@@ -1341,10 +1324,11 @@ if [ "$H_TARGET_IP" != "all" ] && [ -n "$H_TARGET_IP" ]; then
                 HW_EPS_ID="${HW_EPS_ID}" \
                 python3 "${SCRIPT_DIR}/hw_ecs_discover.py" --tsv
             )
-            while IFS=$'\t' read -r os_type offer vm_name ip srv_id; do
+            while IFS=$'\t' read -r os_type offer vm_name ip srv_id sg_id; do
                 [ "$ip" == "$H_TARGET_IP" ] || continue
                 IP_TO_VM_NAME["$ip"]="$vm_name"
                 IP_TO_VM_ID["$ip"]="$srv_id"
+                IP_TO_SG_ID["$ip"]="$sg_id"
                 SHARD_VM_NAME="$vm_name"
             done <<< "$HW_SHARD_RAW"
             if [ -z "$SHARD_VM_NAME" ]; then
