@@ -30,6 +30,8 @@ HW_ECS_TAG_VAL="${HW_ECS_TAG_VAL:-}"
 HW_CSMS_SECRET="${HW_CSMS_SECRET:-AuditPassword}"
 HW_VPC_ID="${HW_VPC_ID:-}"
 HW_ECS_ENDPOINT="${HW_ECS_ENDPOINT:-https://ecs.${HW_REGION}.alphaedge.tmone.com.my}"
+HW_VPC_ENDPOINT="${HW_VPC_ENDPOINT:-https://vpc.${HW_REGION}.alphaedge.tmone.com.my}"
+
 
 WIN_SERVER_ROLE="${WIN_SERVER_ROLE:-member_server}"
 WIN_REBOOT_AFTER_REMEDIATION="${WIN_REBOOT_AFTER_REMEDIATION:-true}"
