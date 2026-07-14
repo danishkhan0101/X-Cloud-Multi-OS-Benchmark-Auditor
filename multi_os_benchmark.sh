@@ -994,7 +994,8 @@ cloud_add_port_rule() {
             echo -e "${YELLOW}⚠️  [HW] No SG ID resolved for ${ip} — skipping rule refresh${NC}"
             return 1
         fi
-
+    
+        HW_VPC_ENDPOINT="${HW_VPC_ENDPOINT}" \
         python3 "${SCRIPT_DIR}/hw_sg_rule_manage.py" \
             --sg-id "$sg_id" \
             --port "$port" \
