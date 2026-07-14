@@ -1659,27 +1659,31 @@ run_phase_1() {
                     fi
                     
                     if [ "$RUN_CIS" == true ]; then
-                        echo -e "${GREEN}🔎 [Phase1/Ubuntu/CIS L${OS_LVL}] Scanning $IP...${NC}"
-                        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
-                            ${UBUNTU_USER}@${IP} \
-                            "sudo oscap xccdf eval --profile $EFFECTIVE_UBUNTU_CIS_PROFILE \
-                             --report /tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html \
-                             $UBUNTU_CIS_XCCDF > /tmp/oscap_console_${IP}.log 2>&1"
-                        rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            p=$(ssh -n ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
-                            f=$(ssh -n ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
-                            echo -e "${GREEN}📊 [Phase1/Ubuntu/CIS] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
-                            fetch_remote_report "$UBUNTU_USER" "$IP" \
-                                "/tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html" \
-                                "./report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html" \
-                                "Ubuntu/CIS-before"
+                        if [ "$PROFILE_OK" != true ]; then
+                            echo -e "${RED}❌ [Phase1/Ubuntu/CIS] Skipping scan on $IP — no valid profile in datastream${NC}"
                         else
-                            echo -e "${RED}❌ [Phase1/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
-                            fetch_remote_report "$UBUNTU_USER" "$IP" \
-                                "/tmp/oscap_console_${IP}.log" \
-                                "./oscap_console_UBUNTU_${IP}_FAILURE.log" \
-                                "Ubuntu/CIS-failure-log"
+                            echo -e "${GREEN}🔎 [Phase1/Ubuntu/CIS L${OS_LVL}] Scanning $IP...${NC}"
+                            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                                ${UBUNTU_USER}@${IP} \
+                                "sudo oscap xccdf eval --profile $EFFECTIVE_UBUNTU_CIS_PROFILE \
+                                 --report /tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html \
+                                 $UBUNTU_CIS_XCCDF > /tmp/oscap_console_${IP}.log 2>&1"
+                            rc=$?
+                            if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
+                                p=$(ssh -n ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                                f=$(ssh -n ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                                echo -e "${GREEN}📊 [Phase1/Ubuntu/CIS] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
+                                fetch_remote_report "$UBUNTU_USER" "$IP" \
+                                    "/tmp/report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html" \
+                                    "./report_before_CIS_L${OS_LVL}_UBUNTU_${IP}.html" \
+                                    "Ubuntu/CIS-before"
+                            else
+                                echo -e "${RED}❌ [Phase1/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
+                                fetch_remote_report "$UBUNTU_USER" "$IP" \
+                                    "/tmp/oscap_console_${IP}.log" \
+                                    "./oscap_console_UBUNTU_${IP}_FAILURE.log" \
+                                    "Ubuntu/CIS-failure-log"
+                            fi
                         fi
                     fi
                     if [ "$RUN_ORG" == true ]; then
@@ -2336,28 +2340,42 @@ run_phase_4() {
                         REMOTE="/tmp/report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
                         LOCAL="./report_after_CIS_L${OS_LVL}_UBUNTU_${IP}.html"
                         EFFECTIVE_UBUNTU_CIS_PROFILE_P4="$UBUNTU_CIS_PROFILE"
+                        PROFILE_OK_P4=true
+                    
+                        AVAILABLE_PROFILES_P4=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
+                            "oscap info '$UBUNTU_CIS_XCCDF' 2>/dev/null | grep -oE 'xccdf_org\.ssgproject\.content_profile_[a-zA-Z0-9_]+'")
+                    
                         if [ "$OS_LVL" == "2" ]; then
-                            if ! ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
-                                    "oscap info '$UBUNTU_CIS_XCCDF' 2>/dev/null | grep -q '$UBUNTU_CIS_PROFILE'"; then
+                            if ! echo "$AVAILABLE_PROFILES_P4" | grep -qx "$UBUNTU_CIS_PROFILE"; then
                                 echo -e "${YELLOW}⚠️  [Phase4/Ubuntu] Level 2 profile not found — falling back to Level 1${NC}"
                                 EFFECTIVE_UBUNTU_CIS_PROFILE_P4="xccdf_org.ssgproject.content_profile_cis_level1_server"
                             fi
                         fi
-                        ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
-                            "sudo oscap xccdf eval \
-                             --profile $EFFECTIVE_UBUNTU_CIS_PROFILE_P4 \
-                             --report ${REMOTE} $UBUNTU_CIS_XCCDF > /tmp/oscap_console_${IP}.log 2>&1"
-                        rc=$?
-                        if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
-                            p=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
-                            f=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
-                            echo -e "${GREEN}📊 [Phase4/Ubuntu/${ORG_PREFIX^^}] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
-                            fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" "Ubuntu/CIS"
+                    
+                        if ! echo "$AVAILABLE_PROFILES_P4" | grep -qx "$EFFECTIVE_UBUNTU_CIS_PROFILE_P4"; then
+                            echo -e "${RED}❌ [Phase4/Ubuntu] Neither requested nor fallback profile exists in this datastream.${NC}"
+                            echo "$AVAILABLE_PROFILES_P4" | sed 's/^/     /'
+                            PROFILE_OK_P4=false
+                        fi
+                    
+                        if [ "$PROFILE_OK_P4" != true ]; then
+                            echo -e "${RED}❌ [Phase4/Ubuntu/CIS] Skipping verify scan on $IP — no valid profile${NC}"
                         else
-                            echo -e "${RED}❌ [Phase4/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
-                            # NEW: surface the real error instead of leaving it to a blind fetch attempt
-                            ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "cat /tmp/oscap_console_${IP}.log" 2>/dev/null \
-                                | tail -20 | sed 's/^/     /'
+                            ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} \
+                                "sudo oscap xccdf eval \
+                                 --profile $EFFECTIVE_UBUNTU_CIS_PROFILE_P4 \
+                                 --report ${REMOTE} $UBUNTU_CIS_XCCDF > /tmp/oscap_console_${IP}.log 2>&1"
+                            rc=$?
+                            if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then
+                                p=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+pass' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                                f=$(ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "grep -cE '^Result[[:space:]]+fail' /tmp/oscap_console_${IP}.log" 2>/dev/null)
+                                echo -e "${GREEN}📊 [Phase4/Ubuntu/${ORG_PREFIX^^}] ${IP}: ${p:-?} passed, ${f:-?} failed${NC}"
+                                fetch_remote_report "$UBUNTU_USER" "$IP" "$REMOTE" "$LOCAL" "Ubuntu/CIS"
+                            else
+                                echo -e "${RED}❌ [Phase4/Ubuntu/CIS] oscap failed on $IP (rc=$rc)${NC}"
+                                ssh $SCAN_SSH_OPTS ${UBUNTU_USER}@${IP} "cat /tmp/oscap_console_${IP}.log" 2>/dev/null \
+                                    | tail -20 | sed 's/^/     /'
+                            fi
                         fi
                     fi
 
