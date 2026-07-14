@@ -270,26 +270,43 @@ prefetch_scap_packages() {
 
         if ! ls "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" >/dev/null 2>&1; then
             echo -e "${CYAN}   Fetching ssg-ubuntu2404-ds.xml from upstream ComplianceAsCode release...${NC}"
-            SSG_VER="${SSG_VER:-0.1.75}"   # pin/verify latest tag on releases page
-            curl -sL -o /tmp/scap-security-guide.tar.bz2 \
-                "https://github.com/ComplianceAsCode/content/releases/download/v${SSG_VER}/scap-security-guide-${SSG_VER}.tar.bz2"
-            if [ -s /tmp/scap-security-guide.tar.bz2 ]; then
-                tar -xjf /tmp/scap-security-guide.tar.bz2 -C /tmp \
-                    "scap-security-guide-${SSG_VER}/ssg-ubuntu2404-ds.xml" 2>/dev/null
-                found=$(find /tmp -name 'ssg-ubuntu2404-ds.xml' 2>/dev/null | head -1)
-                if [ -n "$found" ]; then
-                    cp -f "$found" "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml"
-                    echo -e "${GREEN}   ✅ Real ssg-ubuntu2404-ds.xml fetched from upstream release${NC}"
-                else
-                    echo -e "${RED}   ❌ ssg-ubuntu2404-ds.xml not found in tarball — check SSG_VER${NC}"
+            SSG_VER="${SSG_VER:-$(curl -sL https://api.github.com/repos/ComplianceAsCode/content/releases/latest \
+                | python3 -c "import json,sys; print(json.load(sys.stdin).get('tag_name','').lstrip('v'))" 2>/dev/null)}"
+            if [ -n "$SSG_VER" ]; then
+                curl -sL -o /tmp/scap-security-guide.tar.bz2 \
+                    "https://github.com/ComplianceAsCode/content/releases/download/v${SSG_VER}/scap-security-guide-${SSG_VER}.tar.bz2"
+                if [ -s /tmp/scap-security-guide.tar.bz2 ]; then
+                    tar -xjf /tmp/scap-security-guide.tar.bz2 -C /tmp 2>/dev/null
+                    found=$(find /tmp -name 'ssg-ubuntu2404-ds.xml' 2>/dev/null | head -1)
+                    if [ -n "$found" ]; then
+                        cp -f "$found" "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml"
+                        echo -e "${GREEN}   ✅ Real ssg-ubuntu2404-ds.xml fetched from upstream release v${SSG_VER}${NC}"
+                    fi
                 fi
-            else
-                echo -e "${RED}   ❌ Failed to download release tarball${NC}"
             fi
             rm -f /tmp/scap-security-guide.tar.bz2
+            rm -rf /tmp/scap-security-guide-*
         fi
-        
-        # only now fall back to the jammy hack if upstream fetch failed too
+
+        # ══ INSERT THE DOCKER SOURCE-BUILD BLOCK HERE ══
+        if ! ls "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" >/dev/null 2>&1; then
+            echo -e "${YELLOW}   ⚠️  Pre-built release lacks ubuntu2404 — building from source via Docker (this takes a few minutes)...${NC}"
+            docker run --rm -v "${SCAP_CACHE_DIR}/ubuntu2404:/output" ubuntu:24.04 bash -c "
+                export DEBIAN_FRONTEND=noninteractive
+                apt-get update -qq
+                apt-get install -y --no-install-recommends git cmake make python3 python3-pip \
+                    libxml2-utils xsltproc python3-jinja2 python3-yaml ca-certificates
+                git clone --depth 1 https://github.com/ComplianceAsCode/content.git /tmp/content
+                cd /tmp/content && mkdir build && cd build
+                cmake .. && make -j\$(nproc) ubuntu2404-content
+                find . -name 'ssg-ubuntu2404-ds.xml' -exec cp {} /output/ \;
+            " \
+                && echo -e "${GREEN}   ✅ Built ssg-ubuntu2404-ds.xml from source${NC}" \
+                || echo -e "${RED}   ❌ Source build failed${NC}"
+        fi
+        # ══ END INSERTED BLOCK ══
+
+        # ── Only now fall back to the jammy hack as an absolute last resort ──
         if ! ls "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" >/dev/null 2>&1; then
             if ls "${SCAP_CACHE_DIR}/ubuntu2204/ssg-ubuntu2204-ds.xml" >/dev/null 2>&1; then
                 echo -e "${YELLOW}   ⚠️  Upstream fetch failed too — using 2204 as last-resort fallback (results will be unreliable)${NC}"
