@@ -36,7 +36,9 @@ name: 🛡️ Fleet Commander Pipeline
 #            golden image), not at pipeline runtime.
 #   VM_SSH_PASSWORD is no longer used anywhere in this workflow — remove
 #   it from repo secrets if it's still set.
-
+concurrency:
+  group: fleet-commander-${{ github.event.inputs.cloud_provider || 'azure' }}-${{ github.event.inputs.environment_tag || 'all' }}
+  cancel-in-progress: false
 on:
   workflow_dispatch:
     inputs:
