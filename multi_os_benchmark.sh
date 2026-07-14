@@ -1967,7 +1967,12 @@ run_remediation() {
                              --skip-rule xccdf_org.ssgproject.content_rule_sudo_add_requiretty \
                              --skip-rule xccdf_org.ssgproject.content_rule_sudo_remove_nopasswd \
                              --skip-rule xccdf_org.ssgproject.content_rule_sshd_limit_user_access \
+                             --skip-rule xccdf_org.ssgproject.content_rule_sshd_disable_root_login \
                              --skip-rule xccdf_org.ssgproject.content_rule_disable_users_coredumps \
+                             --skip-rule xccdf_org.ssgproject.content_rule_service_ufw_enabled \
+                             --skip-rule xccdf_org.ssgproject.content_rule_set_ufw_default_rule \
+                             --skip-rule xccdf_org.ssgproject.content_rule_ufw_rules_for_open_ports \
+                             --skip-rule xccdf_org.ssgproject.content_rule_ufw_only_required_services \
                              --report /tmp/report_remediation_CIS_${IP}.html \"\$XML_FILE\" > /tmp/oscap_console_${IP}.log 2>&1"
                     rc=$?
                     case $rc in
