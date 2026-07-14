@@ -83,27 +83,23 @@ jobs:
             --cli-output json | tee /tmp/sg_rules_output.json || true
           echo ""
           echo "=== Field names present in response (top-level keys of first rule) ==="
-          python3 -c "
-import json
-try:
-    with open('/tmp/sg_rules_output.json') as f:
-        d = json.load(f)
-    rules = d.get('security_group_rules', d.get('rules', []))
-    if rules:
-        print('First rule keys:', list(rules[0].keys()))
-        print('First rule sample:', json.dumps(rules[0], indent=2))
-    else:
-        print('No rules returned, or key name differs — inspect raw JSON above.')
-except Exception as e:
-    print('Could not parse JSON:', e)
-"
+          python3 /tmp/parse_sg_rules.py
 
-      - name: '✅ Done — review the logs above'
+      - name: '📝 Write SG-rule parser script'
+        if: ${{ github.event.inputs.security_group_id != '' }}
         run: |
-          echo "Check the step outputs above to confirm:"
-          echo "  1. Correct action name for listing SG rules"
-          echo "  2. Correct action name for deleting a SG rule"
-          echo "  3. Correct parameter flag names (--security_group_id vs --security-group-id etc.)"
-          echo "  4. Correct JSON field names (port_range_min vs portRangeMin, direction, id)"
-          echo ""
-          echo "Once confirmed, update cloud_add_port_rule() in multi_os_benchmark.sh accordingly."
+          cat > /tmp/parse_sg_rules.py <<'PYEOF'
+          import json
+
+          try:
+              with open('/tmp/sg_rules_output.json') as f:
+                  d = json.load(f)
+              rules = d.get('security_group_rules', d.get('rules', []))
+              if rules:
+                  print('First rule keys:', list(rules[0].keys()))
+                  print('First rule sample:', json.dumps(rules[0], indent=2))
+              else:
+                  print('No rules returned, or key name differs — inspect raw JSON above.')
+          except Exception as e:
+              print('Could not parse JSON:', e)
+          PYEOF
