@@ -296,7 +296,8 @@ prefetch_scap_packages() {
                 export DEBIAN_FRONTEND=noninteractive
                 apt-get update -qq
                 apt-get install -y --no-install-recommends git cmake make python3 python3-pip \
-                    libxml2-utils xsltproc python3-jinja2 python3-yaml ca-certificates
+                    libxml2-utils xsltproc python3-jinja2 python3-yaml ca-certificates \
+                    openscap-scanner libopenscap-dev
                 git clone --depth 1 https://github.com/ComplianceAsCode/content.git /tmp/content
                 mkdir -p /tmp/content/build
                 cd /tmp/content/build
