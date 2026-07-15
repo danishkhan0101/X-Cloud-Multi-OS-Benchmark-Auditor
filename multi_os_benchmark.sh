@@ -297,7 +297,7 @@ prefetch_scap_packages() {
                 apt-get install -y --no-install-recommends git cmake make python3 python3-pip \
                     libxml2-utils xsltproc python3-jinja2 python3-yaml ca-certificates \
                     openscap-scanner libopenscap-dev
-                git clone --depth 1 --branch v0.1.71 https://github.com/ComplianceAsCode/content.git /tmp/content
+                git clone --depth 1 --branch v0.1.81 https://github.com/ComplianceAsCode/content.git /tmp/content
                 mkdir -p /tmp/content/build
                 cd /tmp/content/build
                 cmake ..
