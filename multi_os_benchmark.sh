@@ -1389,6 +1389,13 @@ huaweicloud)
     ;;
 esac
 
+if [ "$HEADLESS" == true ] && [ ${#UBUNTU_MACHINES[@]} -eq 0 ] && \
+   [ ${#RHEL_MACHINES[@]} -eq 0 ] && [ ${#ROCKY_MACHINES[@]} -eq 0 ] && \
+   [ ${#ALMA_MACHINES[@]} -eq 0 ] && [ ${#WINDOWS_MACHINES[@]} -eq 0 ]; then
+    echo -e "${YELLOW}⚠️  No matching VMs found for environment '${H_TARGETS}' — nothing to audit. Exiting cleanly.${NC}"
+    exit 0
+fi
+
 if [ "$H_TARGET_IP" != "all" ] && [ -n "$H_TARGET_IP" ]; then
     echo -e "${MAGENTA}🎯 MATRIX SHARDING: Isolating to node $H_TARGET_IP${NC}"
     UBUNTU_MACHINES=(); RHEL_MACHINES=(); ROCKY_MACHINES=()
