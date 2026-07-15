@@ -215,7 +215,7 @@ def main():
         log(f"🔎 EPS filter: {before_count} → {len(all_servers)} server(s) matching EPS_ID={eps_id}")
 
     for s in all_servers:
-        log(f"🐛 DEBUG server: name={s.get('name')} status={s.get('status')} "
+        log(f"🐛 DEBUG server: name={s.get('name')} status=[{s.get('status')}] "
             f"addresses={s.get('addresses')}")
         
     # ── TSV output mode ───────────────────────────────────────────────────
@@ -223,7 +223,7 @@ def main():
         emitted = 0
         for s in all_servers:
             name = s.get("name") or "unknown_name"
-            status = str(s.get("status", "")).upper()
+            status = str(s.get("status", "")).strip().upper()
             if status not in ("ACTIVE", "RUNNING"):
                 continue
             if not tag_matches(s, tag_key, tag_val):
