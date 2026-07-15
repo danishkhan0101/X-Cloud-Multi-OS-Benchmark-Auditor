@@ -332,6 +332,11 @@ jobs:
           echo "✅ Active Matrix: $MATRIX_JSON"
           echo "os_matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
 
+          if [ "$MATRIX_JSON" == "[]" ]; then
+            echo "❌ No VMs matched environment '${TARGET_ENV}' — aborting before matrix creation."
+            exit 1
+          fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 # JOB 2 — EXECUTION ENGINE
 # ─────────────────────────────────────────────────────────────────────────────
