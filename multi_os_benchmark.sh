@@ -329,6 +329,15 @@ prefetch_scap_packages() {
                 echo -e "${YELLOW}   ⚠️  Upstream fetch failed too — using 2204 as last-resort fallback (results will be unreliable)${NC}"
                 cp -f "${SCAP_CACHE_DIR}/ubuntu2204/ssg-ubuntu2204-ds.xml" \
                     "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" 2>/dev/null || true
+        
+                # NEW: validate the copy actually has profiles before trusting it
+                if ! oscap info "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" 2>/dev/null \
+                        | grep -q 'xccdf_org.ssgproject.content_profile_cis_level1_server'; then
+                    echo -e "${RED}   ❌ 2204 fallback copy has no valid CIS profile — removing broken file${NC}"
+                    rm -f "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml"
+                fi
+            else
+                echo -e "${RED}   ❌ No 2204 datastream available either — ubuntu2404 cache will be empty${NC}"
             fi
         fi
     fi
@@ -338,6 +347,16 @@ prefetch_scap_packages() {
     $need_rhel   && check_dirs+=(rhel9)
     $need_rocky  && check_dirs+=(rocky9)
     $need_alma   && check_dirs+=(alma9 alma10)
+
+    if $need_ubuntu; then
+        echo -e "${CYAN}   🔍 Diagnostic: ubuntu2404 cache contents:${NC}"
+        ls -la "${SCAP_CACHE_DIR}/ubuntu2404/" 2>&1
+        if [ -f "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" ]; then
+            echo "   File size: $(stat -c%s "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" 2>/dev/null) bytes"
+            oscap info "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" 2>&1 | head -20
+        fi
+    fi
+    
     $need_ubuntu && check_dirs+=(ubuntu2204 ubuntu2404)
 
     for d in "${check_dirs[@]}"; do
