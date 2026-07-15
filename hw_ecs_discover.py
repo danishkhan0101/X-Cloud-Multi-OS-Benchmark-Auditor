@@ -63,14 +63,19 @@ def get_target_ip(server):
 
 
 def tag_matches(server, tag_key, tag_val):
-    """Return True if tag filtering is disabled, set to 'all', OR the server has the matching tag."""
+    """Return True if tag filtering is disabled, set to 'all', OR the server has the matching tag (case-insensitive)."""
     if not tag_key or not tag_val or tag_val.lower() == "all":
         return True
+    
+    tag_key_lower = tag_key.lower()
+    tag_val_lower = tag_val.lower()
     
     raw_tags = server.get("tags") or []
     for t in raw_tags:
         if isinstance(t, dict):
-            if t.get("key") == tag_key and t.get("value") == tag_val:
+            t_key = (t.get("key") or "").lower()
+            t_val = (t.get("value") or "").lower()
+            if t_key == tag_key_lower and t_val == tag_val_lower:
                 return True
     return False
 
