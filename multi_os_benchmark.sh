@@ -575,6 +575,7 @@ ensure_linux_scap_tools() {
                 sudo mkdir -p /usr/share/xml/scap/ssg/content
                 sudo cp -f /tmp/scap_offline/ssg-*-ds.xml \
                     /usr/share/xml/scap/ssg/content/ 2>/dev/null || true
+                sudo chmod 644 /usr/share/xml/scap/ssg/content/ssg-*-ds.xml 2>/dev/null || true
             elif ls /tmp/scap_offline/ssg-debderived*.deb >/dev/null 2>&1; then
                 _deb_extract=$(mktemp -d /tmp/ssg_deb_XXXXXX)
                 dpkg-deb -x /tmp/scap_offline/ssg-debderived*.deb \
@@ -1624,7 +1625,7 @@ run_phase_1() {
                     # Dump every profile ID once so fallback logic + diagnostics both use real data
                     AVAILABLE_PROFILES=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                         ${GHOST_USER}@${IP} \
-                        "oscap info '$UBUNTU_CIS_XCCDF' 2>/dev/null | grep -oE 'xccdf_org\.ssgproject\.content_profile_[a-zA-Z0-9_]+'")
+                        "sudo oscap info '$UBUNTU_CIS_XCCDF' 2>/dev/null | grep -oE 'xccdf_org\.ssgproject\.content_profile_[a-zA-Z0-9_]+'")
                     
                     if [ "$RUN_CIS" == true ] && [ "$OS_LVL" == "2" ]; then
                         if ! echo "$AVAILABLE_PROFILES" | grep -qx "$UBUNTU_CIS_PROFILE"; then
@@ -2344,7 +2345,7 @@ run_phase_4() {
                         PROFILE_OK_P4=true
                     
                         AVAILABLE_PROFILES_P4=$(ssh $SCAN_SSH_OPTS ${GHOST_USER}@${IP} \
-                            "oscap info '$UBUNTU_CIS_XCCDF' 2>/dev/null | grep -oE 'xccdf_org\.ssgproject\.content_profile_[a-zA-Z0-9_]+'")
+                            "sudo oscap info '$UBUNTU_CIS_XCCDF' 2>/dev/null | grep -oE 'xccdf_org\.ssgproject\.content_profile_[a-zA-Z0-9_]+'")
                     
                         if [ "$OS_LVL" == "2" ]; then
                             if ! echo "$AVAILABLE_PROFILES_P4" | grep -qx "$UBUNTU_CIS_PROFILE"; then
