@@ -297,7 +297,7 @@ prefetch_scap_packages() {
                 apt-get install -y --no-install-recommends git cmake make python3 python3-pip \
                     libxml2-utils xsltproc python3-jinja2 python3-yaml ca-certificates \
                     openscap-scanner libopenscap-dev
-                git clone --depth 1 https://github.com/ComplianceAsCode/content.git /tmp/content
+                git clone --depth 1 --branch v0.1.71 https://github.com/ComplianceAsCode/content.git /tmp/content
                 mkdir -p /tmp/content/build
                 cd /tmp/content/build
                 cmake ..
@@ -308,12 +308,17 @@ prefetch_scap_packages() {
                     exit 1
                 fi
                 cp -v \"\$FOUND\" /output/
+                if ! oscap info /output/ssg-ubuntu2404-ds.xml 2>/dev/null | grep -q 'xccdf_org.ssgproject.content_profile_cis_level1_server'; then
+                echo '[FATAL] Built datastream is missing cis_level1_server profile — likely built from unstable/dev content'
+                exit 1
+            fi
             "
             _rc=$?
             if [ $_rc -eq 0 ] && ls "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml" >/dev/null 2>&1; then
                 echo -e "${GREEN}   ✅ Built ssg-ubuntu2404-ds.xml from source${NC}"
             else
                 echo -e "${RED}   ❌ Source build failed (docker rc=${_rc}) — see output above for the real error${NC}"
+                rm -f "${SCAP_CACHE_DIR}/ubuntu2404/ssg-ubuntu2404-ds.xml"
             fi
         fi
         # ══ END INSERTED BLOCK ══
