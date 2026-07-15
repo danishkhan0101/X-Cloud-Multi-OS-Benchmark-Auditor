@@ -88,7 +88,6 @@ def tag_matches(server, tag_key, tag_val):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    log("🔖 hw_ecs_discover.py version-check: get_target_ip-v2-private-ip-filter")
     tsv_mode = "--tsv" in sys.argv
 
     # ── Validate required env vars ────────────────────────────────────────
@@ -218,11 +217,6 @@ def main():
         before_count = len(all_servers)
         all_servers = [s for s in all_servers if s.get("enterprise_project_id") == eps_id]
         log(f"🔎 EPS filter: {before_count} → {len(all_servers)} server(s) matching EPS_ID={eps_id}")
-
-    for s in all_servers:
-        log(f"🐛 DEBUG server: name={s.get('name')} status=[{s.get('status')}] "
-        f"addresses={s.get('addresses')}")
-        log(f"🐛 DEBUG tags: {s.get('tags')!r}")
         
     # ── TSV output mode ───────────────────────────────────────────────────
     if tsv_mode:
@@ -231,16 +225,13 @@ def main():
             name = s.get("name") or "unknown_name"
             status = str(s.get("status", "")).strip().upper()
             if status not in ("ACTIVE", "RUNNING"):
-                log(f"🐛 DROP [{name}]: status check failed, got status=[{status}]")
                 continue
             if not tag_matches(s, tag_key, tag_val):
-                log(f"🐛 DROP [{name}]: tag_matches failed (tag_key={tag_key!r} tag_val={tag_val!r})")
                 continue
             target_ip = get_target_ip(s)
-            log(f"🐛 get_target_ip returned: {target_ip!r} for [{name}]")
             if not target_ip:
-                log(f"🐛 DROP [{name}]: target_ip empty")
                 continue
+
             srv_id    = s.get("id") or "unknown_id"
             meta      = s.get("metadata") or {}
             os_type   = meta.get("os_type") or "Linux"
