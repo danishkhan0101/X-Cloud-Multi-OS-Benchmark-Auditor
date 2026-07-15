@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import ipaddress
+import time
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -127,37 +128,54 @@ def main():
         sys.exit(1)
 
     # ── Paginated fetch ───────────────────────────────────────────────────
+    MAX_RETRIES     = 3
+    RETRY_DELAY_SEC = 5
+
     all_servers_raw = []
     offset = 0  
 
     while True:
-        try:
-            req        = ListServersDetailsRequest()
-            req.offset = offset
-            req.limit  = 100   
-            
-            # Add the Enterprise Project ID filter if provided
-            if eps_id:
-                req.enterprise_project_id = eps_id
-                
-            resp       = client.list_servers_details(req)
+        req        = ListServersDetailsRequest()
+        req.offset = offset
+        req.limit  = 100
 
-        except exceptions.ClientRequestException as e:
-            if e.status_code == 401:
-                log(f"❌ 401 Unauthorized — error_code={e.error_code}")
-            elif e.status_code == 403:
-                log(f"❌ 403 Forbidden — error_code={e.error_code}")
-            else:
-                log(f"❌ API error {e.status_code}: {e.error_code} — {e.error_msg}")
-            sys.exit(1)
-        except Exception as e:
-            log(f"❌ Unexpected error: {e}")
+        # Add the Enterprise Project ID filter if provided
+        if eps_id:
+            req.enterprise_project_id = eps_id
+
+        resp = None
+        last_err = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                resp = client.list_servers_details(req)
+                break
+            except exceptions.ClientRequestException as e:
+                last_err = e
+                if e.status_code in (429, 500, 502, 503, 504) and attempt < MAX_RETRIES:
+                    log(f"⚠️  Transient error (attempt {attempt}/{MAX_RETRIES}): "
+                        f"{e.status_code} {e.error_code} — retrying in {RETRY_DELAY_SEC}s")
+                    time.sleep(RETRY_DELAY_SEC)
+                    continue
+                else:
+                    if e.status_code == 401:
+                        log(f"❌ 401 Unauthorized — error_code={e.error_code}")
+                    elif e.status_code == 403:
+                        log(f"❌ 403 Forbidden — error_code={e.error_code}")
+                    else:
+                        log(f"❌ API error {e.status_code}: {e.error_code} — {e.error_msg}")
+                    sys.exit(1)
+            except Exception as e:
+                log(f"❌ Unexpected error: {e}")
+                sys.exit(1)
+
+        if resp is None:
+            log(f"❌ Exhausted {MAX_RETRIES} retries — last error: {last_err}")
             sys.exit(1)
 
         page = resp.servers or []
         all_servers_raw.extend(page)
 
-        if len(page) < 100:   
+        if len(page) < 100:
             break
         offset += len(page)
 
