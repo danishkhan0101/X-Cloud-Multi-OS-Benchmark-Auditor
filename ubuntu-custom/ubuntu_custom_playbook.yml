@@ -69,7 +69,8 @@
     - name: LSB27 - Allow OpenSSH before enabling firewall
       ufw:
         rule: allow
-        name: OpenSSH
+        port: '22'
+        proto: tcp
 
     - name: LSB27 + LSB29 - Enable UFW with default deny incoming
       ufw:
