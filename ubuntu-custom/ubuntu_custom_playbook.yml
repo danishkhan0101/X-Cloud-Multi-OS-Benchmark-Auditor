@@ -120,12 +120,12 @@
     # root logins are blocked which satisfies
     # the XCCDF check for this rule.
     # ==========================================
-    # - name: LSB28 - Disable root SSH password login
-    #   lineinfile:
-    #     path: /etc/ssh/sshd_config
-    #     regexp: '^#?PermitRootLogin'
-    #     line: 'PermitRootLogin prohibit-password'
-    #     state: present
+    - name: LSB28 - Disable root SSH password login
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin prohibit-password'
+        state: present
 
     # ==========================================
     # LSB20: Disable Uncommon Filesystems
