@@ -140,8 +140,8 @@ def main():
         req.limit  = 100
 
         # Add the Enterprise Project ID filter if provided
-        if eps_id:
-            req.enterprise_project_id = eps_id
+        # if eps_id:
+        #     req.enterprise_project_id = eps_id
 
         resp = None
         last_err = None
@@ -208,6 +208,12 @@ def main():
         log(f"❌ Failed to serialise server objects: {e}")
         sys.exit(1)
 
+    # ── Client-side EPS filter (server-side param unreliable on this endpoint) ──
+    if eps_id:
+        before_count = len(all_servers)
+        all_servers = [s for s in all_servers if s.get("enterprise_project_id") == eps_id]
+        log(f"🔎 EPS filter: {before_count} → {len(all_servers)} server(s) matching EPS_ID={eps_id}")
+        
     # ── TSV output mode ───────────────────────────────────────────────────
     if tsv_mode:
         emitted = 0
