@@ -213,6 +213,10 @@ def main():
         before_count = len(all_servers)
         all_servers = [s for s in all_servers if s.get("enterprise_project_id") == eps_id]
         log(f"🔎 EPS filter: {before_count} → {len(all_servers)} server(s) matching EPS_ID={eps_id}")
+
+    for s in all_servers:
+        log(f"🐛 DEBUG server: name={s.get('name')} status={s.get('status')} "
+            f"addresses={s.get('addresses')}")
         
     # ── TSV output mode ───────────────────────────────────────────────────
     if tsv_mode:
