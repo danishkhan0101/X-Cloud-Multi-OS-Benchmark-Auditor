@@ -217,7 +217,8 @@ def main():
 
     for s in all_servers:
         log(f"🐛 DEBUG server: name={s.get('name')} status=[{s.get('status')}] "
-            f"addresses={s.get('addresses')}")
+        f"addresses={s.get('addresses')}")
+        log(f"🐛 DEBUG tags: {s.get('tags')!r}")
         
     # ── TSV output mode ───────────────────────────────────────────────────
     if tsv_mode:
