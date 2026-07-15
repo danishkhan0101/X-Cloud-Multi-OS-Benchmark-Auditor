@@ -221,36 +221,39 @@ def main():
         
     # ── TSV output mode ───────────────────────────────────────────────────
     if tsv_mode:
-        emitted = 0
-        for s in all_servers:
-            name = s.get("name") or "unknown_name"
-            status = str(s.get("status", "")).strip().upper()
-            if status not in ("ACTIVE", "RUNNING"):
-                continue
-            if not tag_matches(s, tag_key, tag_val):
-                continue
-            target_ip = get_target_ip(s)
-            if not target_ip:
-                continue
-            srv_id    = s.get("id") or "unknown_id"
-            meta      = s.get("metadata") or {}
-            os_type   = meta.get("os_type") or "Linux"
-            img_name  = (s.get("image") or {}).get("name") or "unknown_image"
+    emitted = 0
+    for s in all_servers:
+        name = s.get("name") or "unknown_name"
+        status = str(s.get("status", "")).strip().upper()
+        if status not in ("ACTIVE", "RUNNING"):
+            log(f"🐛 DROP [{name}]: status check failed, got status=[{status}]")
+            continue
+        if not tag_matches(s, tag_key, tag_val):
+            log(f"🐛 DROP [{name}]: tag_matches failed (tag_key={tag_key!r} tag_val={tag_val!r})")
+            continue
+        target_ip = get_target_ip(s)
+        log(f"🐛 get_target_ip returned: {target_ip!r} for [{name}]")
+        if not target_ip:
+            log(f"🐛 DROP [{name}]: target_ip empty")
+            continue
+        srv_id    = s.get("id") or "unknown_id"
+        meta      = s.get("metadata") or {}
+        os_type   = meta.get("os_type") or "Linux"
+        img_name  = (s.get("image") or {}).get("name") or "unknown_image"
 
-            # NEW: extract first attached security group ID
-            sg_list = s.get("security_groups") or []
-            sg_id = ""
-            if sg_list and isinstance(sg_list, list):
-                sg_id = sg_list[0].get("id", "") if isinstance(sg_list[0], dict) else ""
+        sg_list = s.get("security_groups") or []
+        sg_id = ""
+        if sg_list and isinstance(sg_list, list):
+            sg_id = sg_list[0].get("id", "") if isinstance(sg_list[0], dict) else ""
 
-            img_name = img_name.replace('\t', ' ').replace('\n', ' ')
-            name = name.replace('\t', ' ').replace('\n', ' ')
+        img_name = img_name.replace('\t', ' ').replace('\n', ' ')
+        name = name.replace('\t', ' ').replace('\n', ' ')
 
-            print(f"{os_type}\t{img_name}\t{name}\t{target_ip}\t{srv_id}\t{sg_id}")
-            emitted += 1
-            
-        log(f"✅ {emitted} ACTIVE server(s) emitted as TSV (endpoint: {endpoint})")
-        return
+        print(f"{os_type}\t{img_name}\t{name}\t{target_ip}\t{srv_id}\t{sg_id}")
+        emitted += 1
+
+    log(f"✅ {emitted} ACTIVE server(s) emitted as TSV (endpoint: {endpoint})")
+    return
 
     # ── JSON output mode (default) ────────────────────────────────────────
     if tag_key and tag_val:
