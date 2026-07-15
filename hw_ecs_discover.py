@@ -84,6 +84,7 @@ def tag_matches(server, tag_key, tag_val):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    log("🔖 hw_ecs_discover.py version-check: get_target_ip-v2-private-ip-filter")
     tsv_mode = "--tsv" in sys.argv
 
     # ── Validate required env vars ────────────────────────────────────────
@@ -140,8 +141,8 @@ def main():
         req.limit  = 100
 
         # Add the Enterprise Project ID filter if provided
-        # if eps_id:
-        #     req.enterprise_project_id = eps_id
+        if eps_id:
+            req.enterprise_project_id = eps_id
 
         resp = None
         last_err = None
