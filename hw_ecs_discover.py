@@ -173,6 +173,28 @@ def main():
             sys.exit(1)
 
         page = resp.servers or []
+        
+        # NEW: if this is the first page and it's suspiciously empty while
+        # scoped to an enterprise project, retry a few times before trusting it —
+        # the API has shown flaky empty-but-200 responses for this endpoint.
+        if offset == 0 and len(page) == 0 and eps_id:
+            empty_retry_ok = False
+            for retry_attempt in range(1, MAX_RETRIES + 1):
+                log(f"⚠️  Empty result on first page with EPS_ID set — "
+                    f"retry {retry_attempt}/{MAX_RETRIES} in {RETRY_DELAY_SEC}s")
+                time.sleep(RETRY_DELAY_SEC)
+                try:
+                    resp = client.list_servers_details(req)
+                    page = resp.servers or []
+                    if len(page) > 0:
+                        empty_retry_ok = True
+                        break
+                except exceptions.ClientRequestException:
+                    continue
+            if not empty_retry_ok:
+                log("⚠️  Still empty after retries — proceeding with empty result "
+                    "(may be genuinely empty, or a persistent API issue)")
+
         all_servers_raw.extend(page)
 
         if len(page) < 100:
