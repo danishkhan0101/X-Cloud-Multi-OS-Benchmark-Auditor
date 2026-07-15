@@ -1979,7 +1979,7 @@ run_remediation() {
                         "XML_FILE=\$(find /usr/share/xml/scap/ssg/content/ \
                              -name 'ssg-ubuntu*-ds.xml' | sort -V | tail -n 1)
                          EFFECTIVE_PROFILE='$UBUNTU_CIS_PROFILE'
-                         if [ '$OS_LVL' == '2' ] && ! oscap info \"\$XML_FILE\" 2>/dev/null | grep -q '$UBUNTU_CIS_PROFILE'; then
+                         if [ '$OS_LVL' == '2' ] && ! sudo oscap info \"\$XML_FILE\" 2>/dev/null | grep -q '$UBUNTU_CIS_PROFILE'; then
                              echo '[WARN] Level 2 profile not found — falling back to Level 1' >&2
                              EFFECTIVE_PROFILE='xccdf_org.ssgproject.content_profile_cis_level1_server'
                          fi
