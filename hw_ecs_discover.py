@@ -67,16 +67,20 @@ def tag_matches(server, tag_key, tag_val):
     """Return True if tag filtering is disabled, set to 'all', OR the server has the matching tag (case-insensitive)."""
     if not tag_key or not tag_val or tag_val.lower() == "all":
         return True
-    
+
     tag_key_lower = tag_key.lower()
     tag_val_lower = tag_val.lower()
-    
+
     raw_tags = server.get("tags") or []
     for t in raw_tags:
         if isinstance(t, dict):
             t_key = (t.get("key") or "").lower()
             t_val = (t.get("value") or "").lower()
             if t_key == tag_key_lower and t_val == tag_val_lower:
+                return True
+        elif isinstance(t, str) and "=" in t:
+            t_key, _, t_val = t.partition("=")
+            if t_key.strip().lower() == tag_key_lower and t_val.strip().lower() == tag_val_lower:
                 return True
     return False
 
