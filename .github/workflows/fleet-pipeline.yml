@@ -477,7 +477,6 @@ jobs:
           ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
 
       - name: '🔓 Extract Public Key'
-        if: matrix.os_target.os != 'Windows'
         run: |
           mkdir -p ~/.ssh
           ssh-add -L > ~/.ssh/id_rsa.pub
