@@ -690,22 +690,19 @@ check_windows_agent_alive() {
 # ======================================================
 ensure_windows_ghost_user() {
     local ip="$1"
-
     if ssh -n -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
            "${WIN_GHOST_USER}@${ip}" "echo SSH_OK" 2>/dev/null | grep -q SSH_OK; then
         echo -e "${GREEN}✅ [WinGhost] ${WIN_GHOST_USER} already provisioned on ${ip}${NC}"
         return 0
     fi
-
     echo -e "${CYAN}👤 [WinGhost] Provisioning ${WIN_GHOST_USER} on ${ip} via ${WIN_SSH_USER}...${NC}"
-
     local pub_key
     pub_key=$(cat ~/.ssh/id_rsa.pub)
-
     # Build the PowerShell script in a local file — no bash quoting involved at all
     local ps_script
     ps_script=$(mktemp /tmp/winghost_XXXXXX.ps1)
     cat > "$ps_script" <<PS1EOF
+\$ProgressPreference = 'SilentlyContinue'
 \$chars = [char[]]((48..57)+(65..90)+(97..122)+(33,35,36,37,38))
 \$pass = -join (\$chars | Get-Random -Count 24)
 \$secure = ConvertTo-SecureString \$pass -AsPlainText -Force
@@ -722,33 +719,26 @@ icacls 'C:\ProgramData\ssh\administrators_authorized_keys' /grant 'SYSTEM:F' | O
 Restart-Service sshd
 Write-Output 'GHOST_USER_READY'
 PS1EOF
-
     # Encode to UTF-16LE base64 (what -EncodedCommand requires)
     local encoded_cmd
     encoded_cmd=$(iconv -f UTF-8 -t UTF-16LE "$ps_script" | base64 -w 0)
     rm -f "$ps_script"
-
     local ssh_output
     ssh_output=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
         "${WIN_SSH_USER}@${ip}" "powershell -NoProfile -EncodedCommand ${encoded_cmd}" 2>&1)
-
-    echo -e "${CYAN}🔧 [WinGhost DEBUG] Raw output:${NC}"
-    echo "$ssh_output"
-
     echo "$ssh_output" | grep -q GHOST_USER_READY
     local rc=$?
     if [ $rc -ne 0 ]; then
         echo -e "${RED}❌ [WinGhost] Failed to provision ${WIN_GHOST_USER} on ${ip}${NC}"
+        echo -e "${RED}$ssh_output${NC}"
         return 1
     fi
-
     sleep 5
     if ! ssh -n -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
              "${WIN_GHOST_USER}@${ip}" "echo SSH_OK" 2>/dev/null | grep -q SSH_OK; then
         echo -e "${RED}❌ [WinGhost] ${WIN_GHOST_USER} still not reachable after provisioning on ${ip}${NC}"
         return 1
     fi
-
     echo -e "${GREEN}✅ [WinGhost] ${WIN_GHOST_USER} ready on ${ip}${NC}"
     return 0
 }
