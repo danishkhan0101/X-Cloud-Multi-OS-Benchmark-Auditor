@@ -457,6 +457,12 @@ jobs:
               sys.exit(1)
           PYEOF
 
+      - name: '🔑 Setup SSH Key (Windows)'
+        if: matrix.os_target.os == 'Windows'
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
+
       # ── SSH (Linux only) ────────────────────────────────────────────────
       # Key-only, for both clouds. Azure trusts the runner's public key via
       # `az vm run-command` (an out-of-band control-plane channel — see
