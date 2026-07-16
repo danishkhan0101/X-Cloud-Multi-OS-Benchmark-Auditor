@@ -39,6 +39,7 @@ RHEL_CUSTOM_PLAYBOOK="${RHEL_CUSTOM_DIR}/rhel_custom_playbook.yml"
 
 WIN_SSH_USER="${WIN_SSH_USER:-Administrator}"
 WIN_SERVER_ROLE="${WIN_SERVER_ROLE:-member_server}"
+WIN_GHOST_USER="${WIN_GHOST_USER:-svc_audit}"
 WIN_CUSTOM_DIR="${SCRIPT_DIR}/window-custom"
 WIN_CUSTOM_BENCHMARK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_baseline.rb"
 WIN_CUSTOM_PLAYBOOK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_remediate.yml"
@@ -428,13 +429,13 @@ run_win_ps1_remediation() {
 
     echo -e "${CYAN}📤 [WinPS1/${ip}] Uploading + running via SSH${NC}"
     scp -o BatchMode=yes -o StrictHostKeyChecking=no \
-        "$WIN_PS1_REMEDIATE" "${WIN_SSH_USER}@${ip}:C:/Windows/Temp/Invoke-CISRemediation-Combined.ps1"
+        "$WIN_PS1_REMEDIATE" "$WIN_GHOST_USER@${ip}:C:/Windows/Temp/Invoke-CISRemediation-Combined.ps1"
 
-    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "${WIN_SSH_USER}@${ip}" \
+    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "$WIN_GHOST_USER@${ip}" \
         "powershell -NoProfile -File C:\\Windows\\Temp\\Invoke-CISRemediation-Combined.ps1 -ServerRole '${WIN_SERVER_ROLE}'"
 
     local rc=$?
-    ssh -n "${WIN_SSH_USER}@${ip}" "Remove-Item C:\\Windows\\Temp\\Invoke-CISRemediation-Combined.ps1 -Force -ErrorAction SilentlyContinue" 2>/dev/null
+    ssh -n "$WIN_GHOST_USER@${ip}" "Remove-Item C:\\Windows\\Temp\\Invoke-CISRemediation-Combined.ps1 -Force -ErrorAction SilentlyContinue" 2>/dev/null
 
     [ $rc -eq 0 ] && echo -e "${GREEN}✅ [WinPS1/${ip}] Remediation complete${NC}" \
                   || echo -e "${RED}❌ [WinPS1/${ip}] Remediation failed (rc=${rc})${NC}"
@@ -650,7 +651,7 @@ detect_windows_version() {
     local ip="$1"
     local caption
     caption=$(ssh -n -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
-        "${WIN_SSH_USER}@${ip}" \
+        "${WIN_GHOST_USER}@${ip}" \
         "powershell -NoProfile -Command \"(Get-CimInstance Win32_OperatingSystem).Caption\"" 2>/dev/null \
         | grep -oE 'Windows (Server (2019|2022|2025)|1[01])' | head -1)
 
@@ -672,13 +673,68 @@ run_win_ssh() {
     local cmd="$2"
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ConnectTimeout=10 \
-        "${WIN_SSH_USER}@${ip}" "powershell -NoProfile -NonInteractive -Command \"${cmd}\""
+        "${WIN_GHOST_USER}@${ip}" "powershell -NoProfile -NonInteractive -Command \"${cmd}\""
+        
 }
 
 check_windows_agent_alive() {
     local ip="$1"
     ssh -n -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
-        "${WIN_SSH_USER}@${ip}" "echo ALIVE" 2>/dev/null | grep -q ALIVE
+        "${WIN_GHOST_USER}@${ip}" "echo ALIVE" 2>/dev/null | grep -q ALIVE
+}
+
+# ======================================================
+# HELPER: ensure_windows_ghost_user
+# Creates a dedicated local admin account for audit ops,
+# mirroring the Linux GHOST_USER pattern.
+# ======================================================
+ensure_windows_ghost_user() {
+    local ip="$1"
+
+    if ssh -n -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+           "${WIN_GHOST_USER}@${ip}" "echo SSH_OK" 2>/dev/null | grep -q SSH_OK; then
+        echo -e "${GREEN}✅ [WinGhost] ${WIN_GHOST_USER} already provisioned on ${ip}${NC}"
+        return 0
+    fi
+
+    echo -e "${CYAN}👤 [WinGhost] Provisioning ${WIN_GHOST_USER} on ${ip} via ${WIN_SSH_USER}...${NC}"
+
+    local pub_key
+    pub_key=$(cat ~/.ssh/id_rsa.pub)
+
+    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
+        "${WIN_SSH_USER}@${ip}" "powershell -NoProfile -Command \"
+        \\\$pass = [System.Web.Security.Membership]::GeneratePassword(24,4)
+        \\\$secure = ConvertTo-SecureString \\\$pass -AsPlainText -Force
+        if (-not (Get-LocalUser -Name '${WIN_GHOST_USER}' -ErrorAction SilentlyContinue)) {
+            New-LocalUser -Name '${WIN_GHOST_USER}' -Password \\\$secure -PasswordNeverExpires -AccountNeverExpires -ErrorAction Stop
+        }
+        Add-LocalGroupMember -Group 'Administrators' -Member '${WIN_GHOST_USER}' -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force -Path 'C:\\ProgramData\\ssh' | Out-Null
+        Add-Content -Path 'C:\\ProgramData\\ssh\\administrators_authorized_keys' -Value '${pub_key}'
+        Get-Content 'C:\\ProgramData\\ssh\\administrators_authorized_keys' | Select-Object -Unique | Set-Content 'C:\\ProgramData\\ssh\\administrators_authorized_keys'
+        icacls 'C:\\ProgramData\\ssh\\administrators_authorized_keys' /inheritance:r | Out-Null
+        icacls 'C:\\ProgramData\\ssh\\administrators_authorized_keys' /grant 'Administrators:F' | Out-Null
+        icacls 'C:\\ProgramData\\ssh\\administrators_authorized_keys' /grant 'SYSTEM:F' | Out-Null
+        Restart-Service sshd
+        Write-Output 'GHOST_USER_READY'
+    \"" 2>/dev/null | grep -q GHOST_USER_READY
+
+    local rc=$?
+    if [ $rc -ne 0 ]; then
+        echo -e "${RED}❌ [WinGhost] Failed to provision ${WIN_GHOST_USER} on ${ip}${NC}"
+        return 1
+    fi
+
+    sleep 5
+    if ! ssh -n -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+             "${WIN_GHOST_USER}@${ip}" "echo SSH_OK" 2>/dev/null | grep -q SSH_OK; then
+        echo -e "${RED}❌ [WinGhost] ${WIN_GHOST_USER} still not reachable after provisioning on ${ip}${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}✅ [WinGhost] ${WIN_GHOST_USER} ready on ${ip}${NC}"
+    return 0
 }
 
 # ======================================================
@@ -729,7 +785,7 @@ reboot_windows_host() {
     fi
 
     echo -e "${GREEN}✅ [Reboot/${ip}] Guest agent alive — OS booted${NC}"
-    wait_for_ssh "$ip" "$WIN_SSH_USER" || echo -e "${YELLOW}⚠️  [Reboot/${ip}] SSH not open yet (will retry at scan time)${NC}"
+    wait_for_ssh "$ip" "$WIN_GHOST_USER" || echo -e "${YELLOW}⚠️  [Reboot/${ip}] SSH not open yet (will retry at scan time)${NC}"
     return 0
 }
 
@@ -1271,8 +1327,12 @@ fi
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
     for ip in "${WINDOWS_MACHINES[@]}"; do
         (
-            wait_for_ssh "$ip" "$WIN_SSH_USER" || \
+            wait_for_ssh "$ip" "$WIN_SSH_USER" || {
                 echo -e "${RED}❌ [Win Bootstrap] SSH unreachable: $ip${NC}"
+                exit 1
+            }
+            ensure_windows_ghost_user "$ip" || \
+                echo -e "${RED}❌ [Win Bootstrap] Ghost user provisioning failed: $ip${NC}"
         ) &
     done
 fi
@@ -1299,7 +1359,7 @@ for ip in "${ALMA_MACHINES[@]}"; do
 done
 echo -e "\n[windows_nodes]" >> inventory.ini
 for ip in "${WINDOWS_MACHINES[@]}"; do
-    echo "${ip} ansible_user=${WIN_SSH_USER} ansible_connection=ssh \
+    echo "${ip} ansible_user=${WIN_GHOST_USER} ansible_connection=ssh \
 ansible_shell_type=powershell ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
     >> inventory.ini
 done
@@ -1646,14 +1706,14 @@ run_phase_1() {
             }
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
-                    wait_for_ssh "$IP" "$WIN_SSH_USER" || {
+                    wait_for_ssh "$IP" "${WIN_GHOST_USER}" || {
                         echo -e "${RED}❌ [Phase1/Win] SSH unreachable: $IP — skipping${NC}"
                         exit 1
                     }
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
-                            -t "ssh://${WIN_SSH_USER}@${IP}" \
+                            -t "ssh://${WIN_GHOST_USER}@${IP}" \
                             --input "server_role=${WIN_SERVER_ROLE}" \
                             --input "profile_level=${WIN_INSPEC_LVL}" \
                             --reporter "json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
@@ -1667,7 +1727,7 @@ run_phase_1() {
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
-                            -t "ssh://${WIN_SSH_USER}@${IP}" \
+                            -t "ssh://${WIN_GHOST_USER}@${IP}" \
                             --reporter "json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json"
                         rc=$?
                         case $rc in
@@ -1978,7 +2038,7 @@ run_remediation() {
             if [ "$RUN_CIS" == true ]; then
                 for IP in "${WINDOWS_MACHINES[@]}"; do
                     (
-                        wait_for_ssh "$IP" "$WIN_SSH_USER" || {
+                        wait_for_ssh "$IP" "${WIN_GHOST_USER}" || {
                             echo -e "${RED}❌ [Remediation/Win] SSH unreachable: $IP${NC}"
                             exit 1
                         }
@@ -2292,14 +2352,14 @@ run_phase_4() {
                         echo -e "${RED}⏭️  [Phase4/Win] ${IP} flagged hung after remediation — skipping verify scan${NC}"
                         exit 0
                     fi
-                    wait_for_ssh "$IP" "$WIN_SSH_USER" || {
+                    wait_for_ssh "$IP" "$WIN_GHOST_USER" || {
                         echo -e "${RED}❌ [Phase4/Win] SSH unreachable on ${IP} — skipping${NC}"
                         exit 1
                     }
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
-                            -t "ssh://${WIN_SSH_USER}@${IP}" \
+                            -t "ssh://${WIN_GHOST_USER}@${IP}" \
                             --input "server_role=${WIN_SERVER_ROLE}" \
                             --input "profile_level=${WIN_INSPEC_LVL}" \
                             --reporter "json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
@@ -2313,7 +2373,7 @@ run_phase_4() {
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
-                            -t "ssh://${WIN_SSH_USER}@${IP}" \
+                            -t "ssh://${WIN_GHOST_USER}@${IP}" \
                             --reporter "json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json"
                         rc=$?
                         case $rc in
