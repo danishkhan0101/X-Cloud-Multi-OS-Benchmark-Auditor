@@ -13,12 +13,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ORG_NAME="${ORG_NAME:-Custom}"
 ORG_PREFIX="${ORG_PREFIX:-custom}"
-GHOST_USER="${GHOST_USER:-audit_ghost}"
 CUSTOM_XCCDF_PROFILE="${CUSTOM_XCCDF_PROFILE:-xccdf_com.org_profile_lsb}"
 RG_NAME="${AZURE_RG_NAME:-DEFAULT_RG}"
-KV_NAME="${AZURE_KV_NAME:-YOUR-KEYVAULT-NAME}"
-SECRET_NAME="${AZURE_KV_SECRET:-AuditPassword}"
-AUDIT_USER="${WINDOWS_ADMIN_USER:-Windows_Admin}"
+
 
 CLOUD_PROVIDER="${CLOUD_PROVIDER:-azure}"
 
@@ -26,21 +23,10 @@ HW_REGION="${HW_REGION:-ap-southeast-1}"
 HW_PROJECT_ID="${HW_PROJECT_ID:-}"
 HW_ECS_TAG_KEY="${HW_ECS_TAG_KEY:-Environment}"
 HW_ECS_TAG_VAL="${HW_ECS_TAG_VAL:-}"
-HW_CSMS_SECRET="${HW_CSMS_SECRET:-AuditPassword}"
 HW_VPC_ID="${HW_VPC_ID:-}"
 HW_ECS_ENDPOINT="${HW_ECS_ENDPOINT:-https://ecs.${HW_REGION}.alphaedge.tmone.com.my}"
 HW_VPC_ENDPOINT="${HW_VPC_ENDPOINT:-https://vpc.${HW_REGION}.alphaedge.tmone.com.my}"
 
-
-WIN_SERVER_ROLE="${WIN_SERVER_ROLE:-member_server}"
-WIN_REBOOT_AFTER_REMEDIATION="${WIN_REBOOT_AFTER_REMEDIATION:-true}"
-WIN_REBOOT_SETTLE_SEC="${WIN_REBOOT_SETTLE_SEC:-45}"
-WIN_AGENT_PROBE_SEC="${WIN_AGENT_PROBE_SEC:-180}"
-WIN_REBOOT_HEALTH_WAIT_SEC="${WIN_REBOOT_HEALTH_WAIT_SEC:-360}"
-WIN_SCAN_TIMEOUT_SEC="${WIN_SCAN_TIMEOUT_SEC:-1200}"
-
-# FIX: Use absolute paths based on SCRIPT_DIR so working-directory shifts
-#      in CI/CD never cause "playbook not found" silent failures
 UBUNTU_CUSTOM_DIR="${SCRIPT_DIR}/ubuntu-custom"
 UBUNTU_CUSTOM_XCCDF="${UBUNTU_CUSTOM_DIR}/${ORG_PREFIX}_xccdf.xml"
 UBUNTU_CUSTOM_OVAL="${UBUNTU_CUSTOM_DIR}/${ORG_PREFIX}_ubuntu_rules.xml"
@@ -51,6 +37,7 @@ RHEL_CUSTOM_XCCDF="${RHEL_CUSTOM_DIR}/${ORG_PREFIX}_rhel_xccdf.xml"
 RHEL_CUSTOM_OVAL="${RHEL_CUSTOM_DIR}/${ORG_PREFIX}_rhel_rules.xml"
 RHEL_CUSTOM_PLAYBOOK="${RHEL_CUSTOM_DIR}/rhel_custom_playbook.yml"
 
+WIN_SSH_USER="${WINDOWS_SSH_USER:-Administrator}"
 WIN_CUSTOM_DIR="${SCRIPT_DIR}/window-custom"
 WIN_CUSTOM_BENCHMARK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_baseline.rb"
 WIN_CUSTOM_PLAYBOOK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_remediate.yml"
@@ -58,6 +45,11 @@ WIN_CUSTOM_PLAYBOOK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_remediate.yml"
 WIN_CIS_DIR="${SCRIPT_DIR}/window-default-cis"
 WIN_CIS_BENCHMARK="${WIN_CIS_DIR}/window-baseline"
 WIN_PS1_REMEDIATE="${WIN_CIS_BENCHMARK}/Invoke-CISRemediation-Combined.ps1"
+
+WIN_REBOOT_SETTLE_SEC="${WIN_REBOOT_SETTLE_SEC:-45}"
+WIN_REBOOT_HEALTH_WAIT_SEC="${WIN_REBOOT_HEALTH_WAIT_SEC:-360}"
+WIN_SCAN_TIMEOUT_SEC="${WIN_SCAN_TIMEOUT_SEC:-1200}"
+WIN_REBOOT_AFTER_REMEDIATION="${WIN_REBOOT_AFTER_REMEDIATION:-true}"
 
 export INSPEC_SSH_CONFIG_NO_SECURE=true
 BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -432,43 +424,18 @@ run_win_ps1_remediation() {
         return 1
     fi
 
-    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
-    if [ -z "$vm_name" ]; then
-        echo -e "${RED}❌ [WinPS1] No VM name mapped for IP ${ip}${NC}"
-        return 1
-    fi
+    echo -e "${CYAN}📤 [WinPS1/${ip}] Uploading + running via SSH${NC}"
+    scp -o BatchMode=yes -o StrictHostKeyChecking=no \
+        "$WIN_PS1_REMEDIATE" "${WIN_SSH_USER}@${ip}:C:/Windows/Temp/Invoke-CISRemediation-Combined.ps1"
 
-    local sections_arg=""
-    if [ -n "$sections" ]; then
-        local quoted
-        quoted=$(echo "$sections" | tr ' ' '\n' | awk '{printf "\"%s\",",$0}' | sed 's/,$//')
-        sections_arg="-Sections @(${quoted})"
-    fi
-
-    echo -e "${CYAN}📤 [WinPS1/${ip}] Uploading + running Invoke-CISRemediation-Combined.ps1${NC}"
-
-    local encoded_main
-    encoded_main=$(base64 -w0 < "$WIN_PS1_REMEDIATE")
-
-    cloud_vm_run_powershell "$ip" "
-\$ErrorActionPreference = 'Continue'
-[IO.File]::WriteAllBytes('C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1',
-    [Convert]::FromBase64String('${encoded_main}'))
-& 'C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1' \`
-    -ServerRole '${WIN_SERVER_ROLE}' \`
-    ${sections_arg}
-Remove-Item 'C:\Windows\Temp\Invoke-CISRemediation-Combined.ps1' \`
-    -Force -ErrorAction SilentlyContinue
-" 2>/dev/null
+    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "${WIN_SSH_USER}@${ip}" \
+        "powershell -NoProfile -File C:\\Windows\\Temp\\Invoke-CISRemediation-Combined.ps1 -ServerRole '${WIN_SERVER_ROLE}'"
 
     local rc=$?
-    if [ $rc -eq 0 ]; then
-        echo -e "${GREEN}✅ [WinPS1/${ip}] PS1 remediation complete (role=${WIN_SERVER_ROLE})${NC}"
-    elif [ $rc -eq 1 ] && [ "${CLOUD_PROVIDER}" == "huaweicloud" ]; then
-        echo -e "${RED}❌ [WinPS1/${ip}] PS1 remediation via agent channel not available on Huawei Cloud.${NC}"
-    else
-        echo -e "${RED}❌ [WinPS1/${ip}] run-command failed (rc=${rc})${NC}"
-    fi
+    ssh -n "${WIN_SSH_USER}@${ip}" "Remove-Item C:\\Windows\\Temp\\Invoke-CISRemediation-Combined.ps1 -Force -ErrorAction SilentlyContinue" 2>/dev/null
+
+    [ $rc -eq 0 ] && echo -e "${GREEN}✅ [WinPS1/${ip}] Remediation complete${NC}" \
+                  || echo -e "${RED}❌ [WinPS1/${ip}] Remediation failed (rc=${rc})${NC}"
     return $rc
 }
 
@@ -679,18 +646,11 @@ scp_custom_content_rhel() {
 # ======================================================
 detect_windows_version() {
     local ip="$1"
-    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
-    local caption=""
-
-    caption=$(ansible -i inventory.ini "${ip}" -m ansible.windows.win_shell \
-        -a '(Get-CimInstance Win32_OperatingSystem).Caption' \
-        2>/dev/null | grep -oE 'Windows (Server (2019|2022|2025)|1[01])' | head -1)
-
-    if [ -z "$caption" ] && [ -n "$vm_name" ]; then
-        caption=$(cloud_vm_run_powershell "$ip" \
-            '(Get-CimInstance Win32_OperatingSystem).Caption' 2>/dev/null \
-            | grep -oE 'Windows (Server (2019|2022|2025)|1[01])' | head -1)
-    fi
+    local caption
+    caption=$(ssh -n -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+        "${WIN_SSH_USER}@${ip}" \
+        "powershell -NoProfile -Command \"(Get-CimInstance Win32_OperatingSystem).Caption\"" 2>/dev/null \
+        | grep -oE 'Windows (Server (2019|2022|2025)|1[01])' | head -1)
 
     case "$caption" in
         *"Server 2019"*) echo "2019" ;;
@@ -705,72 +665,18 @@ detect_windows_version() {
     esac
 }
 
-WINRM_REOPEN_BASIC="${WINRM_REOPEN_BASIC:-true}"
-
-# ======================================================
-# HELPER: check_windows_agent_alive
-# ======================================================
-check_windows_agent_alive() {
+run_win_ssh() {
     local ip="$1"
-    local out
-    out=$(cloud_vm_run_powershell "$ip" 'Write-Output "AGENT_ALIVE"' 2>/dev/null)
-    local rc=$?
-    [ $rc -ne 0 ] && return 1
-    [[ "$out" == *"AGENT_ALIVE"* ]] && return 0 || return 1
+    local cmd="$2"
+    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o ConnectTimeout=10 \
+        "${WIN_SSH_USER}@${ip}" "powershell -NoProfile -NonInteractive -Command \"${cmd}\""
 }
 
-# ======================================================
-# HELPER: ensure_winrm_powershell
-# ======================================================
-ensure_winrm_powershell() {
+check_windows_agent_alive() {
     local ip="$1"
-    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
-    if [ -z "$vm_name" ]; then
-        echo -e "${YELLOW}⚠️  [WinRM-Heal] No VM name mapped for ${ip} — skipping repair${NC}"
-        return 1
-    fi
-
-    local reopen_block=""
-    if [ "${WINRM_REOPEN_BASIC}" == "true" ]; then
-        reopen_block="
-\$svc = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service'
-if (-not (Test-Path \$svc)) { New-Item -Path \$svc -Force | Out-Null }
-New-ItemProperty -Path \$svc -Name 'AllowBasic'              -Value 1 -PropertyType DWord -Force | Out-Null
-New-ItemProperty -Path \$svc -Name 'AllowUnencryptedTraffic' -Value 1 -PropertyType DWord -Force | Out-Null
-New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'LocalAccountTokenFilterPolicy' -Value 1 -PropertyType DWord -Force | Out-Null
-winrm set winrm/config/service/auth '@{Basic=\"true\"}'          2>&1 | Out-Null
-winrm set winrm/config/service      '@{AllowUnencrypted=\"true\"}' 2>&1 | Out-Null
-"
-    fi
-
-    echo -e "${CYAN}🩺 [WinRM-Heal/${ip}] Re-registering PowerShell provider + restoring shell limits...${NC}"
-    cloud_vm_run_powershell "$ip" "
-\$ErrorActionPreference = 'Continue'
-Set-Service WinRM -StartupType Automatic -ErrorAction SilentlyContinue
-Start-Service WinRM -ErrorAction SilentlyContinue
-winrm quickconfig -quiet -force 2>&1 | Out-Null
-try { Register-PSSessionConfiguration -Name 'Microsoft.PowerShell' -Force -ErrorAction Stop | Out-Null }
-catch { Enable-PSRemoting -SkipNetworkProfileCheck -Force -ErrorAction SilentlyContinue | Out-Null }
-winrm set winrm/config/winrs '@{MaxShellsPerUser=\"30\"}'    2>&1 | Out-Null
-winrm set winrm/config/winrs '@{MaxConcurrentUsers=\"10\"}'  2>&1 | Out-Null
-winrm set winrm/config/winrs '@{MaxMemoryPerShellMB=\"1024\"}' 2>&1 | Out-Null
-${reopen_block}
-Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' -Enabled True -Profile Any -ErrorAction SilentlyContinue
-Restart-Service WinRM -Force -ErrorAction SilentlyContinue
-Write-Output 'WinRM PowerShell provider re-initialized'
-" >/dev/null 2>&1
-
-    local rc=$?
-    if [ $rc -eq 0 ]; then
-        echo -e "${GREEN}✅ [WinRM-Heal/${ip}] provider re-registered${NC}"
-    elif [ $rc -eq 124 ]; then
-        echo -e "${RED}❌ [WinRM-Heal/${ip}] agent did not respond within ${WIN_AGENT_PROBE_SEC}s${NC}"
-        return 1
-    else
-        echo -e "${YELLOW}⚠️  [WinRM-Heal/${ip}] az run-command rc=${rc} (continuing)${NC}"
-    fi
-    sleep 5
-    return 0
+    ssh -n -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+        "${WIN_SSH_USER}@${ip}" "echo ALIVE" 2>/dev/null | grep -q ALIVE
 }
 
 # ======================================================
@@ -823,8 +729,7 @@ reboot_windows_host() {
     fi
 
     echo -e "${GREEN}✅ [Reboot/${ip}] Guest agent alive — OS booted${NC}"
-    ensure_winrm_powershell "$ip"
-    wait_for_winrm "$ip" || echo -e "${YELLOW}⚠️  [Reboot/${ip}] WinRM port not open yet (will retry at scan time)${NC}"
+    wait_for_ssh "$ip" "$WIN_SSH_USER" || echo -e "${YELLOW}⚠️  [Reboot/${ip}] SSH not open yet (will retry at scan time)${NC}"
     return 0
 }
 
@@ -834,76 +739,9 @@ reboot_windows_host() {
 remediate_windows_host() {
     local ip="$1"
     local cis_level="$2"
-
-    echo -e "${CYAN}🔍 [Win] Detecting OS version on ${ip}...${NC}"
-    local ver
-    ver=$(detect_windows_version "$ip")
-
-    if [ "$ver" == "unknown" ]; then
-        echo -e "${RED}❌ [Win] Could not detect OS version on ${ip} — skipping${NC}"
-        return 1
-    fi
-    echo -e "${CYAN}   → Detected: Windows ${ver}${NC}"
-
-    local role_name role_install_target playbook_file tag_scope_l1
-    case "$ver" in
-        2019) role_name="ansible-lockdown.windows_2019_cis"
-              role_install_target="ansible-lockdown.windows_2019_cis"
-              playbook_file="${SCRIPT_DIR}/window-default-cis/cis_remediate_2019.yml"
-              tag_scope_l1="level1-memberserver" ;;
-        2022) role_name="ansible-lockdown.windows_2022_cis"
-              role_install_target="ansible-lockdown.windows_2022_cis"
-              playbook_file="${SCRIPT_DIR}/window-default-cis/cis_remediate_2022.yml"
-              tag_scope_l1="level1-memberserver" ;;
-        2025) role_name="Windows-2025-CIS"
-              role_install_target="git+https://github.com/ansible-lockdown/Windows-2025-CIS.git"
-              playbook_file="${SCRIPT_DIR}/window-default-cis/cis_remediate_2025.yml"
-              tag_scope_l1="level1-memberserver" ;;
-        10)   role_name="ansible-lockdown.windows_10_cis"
-              role_install_target="ansible-lockdown.windows_10_cis"
-              playbook_file="${SCRIPT_DIR}/window-default-cis/cis_remediate_win10.yml"
-              tag_scope_l1="level1-corporate-enterprise-environment" ;;
-        11)   role_name="ansible-lockdown.windows_11_cis"
-              role_install_target="ansible-lockdown.windows_11_cis"
-              playbook_file="${SCRIPT_DIR}/window-default-cis/cis_remediate_win11.yml"
-              tag_scope_l1="level1-corporate-enterprise-environment" ;;
-    esac
-
-    if [ ! -f "$playbook_file" ]; then
-        echo -e "${RED}❌ [Win/${ver}] Playbook missing: ${playbook_file}${NC}"
-        echo -e "${YELLOW}   Falling back to PS1 remediation...${NC}"
-        run_win_ps1_remediation "$ip" "$cis_level"
-        return $?
-    fi
-
-    echo -e "${CYAN}📦 [Win/${ver}] Installing role: ${role_name}...${NC}"
-    ansible-galaxy role install -f "$role_install_target"
-
-    local tags
-    if [ "$cis_level" == "Level 2" ]; then
-        if [ "$ver" -ge 10 ] 2>/dev/null && [ "$ver" -le 11 ] 2>/dev/null; then
-            tags="level1-corporate-enterprise-environment,level2-corporate-enterprise-environment"
-        else
-            tags="level1-memberserver,level2-memberserver"
-        fi
-    else
-        tags="$tag_scope_l1"
-    fi
-
-    echo -e "${CYAN}🛠️  [Win/${ver}] Running ${playbook_file} (tags: ${tags})...${NC}"
-    ANSIBLE_HOST_KEY_CHECKING=False \
-        ansible-playbook -i inventory.ini "$playbook_file" \
-        --limit "$ip" \
-        --tags "$tags"
-    local rc=$?
-    if [ $rc -eq 0 ]; then
-        echo -e "${GREEN}✅ [Win/${ver}] ${ip} completed successfully${NC}"
-    else
-        echo -e "${RED}❌ [Win/${ver}] Ansible failed (rc=${rc}) — falling back to PS1 remediation${NC}"
-        run_win_ps1_remediation "$ip" "$cis_level"
-        rc=$?
-    fi
-    return $rc
+    echo -e "${CYAN}🛠️  [Win] Remediating ${ip} via SSH+PS1 (Level: ${cis_level})...${NC}"
+    run_win_ps1_remediation "$ip" "$cis_level"
+    return $?
 }
 
 # ======================================================
@@ -954,29 +792,6 @@ wait_for_ssh() {
         count=$((count+1))
         if [ $count -ge 12 ]; then echo "❌ Timeout waiting for $ip"; return 1; fi
         sleep 10
-    done
-}
-# ======================================================
-# HELPER: wait_for_winrm
-# ======================================================
-WINRM_TIMEOUT_SEC="${WINRM_TIMEOUT_SEC:-180}"
-WINRM_RETRY_INTERVAL="${WINRM_RETRY_INTERVAL:-10}"
-
-wait_for_winrm() {
-    local ip="$1"
-    local elapsed=0
-    echo -e "${CYAN}⏳ [WinRM] Waiting for port 5985 on ${ip} (max ${WINRM_TIMEOUT_SEC}s)...${NC}"
-    while true; do
-        if bash -c ">/dev/tcp/${ip}/5985" 2>/dev/null; then
-            echo -e "${GREEN}✅ [WinRM] ${ip} accepting connections (${elapsed}s elapsed)${NC}"
-            return 0
-        fi
-        if [ "$elapsed" -ge "$WINRM_TIMEOUT_SEC" ]; then
-            echo -e "${RED}❌ [WinRM] Timeout after ${WINRM_TIMEOUT_SEC}s on ${ip}:5985${NC}"
-            return 1
-        fi
-        sleep "$WINRM_RETRY_INTERVAL"
-        elapsed=$((elapsed + WINRM_RETRY_INTERVAL))
     done
 }
 
@@ -1090,27 +905,6 @@ reassert_ssh_rule_all_linux() {
     done
 }
 
-cloud_vm_run_powershell() {
-    local ip="$1"
-    local script="$2"
-    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
-
-    case "${CLOUD_PROVIDER}" in
-    azure)
-        [ -z "$vm_name" ] && return 1
-        timeout "${WIN_AGENT_PROBE_SEC}" az vm run-command invoke \
-            -g "$RG_NAME" -n "$vm_name" \
-            --command-id RunPowerShellScript \
-            --scripts "$script" \
-            --query 'value[0].message' -o tsv 2>/dev/null
-        return $?
-        ;;
-    huaweicloud)
-        echo -e "${YELLOW}⚠️  [HW] Agent-channel PowerShell not available on Huawei Cloud.${NC}" >&2
-        return 1
-        ;;
-    esac
-}
 
 # ======================================================
 # HELPER: cloud_vm_run_shell
@@ -1250,39 +1044,6 @@ if [ "$HEADLESS" == true ]; then
     if [ "$DEBUG_MODE" == "true" ]; then set -x; fi
 fi
 
-if [ -z "$AUDIT_PASS" ]; then
-    case "${CLOUD_PROVIDER}" in
-        azure)
-            echo -e "${YELLOW}🔐 [Azure] Fetching credentials from KeyVault (${KV_NAME})...${NC}"
-            az login --identity --allow-no-subscriptions > /dev/null 2>&1 || true
-            AUDIT_PASS=$(az keyvault secret show \
-                --name "$SECRET_NAME" \
-                --vault-name "$KV_NAME" \
-                --query value -o tsv 2>/dev/null | tr -d '\r\n')
-            ;;
-        huaweicloud)
-            echo -e "${YELLOW}🔐 [HuaweiCloud] Fetching credentials from CSMS (${HW_CSMS_SECRET})...${NC}"
-            AUDIT_PASS=$(hcloud CSMS ShowSecretVersion \
-                --secret-name "${HW_CSMS_SECRET}" \
-                --version-id "latest" \
-                --cli-region "${HW_REGION}" \
-                --cli-output json 2>/dev/null \
-                | python3 -c "
-import json,sys
-d=json.load(sys.stdin)
-print(d.get('version',{}).get('secret_string',''))
-" | tr -d '\r\n')
-            if [ -z "$AUDIT_PASS" ]; then
-                echo -e "${YELLOW}   CSMS fetch returned empty — expecting AUDIT_PASS env var${NC}"
-            fi
-            ;;
-    esac
-fi
-
-if [ -z "$AUDIT_PASS" ]; then
-    echo -e "${RED}❌ ERROR: Failed to retrieve password from KeyVault. Aborting.${NC}"
-    exit 1
-fi
 
 # ======================================================
 # SSH MULTIPLEXING
@@ -1512,31 +1273,9 @@ fi
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
     for ip in "${WINDOWS_MACHINES[@]}"; do
         (
-            VM_NAME="${IP_TO_VM_NAME[$ip]}"
-            cloud_add_port_rule "$ip" 5985 "Allow_WinRM_Runner_Only"
-            cloud_vm_run_powershell "$ip" "
-Remove-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM' \
-    -Recurse -Force -ErrorAction SilentlyContinue
-net user ${AUDIT_USER} '${AUDIT_PASS}' /add /y 2>&1 | Out-Null
-net user ${AUDIT_USER} '${AUDIT_PASS}' 2>&1 | Out-Null
-net localgroup Administrators ${AUDIT_USER} /add 2>&1 | Out-Null
-WMIC USERACCOUNT WHERE Name='${AUDIT_USER}' SET PasswordExpires=FALSE 2>&1 | Out-Null
-Enable-PSRemoting -SkipNetworkProfileCheck -Force
-winrm quickconfig -quiet -force 2>&1 | Out-Null
-try { Register-PSSessionConfiguration -Name 'Microsoft.PowerShell' -Force -ErrorAction Stop | Out-Null } catch {}
-winrm set winrm/config/winrs '@{MaxShellsPerUser=\"30\"}' 2>&1 | Out-Null
-winrm set winrm/config/winrs '@{MaxMemoryPerShellMB=\"1024\"}' 2>&1 | Out-Null
-winrm set winrm/config/service/auth '@{Basic=\"true\"}'
-winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'
-New-ItemProperty -Name LocalAccountTokenFilterPolicy \
-    -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System \
-    -PropertyType DWord -Value 1 -Force
-Set-NetFirewallRule -DisplayGroup 'Windows Remote Management' \
-    -Enabled True -Profile Any -ErrorAction SilentlyContinue
-Restart-Service WinRM -Force" || true
-            sleep 20
+            wait_for_ssh "$ip" "$WIN_SSH_USER" || \
+                echo -e "${RED}❌ [Win Bootstrap] SSH unreachable: $ip${NC}"
         ) &
-        WIN_BOOTSTRAP_PIDS+=($!)
     done
 fi
 wait
@@ -1571,10 +1310,9 @@ for ip in "${ALMA_MACHINES[@]}"; do
 done
 echo -e "\n[windows_nodes]" >> inventory.ini
 for ip in "${WINDOWS_MACHINES[@]}"; do
-    echo "${ip} ansible_user=${AUDIT_USER} ansible_password=\"${AUDIT_PASS}\" \
-ansible_port=5985 ansible_winrm_scheme=http ansible_connection=winrm \
-ansible_winrm_transport=basic ansible_winrm_server_cert_validation=ignore" \
-        >> inventory.ini
+    echo "${ip} ansible_user=${WIN_SSH_USER} ansible_connection=ssh \
+ansible_shell_type=powershell ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
+    >> inventory.ini
 done
 
 RUN_ORG=false; RUN_CIS=false
@@ -1927,9 +1665,7 @@ run_phase_1() {
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
-                            -t "winrm://${IP}" \
-                            --user="${AUDIT_USER}" \
-                            --password="${AUDIT_PASS}" \
+                            -t "ssh://${WIN_SSH_USER}@${IP}" \
                             --input "server_role=${WIN_SERVER_ROLE}" \
                             --input "profile_level=${WIN_INSPEC_LVL}" \
                             --reporter "json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
@@ -1943,9 +1679,7 @@ run_phase_1() {
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/${ORG_PREFIX^^}] Scanning $IP...${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
-                            -t "winrm://${IP}" \
-                            --user="${AUDIT_USER}" \
-                            --password="${AUDIT_PASS}" \
+                            -t "ssh://${WIN_SSH_USER}@${IP}" \
                             --reporter "json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json"
                         rc=$?
                         case $rc in
@@ -2256,20 +1990,11 @@ run_remediation() {
             if [ "$RUN_CIS" == true ]; then
                 for IP in "${WINDOWS_MACHINES[@]}"; do
                     (
-                        local _saved_timeout=$WINRM_TIMEOUT_SEC
-                        WINRM_TIMEOUT_SEC=300
-                        wait_for_winrm "$IP" || {
-                            echo -e "${RED}❌ [Remediation/Win] WinRM unreachable after 300s: $IP${NC}"
-                            ensure_winrm_powershell "$IP"
-                            WINRM_TIMEOUT_SEC=120
-                            wait_for_winrm "$IP" || {
-                                echo -e "${RED}❌ [Remediation/Win] WinRM still down after repair — skipping${NC}"
-                                WINRM_TIMEOUT_SEC=$_saved_timeout
-                                exit 1
-                            }
+                        wait_for_ssh "$ip" "$WIN_SSH_USER" || {
+                            echo -e "${RED}❌ [Remediation/Win] SSH unreachable: $ip${NC}"
+                            exit 1
                         }
-                        WINRM_TIMEOUT_SEC=$_saved_timeout
-                        remediate_windows_host "$IP" "$CIS_LEVEL"
+                        remediate_windows_host "$ip" "$CIS_LEVEL"
                     ) &
                 done
                 wait
@@ -2606,9 +2331,7 @@ run_phase_4() {
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
-                            -t "winrm://${IP}" \
-                            --user="${AUDIT_USER}" \
-                            --password="${AUDIT_PASS}" \
+                            -t "ssh://${WIN_SSH_USER}@${IP}" \
                             --input "server_role=${WIN_SERVER_ROLE}" \
                             --input "profile_level=${WIN_INSPEC_LVL}" \
                             --reporter "json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
@@ -2622,10 +2345,8 @@ run_phase_4() {
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
-                            -t "winrm://${IP}" \
-                            --user="${AUDIT_USER}" \
-                            --password="${AUDIT_PASS}" \
-                            --reporter "json:heimdall_after_${ORG_PREFIX^^}_WIN_${IP}.json"
+                            -t "ssh://${WIN_SSH_USER}@${IP}" \
+                            --reporter "json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json"
                         rc=$?
                         case $rc in
                             0|100|101) echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] $IP verify complete (rc=$rc)${NC}" ;;
