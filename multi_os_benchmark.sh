@@ -38,6 +38,7 @@ RHEL_CUSTOM_OVAL="${RHEL_CUSTOM_DIR}/${ORG_PREFIX}_rhel_rules.xml"
 RHEL_CUSTOM_PLAYBOOK="${RHEL_CUSTOM_DIR}/rhel_custom_playbook.yml"
 
 WIN_SSH_USER="${WIN_SSH_USER:-Administrator}"
+WIN_SERVER_ROLE="${WIN_SERVER_ROLE:-Member Server}"
 WIN_CUSTOM_DIR="${SCRIPT_DIR}/window-custom"
 WIN_CUSTOM_BENCHMARK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_baseline.rb"
 WIN_CUSTOM_PLAYBOOK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_remediate.yml"
@@ -1112,7 +1113,6 @@ azure)
         os=$(echo "$raw_os"         | tr -d '\r' | xargs)
         power=$(echo "$raw_power"   | tr -d '\r' | xargs)
         offer=$(echo "$raw_offer"   | tr -d '\r' | xargs)
-        IP_TO_VM_ID["$ip"]="$vm_name"
         _map_vm "$vm_name" "$ip" "$os" "$power" "$offer"
     done <<< "$VM_DATA"
     ;;
