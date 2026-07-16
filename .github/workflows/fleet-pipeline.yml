@@ -368,7 +368,6 @@ jobs:
       # ── Huawei Cloud ───────────────────────────────────────────────────
       HW_REGION:              ${{ vars.HW_REGION || 'my-kualalumpur-1' }}
       HW_PROJECT_ID:          ${{ vars.HW_PROJECT_ID }}
-      HW_CSMS_SECRET:         ${{ vars.HW_CSMS_SECRET || 'AuditPassword' }}
       HW_ECS_TAG_KEY:         ${{ vars.HW_ECS_TAG_KEY || '' }}
       HW_ECS_TAG_VAL:         ${{ github.event.inputs.environment_tag == 'all' && '' || github.event.inputs.environment_tag }}
       HW_VPC_ID:              ${{ vars.HW_VPC_ID }}
@@ -383,13 +382,12 @@ jobs:
       HW_ECS_ENDPOINT:        "https://ecs.${{ vars.HW_REGION || 'my-kualalumpur-1' }}.alphaedge.tmone.com.my"
       # ── Shared ─────────────────────────────────────────────────────────
       LINUX_ADMIN_USER:     ${{ vars.LINUX_ADMIN_USER }}
-      WINDOWS_ADMIN_USER:   ${{ vars.WINDOWS_ADMIN_USER }}
+      WIN_SSH_USER:         ${{ vars.WIN_SSH_USER || 'Administrator' }}
       WIN_SERVER_ROLE:      ${{ vars.WIN_SERVER_ROLE || 'member_server' }}
       ORG_NAME:             ${{ vars.ORG_NAME }}
       ORG_PREFIX:           ${{ vars.ORG_PREFIX }}
       GHOST_USER:           ${{ vars.GHOST_USER }}
       CUSTOM_XCCDF_PROFILE: ${{ vars.CUSTOM_XCCDF_PROFILE }}
-      AUDIT_PASS:           ${{ secrets.AUDIT_PASS }}
       TICKET_ID:            ${{ github.event.inputs.ticket_id }}
       DEBUG_MODE:           ${{ github.event.inputs.debug_mode }}
       CLEANUP:              ${{ github.event.inputs.cleanup_mode }}
@@ -556,15 +554,6 @@ jobs:
 
           [ $FAIL -eq 1 ] && exit 1
           echo "✅ Profile ready | server_role=$WIN_SERVER_ROLE"
-
-      # ── Ansible CIS role ────────────────────────────────────────────────
-      - name: '📦 Install Ansible CIS Role (Windows)'
-        if: matrix.os_target.os == 'Windows'
-        run: |
-          ansible-galaxy role install -r requirements.yml \
-            || ansible-galaxy role install \
-                 git+https://github.com/ansible-lockdown/Windows-2022-CIS.git \
-            && echo "✅ WS2022 role ready"
 
       # ── MAIN EXECUTION ──────────────────────────────────────────────────
       - name: '🚀 Execute Fleet Commander'
