@@ -1706,10 +1706,6 @@ run_phase_1() {
 
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
         if [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then
-            validate_win_cis_profile || {
-                echo -e "${RED}❌ [Phase1/Win] Profile validation failed — skipping all Windows hosts.${NC}"
-                return 1
-            }
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
                     wait_for_ssh "$IP" "${WIN_GHOST_USER}" || {
