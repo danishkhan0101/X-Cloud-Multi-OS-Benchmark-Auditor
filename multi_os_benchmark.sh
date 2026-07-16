@@ -1038,27 +1038,28 @@ cloud_vm_get_power_state() {
         ;;
     huaweicloud)
         [ -z "$vm_id" ] && { echo "unknown"; return; }
-        local err_log="/tmp/hcloud_power_err_${ip//./_}.log"
+        local err_log="/tmp/hw_power_err_${ip//./_}.log"
         raw=$(
             HUAWEICLOUD_ACCESS_KEY="${HUAWEICLOUD_ACCESS_KEY}" \
             HUAWEICLOUD_SECRET_KEY="${HUAWEICLOUD_SECRET_KEY}" \
             HW_PROJECT_ID="${HW_PROJECT_ID}" \
-            timeout 30 hcloud ECS ShowServer \
-                --server-id "$vm_id" \
-                --cli-region "${HW_REGION}" \
-                --cli-output json 2>"$err_log" \
-            | python3 -c "
-import json,sys
+            HW_ECS_ENDPOINT="${HW_ECS_ENDPOINT}" \
+            timeout 30 python3 -c "
+import sys, os
+from huaweicloudsdkcore.auth.credentials import BasicCredentials
+from huaweicloudsdkecs.v2 import EcsClient, ShowServerRequest
 try:
-    d=json.load(sys.stdin)
-    st=d.get('server',{}).get('status','')
-    print('running' if st=='ACTIVE' else st.lower())
-except Exception:
-    print('')
-"
+    creds = BasicCredentials(os.environ['HUAWEICLOUD_ACCESS_KEY'], os.environ['HUAWEICLOUD_SECRET_KEY'], os.environ.get('HW_PROJECT_ID'))
+    client = EcsClient.new_builder().with_credentials(creds).with_endpoint(os.environ['HW_ECS_ENDPOINT']).build()
+    resp = client.show_server(ShowServerRequest(server_id='$vm_id'))
+    status = resp.server.status
+    print('running' if status == 'ACTIVE' else status.lower())
+except Exception as e:
+    print(str(e), file=sys.stderr)
+" 2>"$err_log"
         )
         if [ -z "$raw" ] && [ -s "$err_log" ]; then
-            echo -e "${YELLOW}⚠️  [PowerState] hcloud call failed for ${ip}:${NC}" >&2
+            echo -e "${YELLOW}⚠️  [PowerState] SDK call failed for ${ip}:${NC}" >&2
             cat "$err_log" >&2
         fi
         rm -f "$err_log"
