@@ -1029,7 +1029,6 @@ cloud_vm_get_power_state() {
     local vm_name="${IP_TO_VM_NAME[$ip]:-}"
     local vm_id="${IP_TO_VM_ID[$ip]:-}"
     local raw=""
-
     case "${CLOUD_PROVIDER}" in
     azure)
         [ -z "$vm_name" ] && { echo "unknown"; return; }
@@ -1039,19 +1038,32 @@ cloud_vm_get_power_state() {
         ;;
     huaweicloud)
         [ -z "$vm_id" ] && { echo "unknown"; return; }
-        raw=$(timeout 30 hcloud ECS ShowServer \
-            --server-id "$vm_id" \
-            --cli-region "${HW_REGION}" \
-            --cli-output json 2>/dev/null \
+        local err_log="/tmp/hcloud_power_err_${ip//./_}.log"
+        raw=$(
+            HUAWEICLOUD_ACCESS_KEY="${HUAWEICLOUD_ACCESS_KEY}" \
+            HUAWEICLOUD_SECRET_KEY="${HUAWEICLOUD_SECRET_KEY}" \
+            HW_PROJECT_ID="${HW_PROJECT_ID}" \
+            timeout 30 hcloud ECS ShowServer \
+                --server-id "$vm_id" \
+                --cli-region "${HW_REGION}" \
+                --cli-output json 2>"$err_log" \
             | python3 -c "
 import json,sys
-d=json.load(sys.stdin)
-st=d.get('server',{}).get('status','')
-print('running' if st=='ACTIVE' else st.lower())
-" 2>/dev/null)
+try:
+    d=json.load(sys.stdin)
+    st=d.get('server',{}).get('status','')
+    print('running' if st=='ACTIVE' else st.lower())
+except Exception:
+    print('')
+"
+        )
+        if [ -z "$raw" ] && [ -s "$err_log" ]; then
+            echo -e "${YELLOW}⚠️  [PowerState] hcloud call failed for ${ip}:${NC}" >&2
+            cat "$err_log" >&2
+        fi
+        rm -f "$err_log"
         ;;
     esac
-
     [[ "$raw" == *"running"* || "$raw" == "running" ]] && echo "running" || echo "${raw:-unknown}"
 }
 
