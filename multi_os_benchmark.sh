@@ -701,10 +701,9 @@ ensure_windows_ghost_user() {
 
     local pub_key
     pub_key=$(cat ~/.ssh/id_rsa.pub)
-
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
         "${WIN_SSH_USER}@${ip}" "powershell -NoProfile -Command \"
-        \\\$pass = [System.Web.Security.Membership]::GeneratePassword(24,4)
+        \\\$pass = -join ((48..57)+(65..90)+(97..122)+(33,35,36,37,38) | Get-Random -Count 24 | ForEach-Object {[char]\\\$_})
         \\\$secure = ConvertTo-SecureString \\\$pass -AsPlainText -Force
         if (-not (Get-LocalUser -Name '${WIN_GHOST_USER}' -ErrorAction SilentlyContinue)) {
             New-LocalUser -Name '${WIN_GHOST_USER}' -Password \\\$secure -PasswordNeverExpires -AccountNeverExpires -ErrorAction Stop
