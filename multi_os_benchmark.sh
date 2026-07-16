@@ -1233,14 +1233,6 @@ if [ "${CLOUD_PROVIDER}" == "huaweicloud" ]; then
     cloud_hcloud_check || exit 1
 fi
 
-if [ ${#WIN_BOOTSTRAP_PIDS[@]} -gt 0 ]; then
-    echo -e "${CYAN}⏳ [Phase 0.3] Waiting for Windows WinRM bootstrap to complete...${NC}"
-    for pid in "${WIN_BOOTSTRAP_PIDS[@]}"; do
-        wait "$pid" 2>/dev/null || true
-    done
-    echo -e "${GREEN}✅ [Phase 0.3] Windows bootstrap done — proceeding to remediation${NC}"
-    sleep 10
-fi
 
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" =~ ^(ubuntu|rhel|rocky|alma)$ ]]; then
     for ip in "${UBUNTU_MACHINES[@]}" "${RHEL_MACHINES[@]}" "${ROCKY_MACHINES[@]}" "${ALMA_MACHINES[@]}"; do
@@ -1285,15 +1277,6 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
     done
 fi
 wait
-
-if [ ${#WIN_BOOTSTRAP_PIDS[@]} -gt 0 ]; then
-    echo -e "${CYAN}⏳ [Phase 0.3] Waiting for Windows WinRM bootstrap to complete...${NC}"
-    for pid in "${WIN_BOOTSTRAP_PIDS[@]}"; do
-        wait "$pid" 2>/dev/null || true
-    done
-    echo -e "${GREEN}✅ [Phase 0.3] Windows bootstrap done — proceeding to remediation${NC}"
-    sleep 10
-fi
 
 # ======================================================
 # INVENTORY BUILDER
