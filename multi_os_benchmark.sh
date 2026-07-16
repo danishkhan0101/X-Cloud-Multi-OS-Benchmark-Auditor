@@ -701,7 +701,8 @@ ensure_windows_ghost_user() {
 
     local pub_key
     pub_key=$(cat ~/.ssh/id_rsa.pub)
-    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
+    local ssh_output
+    ssh_output=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
         "${WIN_SSH_USER}@${ip}" "powershell -NoProfile -Command \"
         \\\$pass = -join ((48..57)+(65..90)+(97..122)+(33,35,36,37,38) | Get-Random -Count 24 | ForEach-Object {[char]\\\$_})
         \\\$secure = ConvertTo-SecureString \\\$pass -AsPlainText -Force
@@ -717,8 +718,12 @@ ensure_windows_ghost_user() {
         icacls 'C:\\ProgramData\\ssh\\administrators_authorized_keys' /grant 'SYSTEM:F' | Out-Null
         Restart-Service sshd
         Write-Output 'GHOST_USER_READY'
-    \"" 2>/dev/null | grep -q GHOST_USER_READY
+    \"" 2>&1)
 
+    echo "🔧 [WinGhost DEBUG] Raw output:"
+    echo "$ssh_output"
+
+    echo "$ssh_output" | grep -q GHOST_USER_READY
     local rc=$?
     if [ $rc -ne 0 ]; then
         echo -e "${RED}❌ [WinGhost] Failed to provision ${WIN_GHOST_USER} on ${ip}${NC}"
