@@ -37,7 +37,7 @@ RHEL_CUSTOM_XCCDF="${RHEL_CUSTOM_DIR}/${ORG_PREFIX}_rhel_xccdf.xml"
 RHEL_CUSTOM_OVAL="${RHEL_CUSTOM_DIR}/${ORG_PREFIX}_rhel_rules.xml"
 RHEL_CUSTOM_PLAYBOOK="${RHEL_CUSTOM_DIR}/rhel_custom_playbook.yml"
 
-WIN_SSH_USER="${WINDOWS_SSH_USER:-Administrator}"
+WIN_SSH_USER="${WIN_SSH_USER:-Administrator}"
 WIN_CUSTOM_DIR="${SCRIPT_DIR}/window-custom"
 WIN_CUSTOM_BENCHMARK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_baseline.rb"
 WIN_CUSTOM_PLAYBOOK="${WIN_CUSTOM_DIR}/${ORG_PREFIX}_remediate.yml"
@@ -50,6 +50,7 @@ WIN_REBOOT_SETTLE_SEC="${WIN_REBOOT_SETTLE_SEC:-45}"
 WIN_REBOOT_HEALTH_WAIT_SEC="${WIN_REBOOT_HEALTH_WAIT_SEC:-360}"
 WIN_SCAN_TIMEOUT_SEC="${WIN_SCAN_TIMEOUT_SEC:-1200}"
 WIN_REBOOT_AFTER_REMEDIATION="${WIN_REBOOT_AFTER_REMEDIATION:-true}"
+WIN_AGENT_PROBE_SEC="${WIN_AGENT_PROBE_SEC:-180}"
 
 export INSPEC_SSH_CONFIG_NO_SECURE=true
 BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -687,10 +688,8 @@ reboot_windows_host() {
     local vm_name="${IP_TO_VM_NAME[$ip]:-}"
     [ -z "$vm_name" ] && { echo -e "${YELLOW}⚠️  [Reboot] No VM name for ${ip}${NC}"; return 0; }
 
-    echo -e "${CYAN}🔧 [Reboot/${ip}] Re-opening WinRM via agent before reboot...${NC}"
-    ensure_winrm_powershell "$ip"
-
     echo -e "${CYAN}🔁 [Reboot/${ip}] Restarting ${vm_name} (non-blocking)...${NC}"
+    
     cloud_vm_restart "$ip"
 
     sleep 20
@@ -1234,7 +1233,14 @@ if [ "${CLOUD_PROVIDER}" == "huaweicloud" ]; then
     cloud_hcloud_check || exit 1
 fi
 
-declare -a WIN_BOOTSTRAP_PIDS=()
+if [ ${#WIN_BOOTSTRAP_PIDS[@]} -gt 0 ]; then
+    echo -e "${CYAN}⏳ [Phase 0.3] Waiting for Windows WinRM bootstrap to complete...${NC}"
+    for pid in "${WIN_BOOTSTRAP_PIDS[@]}"; do
+        wait "$pid" 2>/dev/null || true
+    done
+    echo -e "${GREEN}✅ [Phase 0.3] Windows bootstrap done — proceeding to remediation${NC}"
+    sleep 10
+fi
 
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" =~ ^(ubuntu|rhel|rocky|alma)$ ]]; then
     for ip in "${UBUNTU_MACHINES[@]}" "${RHEL_MACHINES[@]}" "${ROCKY_MACHINES[@]}" "${ALMA_MACHINES[@]}"; do
@@ -1657,11 +1663,10 @@ run_phase_1() {
             }
             for IP in "${WINDOWS_MACHINES[@]}"; do
                 (
-                    wait_for_winrm "$IP" || {
-                        echo -e "${RED}❌ [Phase1/Win] WinRM unreachable: $IP — skipping${NC}"
+                    wait_for_ssh "$IP" "$WIN_SSH_USER" || {
+                        echo -e "${RED}❌ [Phase1/Win] SSH unreachable: $IP — skipping${NC}"
                         exit 1
                     }
-                    ensure_winrm_powershell "$IP"
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
@@ -1990,27 +1995,17 @@ run_remediation() {
             if [ "$RUN_CIS" == true ]; then
                 for IP in "${WINDOWS_MACHINES[@]}"; do
                     (
-                        wait_for_ssh "$ip" "$WIN_SSH_USER" || {
-                            echo -e "${RED}❌ [Remediation/Win] SSH unreachable: $ip${NC}"
+                        wait_for_ssh "$IP" "$WIN_SSH_USER" || {
+                            echo -e "${RED}❌ [Remediation/Win] SSH unreachable: $IP${NC}"
                             exit 1
                         }
-                        remediate_windows_host "$ip" "$CIS_LEVEL"
+                        remediate_windows_host "$IP" "$CIS_LEVEL"
                     ) &
                 done
                 wait
             fi
             if [ "$RUN_ORG" == true ]; then
-                for IP in "${WINDOWS_MACHINES[@]}"; do
-                    wait_for_winrm "$IP" || \
-                        echo -e "${YELLOW}⚠️  [Remediation/Win/${ORG_PREFIX^^}] WinRM not ready on $IP${NC}"
-                done
-                ANSIBLE_HOST_KEY_CHECKING=False \
-                ansible-playbook -i inventory.ini "$WIN_CUSTOM_PLAYBOOK" \
-                    --limit windows_nodes -v
-                ANSIBLE_RC=$?
-                [ $ANSIBLE_RC -ne 0 ] && \
-                    echo -e "${RED}❌ [Remediation/Win/ORG] Playbook FAILED (rc=${ANSIBLE_RC})${NC}" || \
-                    echo -e "${GREEN}✅ [Remediation/Win/ORG] Playbook complete${NC}"
+                echo -e "${YELLOW}⚠️  [Remediation/Win/${ORG_PREFIX^^}] Windows ORG remediation via Ansible is not yet migrated to SSH — skipping.${NC}"
             fi
 
             if [ "$RUN_CIS" == true ] && [ "${WIN_REBOOT_AFTER_REMEDIATION}" == "true" ]; then
@@ -2314,20 +2309,10 @@ run_phase_4() {
                         echo -e "${RED}⏭️  [Phase4/Win] ${IP} flagged hung after remediation — skipping verify scan${NC}"
                         exit 0
                     fi
-                    wait_for_winrm "$IP" || {
-                        echo -e "${YELLOW}⚠️  [Phase4/Win] WinRM port closed on ${IP} — probing guest agent...${NC}"
-                        if check_windows_agent_alive "$IP"; then
-                            ensure_winrm_powershell "$IP"
-                            wait_for_winrm "$IP" || {
-                                echo -e "${RED}❌ [Phase4/Win] WinRM still down after repair on ${IP} — skipping${NC}"
-                                exit 1
-                            }
-                        else
-                            echo -e "${RED}❌ [Phase4/Win] Guest agent dead — ${IP} is hung at boot. Skipping.${NC}"
-                            exit 1
-                        fi
+                    wait_for_ssh "$IP" "$WIN_SSH_USER" || {
+                        echo -e "${RED}❌ [Phase4/Win] SSH unreachable on ${IP} — skipping${NC}"
+                        exit 1
                     }
-                    ensure_winrm_powershell "$IP"
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
