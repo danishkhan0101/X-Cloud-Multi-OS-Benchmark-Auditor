@@ -1346,6 +1346,12 @@ fi
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
     for ip in "${WINDOWS_MACHINES[@]}"; do
         (
+            # Refresh the SG rule for port 22 to the CURRENT runner IP —
+            # closes the gap where a stale/mismatched SG rule silently
+            # drops SSH before it ever reaches the host (network-layer
+            # block, indistinguishable from a hung VM without this).
+            cloud_add_port_rule "$ip" 22 "Allow_SSH_Runner_Only_Win"
+
             wait_for_ssh "$ip" "$WIN_SSH_USER" || {
                 echo -e "${RED}❌ [Win Bootstrap] SSH unreachable: $ip${NC}"
                 exit 1
