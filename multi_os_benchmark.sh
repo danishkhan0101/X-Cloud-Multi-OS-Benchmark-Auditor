@@ -2402,6 +2402,8 @@ run_cleanup() {
     echo -e "\n${BOLD}${RED}🧹 PHASE 5: POST-AUDIT CLEANUP${NC}"
     echo -e "${CYAN}   VM stays HARDENED — oscap tools/files removed. Audit user is kept for future runs.${NC}"
 
+    local did_linux_cleanup=false
+
     local remove_rpm='
         echo "Searching for all openscap/scap-security-guide related packages..."
         PKGS=$(rpm -qa | grep -E "openscap|scap-security-guide")
@@ -2443,6 +2445,7 @@ run_cleanup() {
 
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
         for IP in "${UBUNTU_MACHINES[@]}"; do
+            did_linux_cleanup=true
             echo -e "${CYAN}🧹 [Cleanup/Ubuntu] Removing oscap artifacts on ${IP}...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                 ${GHOST_USER}@${IP} "$remove_deb" 2>&1 || \
@@ -2452,6 +2455,7 @@ run_cleanup() {
 
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" =~ ^(rhel|rocky|alma)$ ]]; then
         for IP in "${RHEL_MACHINES[@]}" "${ROCKY_MACHINES[@]}" "${ALMA_MACHINES[@]}"; do
+            did_linux_cleanup=true
             echo -e "${CYAN}🧹 [Cleanup/RHEL-family] Removing oscap artifacts on ${IP}...${NC}"
             ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                 ${GHOST_USER}@${IP} "$remove_rpm" 2>&1 || \
@@ -2466,7 +2470,12 @@ run_cleanup() {
     fi
 
     wait
-    echo -e "\n${GREEN}✅ [Phase 5] All oscap tools, content, temp/report files, and logs removed.${NC}"
+
+    if [ "$did_linux_cleanup" == true ]; then
+        echo -e "\n${GREEN}✅ [Phase 5] All oscap tools, content, temp/report files, and logs removed from Linux hosts.${NC}"
+    else
+        echo -e "\n${GREEN}✅ [Phase 5] Cleanup complete — no Linux hosts targeted, nothing to remove.${NC}"
+    fi
     echo -e "${GREEN}   Audit user + sudo access kept in place for future scheduled runs.${NC}"
 }
 
