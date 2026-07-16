@@ -701,26 +701,38 @@ ensure_windows_ghost_user() {
 
     local pub_key
     pub_key=$(cat ~/.ssh/id_rsa.pub)
+
+    # Build the PowerShell script in a local file — no bash quoting involved at all
+    local ps_script
+    ps_script=$(mktemp /tmp/winghost_XXXXXX.ps1)
+    cat > "$ps_script" <<PS1EOF
+\$chars = [char[]]((48..57)+(65..90)+(97..122)+(33,35,36,37,38))
+\$pass = -join (\$chars | Get-Random -Count 24)
+\$secure = ConvertTo-SecureString \$pass -AsPlainText -Force
+if (-not (Get-LocalUser -Name '${WIN_GHOST_USER}' -ErrorAction SilentlyContinue)) {
+    New-LocalUser -Name '${WIN_GHOST_USER}' -Password \$secure -PasswordNeverExpires -AccountNeverExpires -ErrorAction Stop
+}
+Add-LocalGroupMember -Group 'Administrators' -Member '${WIN_GHOST_USER}' -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path 'C:\ProgramData\ssh' | Out-Null
+Add-Content -Path 'C:\ProgramData\ssh\administrators_authorized_keys' -Value '${pub_key}'
+Get-Content 'C:\ProgramData\ssh\administrators_authorized_keys' | Select-Object -Unique | Set-Content 'C:\ProgramData\ssh\administrators_authorized_keys'
+icacls 'C:\ProgramData\ssh\administrators_authorized_keys' /inheritance:r | Out-Null
+icacls 'C:\ProgramData\ssh\administrators_authorized_keys' /grant 'Administrators:F' | Out-Null
+icacls 'C:\ProgramData\ssh\administrators_authorized_keys' /grant 'SYSTEM:F' | Out-Null
+Restart-Service sshd
+Write-Output 'GHOST_USER_READY'
+PS1EOF
+
+    # Encode to UTF-16LE base64 (what -EncodedCommand requires)
+    local encoded_cmd
+    encoded_cmd=$(iconv -f UTF-8 -t UTF-16LE "$ps_script" | base64 -w 0)
+    rm -f "$ps_script"
+
     local ssh_output
     ssh_output=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
-        "${WIN_SSH_USER}@${ip}" "powershell -NoProfile -Command \"
-        \\\$chars = [char[]]((48..57)+(65..90)+(97..122)+(33,35,36,37,38)); \\\$pass = -join (\\\$chars | Get-Random -Count 24)
-        \\\$secure = ConvertTo-SecureString \\\$pass -AsPlainText -Force
-        if (-not (Get-LocalUser -Name '${WIN_GHOST_USER}' -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name '${WIN_GHOST_USER}' -Password \\\$secure -PasswordNeverExpires -AccountNeverExpires -ErrorAction Stop
-        }
-        Add-LocalGroupMember -Group 'Administrators' -Member '${WIN_GHOST_USER}' -ErrorAction SilentlyContinue
-        New-Item -ItemType Directory -Force -Path 'C:\\ProgramData\\ssh' | Out-Null
-        Add-Content -Path 'C:\\ProgramData\\ssh\\administrators_authorized_keys' -Value '${pub_key}'
-        Get-Content 'C:\\ProgramData\\ssh\\administrators_authorized_keys' | Select-Object -Unique | Set-Content 'C:\\ProgramData\\ssh\\administrators_authorized_keys'
-        icacls 'C:\\ProgramData\\ssh\\administrators_authorized_keys' /inheritance:r | Out-Null
-        icacls 'C:\\ProgramData\\ssh\\administrators_authorized_keys' /grant 'Administrators:F' | Out-Null
-        icacls 'C:\\ProgramData\\ssh\\administrators_authorized_keys' /grant 'SYSTEM:F' | Out-Null
-        Restart-Service sshd
-        Write-Output 'GHOST_USER_READY'
-    \"" 2>&1)
+        "${WIN_SSH_USER}@${ip}" "powershell -NoProfile -EncodedCommand ${encoded_cmd}" 2>&1)
 
-    echo "🔧 [WinGhost DEBUG] Raw output:"
+    echo -e "${CYAN}🔧 [WinGhost DEBUG] Raw output:${NC}"
     echo "$ssh_output"
 
     echo "$ssh_output" | grep -q GHOST_USER_READY
