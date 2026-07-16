@@ -704,7 +704,7 @@ ensure_windows_ghost_user() {
     local ssh_output
     ssh_output=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
         "${WIN_SSH_USER}@${ip}" "powershell -NoProfile -Command \"
-        \\\$pass = -join ((48..57)+(65..90)+(97..122)+(33,35,36,37,38) | Get-Random -Count 24 | ForEach-Object {[char]\\\$_})
+        \\\$chars = [char[]]((48..57)+(65..90)+(97..122)+(33,35,36,37,38)); \\\$pass = -join (\\\$chars | Get-Random -Count 24)
         \\\$secure = ConvertTo-SecureString \\\$pass -AsPlainText -Force
         if (-not (Get-LocalUser -Name '${WIN_GHOST_USER}' -ErrorAction SilentlyContinue)) {
             New-LocalUser -Name '${WIN_GHOST_USER}' -Password \\\$secure -PasswordNeverExpires -AccountNeverExpires -ErrorAction Stop
