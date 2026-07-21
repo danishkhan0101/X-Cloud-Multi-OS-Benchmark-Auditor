@@ -47,8 +47,10 @@ param(
     [ValidateSet("1","2","5","9","17","18","19")]
     [string[]]$Sections,
 
-    [switch]$SkipBackup,
+    [ValidateSet("L1","L2")]
+    [string]$CisLevel = "L2",   # preserves old "remediate everything" behavior if omitted
 
+    [switch]$SkipBackup,
     [string]$BackupDir = (Join-Path $env:ProgramData ("CIS-WS2022-Remediation\backup-{0}" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))),
     [string]$LogDir    = (Join-Path $env:ProgramData "CIS-WS2022-Remediation\logs")
 )
@@ -67,8 +69,13 @@ function Set-CISRegValue {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][ValidateSet("DWord","QWord","String","ExpandString","MultiString","Binary")][string]$Type,
-        [Parameter(Mandatory)]$Value
+        [Parameter(Mandatory)]$Value,
+        [string]$ControlId
     )
+    if ($ControlId -and -not (Test-CISShouldRun -ControlId $ControlId)) {
+        Write-Verbose ("Skipping {0} (L2, CisLevel={1})" -f $ControlId, $CisLevel)
+        return
+    }
     if ($PSCmdlet.ShouldProcess(("{0}\{1}" -f $Path,$Name), ("Set {0} = {1}" -f $Type,$Value))) {
         try {
             if (-not (Test-Path -Path $Path)) { New-Item -Path $Path -Force | Out-Null }
@@ -98,6 +105,30 @@ function Set-CISAudit {
         & auditpol /set /subcategory:"$Subcategory" /success:$Success /failure:$Failure | Out-Null
         if ($LASTEXITCODE -ne 0) { Write-CISWarn ("auditpol failed for '{0}' (exit {1})" -f $Subcategory,$LASTEXITCODE) }
     }
+}
+
+$script:L2ControlIds = @(
+    '2.2.36','2.3.7.1','2.3.7.6','2.3.10.4',
+    '5.2',
+    '18.1.3','18.5.5','18.5.7','18.5.9','18.5.10',
+    '18.6.4.3','18.6.5.1','18.6.9.1','18.6.9.2','18.6.10.2','18.6.19.2.1','18.6.20.1','18.6.20.2','18.6.21.2',
+    '18.8.1.1',
+    '18.9.20.1.2','18.9.20.1.3','18.9.20.1.4','18.9.20.1.7','18.9.20.1.8','18.9.20.1.9','18.9.20.1.10','18.9.20.1.11','18.9.20.1.12',
+    '18.9.28.1','18.9.33.1','18.9.33.2','18.9.35.6.1','18.9.35.6.2','18.9.49.5.1','18.9.49.11.1','18.9.51.1',
+    '18.10.4.1','18.10.13.2','18.10.16.2','18.10.16.4','18.10.16.5','18.10.16.6',
+    '18.10.18.1','18.10.18.7','18.10.36.1','18.10.40.1',
+    '18.10.42.8.1','18.10.42.11.1.1.1','18.10.42.11.1.2.1','18.10.42.12.1',
+    '18.10.57.3.2.1','18.10.57.3.3.1','18.10.57.3.3.4','18.10.57.3.3.6','18.10.57.3.3.7',
+    '18.10.57.3.10.1','18.10.57.3.10.2',
+    '18.10.59.4','18.10.81.1','18.10.82.3',
+    '18.10.88.1','18.10.88.2','18.10.90.2.2','18.10.91.1',
+    '19.6.6.1.1','19.7.8.3','19.7.8.4','19.7.46.2.1'
+)
+
+function Test-CISShouldRun {
+    param([Parameter(Mandatory)][string]$ControlId)
+    if ($script:L2ControlIds -contains $ControlId) { return $CisLevel -eq 'L2' }
+    return $true
 }
 
 function Backup-CISState {
@@ -183,10 +214,10 @@ function Set-CISSecurityOptions {
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters' -Name 'DisablePasswordChange' -Type DWord -Value 0  # 2.3.6.4
     Set-CISRegValue -Path 'HKLM:\System\CurrentControlSet\Services\Netlogon\Parameters' -Name 'MaximumPasswordAge' -Type DWord -Value 1  # 2.3.6.5
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters' -Name 'RequireStrongKey' -Type DWord -Value 1  # 2.3.6.6
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'DisableCAD' -Type DWord -Value 0  # 2.3.7.1
+    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'DisableCAD' -Type DWord -Value 0 -ControlId '2.3.7.1'  # 2.3.7.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'DontDisplayLastUserName' -Type DWord -Value 1  # 2.3.7.2
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'InactivityTimeoutSecs' -Type DWord -Value 1  # 2.3.7.3
-    if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'CachedLogonsCount' -Type DWord -Value 0 }  # 2.3.7.6
+    if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'CachedLogonsCount' -Type DWord -Value 0 -ControlId '2.3.7.6' }  # 2.3.7.6
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'PasswordExpiryWarning' -Type DWord -Value 5  # 2.3.7.7
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'ScRemoveOption' -Type DWord -Value 1  # 2.3.7.9
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters' -Name 'RequireSecuritySignature' -Type DWord -Value 1  # 2.3.8.1
@@ -198,7 +229,7 @@ function Set-CISSecurityOptions {
     if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'RestrictAnonymousSAM' -Type DWord -Value 1 }  # 2.3.10.2
     if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'RestrictAnonymous' -Type DWord -Value 1 }  # 2.3.10.3
     if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'restrictremotesam' -Type String -Value 'O:BAG:BAD:(A;;RC;;;BA)' }  # 2.3.10.11
-    Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'DisableDomainCreds' -Type DWord -Value 1  # 2.3.10.4
+    Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'DisableDomainCreds' -Type DWord -Value 1 -ControlId '2.3.10.4'  # 2.3.10.4
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'EveryoneIncludesAnonymous' -Type DWord -Value 0  # 2.3.10.5
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters' -Name 'NullSessionPipes' -Type MultiString -Value @('LSARPC','NETLOGON','SAMR')  # 2.3.10.6
     Remove-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters' -Name 'NullSessionShares'  # 2.3.10.12
@@ -349,12 +380,13 @@ function Set-CISSystemServices {
     [CmdletBinding(SupportsShouldProcess)]
     param([string]$ServerRole = "member_server", [string]$BackupDir)
     Write-CISLog "Section 5 - System Services (role: $ServerRole)"
-    # 5.1 (DC only, L1) and 5.2 (MS only, L2) both disable the Print Spooler
-    # (Spooler:Start = 4). Applied on either role to satisfy the active control.
-    Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Spooler' -Name 'Start' -Type DWord -Value 4  # 5.1 / 5.2
-    if ($PSCmdlet.ShouldProcess("Spooler service","Stop and disable")) {
-        Stop-Service -Name Spooler -Force -ErrorAction SilentlyContinue
-        Set-Service  -Name Spooler -StartupType Disabled -ErrorAction SilentlyContinue
+    $spoolerControlId = if ($ServerRole -eq 'domain_controller') { '5.1' } else { '5.2' }
+    if (Test-CISShouldRun -ControlId $spoolerControlId) {
+        Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Spooler' -Name 'Start' -Type DWord -Value 4  # 5.1 / 5.2
+        if ($PSCmdlet.ShouldProcess("Spooler service","Stop and disable")) {
+            Stop-Service -Name Spooler -Force -ErrorAction SilentlyContinue
+            Set-Service  -Name Spooler -StartupType Disabled -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -650,17 +682,17 @@ function Set-CISAdminTemplatesUser {
     param([string]$ServerRole = "member_server", [string]$BackupDir)
     Write-CISLog "Section 19 - Administrative Templates (User) - per-user hives"
     $settings = @(
-        @{ Sub='Software\Policies\Microsoft\Windows\CurrentVersion\PushNotifications'; Name='NoToastApplicationNotificationOnLockScreen'; Val=1 }  # 19.5.1.1
-        @{ Sub='Software\Policies\Microsoft\Assistance\Client\1.0'; Name='NoImplicitFeedback'; Val=1 }  # 19.6.6.1.1
-        @{ Sub='Software\Microsoft\Windows\CurrentVersion\Policies\Attachments'; Name='SaveZoneInformation'; Val=2 }  # 19.7.5.1
-        @{ Sub='Software\Microsoft\Windows\CurrentVersion\Policies\Attachments'; Name='ScanWithAntiVirus'; Val=3 }  # 19.7.5.2
-        @{ Sub='Software\Policies\Microsoft\Windows\CloudContent'; Name='ConfigureWindowsSpotlight'; Val=2 }  # 19.7.8.1
-        @{ Sub='Software\Policies\Microsoft\Windows\CloudContent'; Name='DisableThirdPartySuggestions'; Val=1 }  # 19.7.8.2
-        @{ Sub='Software\Policies\Microsoft\Windows\CloudContent'; Name='DisableTailoredExperiencesWithDiagnosticData'; Val=1 }  # 19.7.8.3
-        @{ Sub='Software\Policies\Microsoft\Windows\CloudContent'; Name='DisableWindowsSpotlightFeatures'; Val=1 }  # 19.7.8.4
-        @{ Sub='SOFTWARE\Policies\Microsoft\Windows\CloudContent'; Name='DisableSpotlightCollectionOnDesktop'; Val=1 }  # 19.7.8.5
-        @{ Sub='Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'; Name='NoInplaceSharing'; Val=1 }  # 19.7.26.1
-        @{ Sub='Software\Policies\Microsoft\WindowsMediaPlayer'; Name='PreventCodecDownload'; Val=1 }  # 19.7.46.2.1
+        @{ Sub='Software\Policies\Microsoft\Windows\CurrentVersion\PushNotifications'; Name='NoToastApplicationNotificationOnLockScreen'; Val=1; Level='L1' }  # 19.5.1.1
+        @{ Sub='Software\Policies\Microsoft\Assistance\Client\1.0'; Name='NoImplicitFeedback'; Val=1; Level='L2' }  # 19.6.6.1.1
+        @{ Sub='Software\Microsoft\Windows\CurrentVersion\Policies\Attachments'; Name='SaveZoneInformation'; Val=2; Level='L1' }  # 19.7.5.1
+        @{ Sub='Software\Microsoft\Windows\CurrentVersion\Policies\Attachments'; Name='ScanWithAntiVirus'; Val=3; Level='L1' }  # 19.7.5.2
+        @{ Sub='Software\Policies\Microsoft\Windows\CloudContent'; Name='ConfigureWindowsSpotlight'; Val=2; Level='L1' }  # 19.7.8.1
+        @{ Sub='Software\Policies\Microsoft\Windows\CloudContent'; Name='DisableThirdPartySuggestions'; Val=1; Level='L1' }  # 19.7.8.2
+        @{ Sub='Software\Policies\Microsoft\Windows\CloudContent'; Name='DisableTailoredExperiencesWithDiagnosticData'; Val=1; Level='L2' }  # 19.7.8.3
+        @{ Sub='Software\Policies\Microsoft\Windows\CloudContent'; Name='DisableWindowsSpotlightFeatures'; Val=1; Level='L2' }  # 19.7.8.4
+        @{ Sub='SOFTWARE\Policies\Microsoft\Windows\CloudContent'; Name='DisableSpotlightCollectionOnDesktop'; Val=1; Level='L1' }  # 19.7.8.5
+        @{ Sub='Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'; Name='NoInplaceSharing'; Val=1; Level='L1' }  # 19.7.26.1
+        @{ Sub='Software\Policies\Microsoft\WindowsMediaPlayer'; Name='PreventCodecDownload'; Val=1; Level='L2' }  # 19.7.46.2.1
     )
     # Target the .DEFAULT hive plus any loaded interactive user hive (S-1-5-21-*)
     $targets = @('.DEFAULT')
@@ -669,6 +701,7 @@ function Set-CISAdminTemplatesUser {
                  ForEach-Object { $_.PSChildName })
     foreach ($sid in ($targets | Select-Object -Unique)) {
         foreach ($s in $settings) {
+            if ($s.Level -eq 'L2' -and $CisLevel -ne 'L2') { continue }
             $full = "HKU:\$sid\$($s.Sub)"
             Set-CISRegValue -Path $full -Name $s.Name -Type DWord -Value $s.Val
         }
