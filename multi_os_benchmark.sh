@@ -1814,7 +1814,7 @@ run_phase_1() {
                                 -t "ssh://${WIN_GHOST_USER}@${IP}" \
                                 --input "server_role=${WIN_SERVER_ROLE}" \
                                 --input "profile_level=${WIN_INSPEC_LVL}" \
-                                "${CONTROL_ARGS[@]}" \
+                                --controls "${WIN_LEVEL_CONTROLS[@]}" \
                                 --reporter "json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
                             rc=$?
                             case $rc in
@@ -2475,7 +2475,7 @@ run_phase_4() {
                                 -t "ssh://${WIN_GHOST_USER}@${IP}" \
                                 --input "server_role=${WIN_SERVER_ROLE}" \
                                 --input "profile_level=${WIN_INSPEC_LVL}" \
-                                "${CONTROL_ARGS[@]}" \
+                                --controls "${WIN_LEVEL_CONTROLS[@]}" \
                                 --reporter "json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
                             rc=$?
                             case $rc in
