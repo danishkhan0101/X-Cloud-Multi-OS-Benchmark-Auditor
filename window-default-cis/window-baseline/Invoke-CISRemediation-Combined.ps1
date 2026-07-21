@@ -694,6 +694,10 @@ function Set-CISAdminTemplatesUser {
         @{ Sub='Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'; Name='NoInplaceSharing'; Val=1; Level='L1' }  # 19.7.26.1
         @{ Sub='Software\Policies\Microsoft\WindowsMediaPlayer'; Name='PreventCodecDownload'; Val=1; Level='L2' }  # 19.7.46.2.1
     )
+
+    if (-not (Get-PSDrive -Name HKU -ErrorAction SilentlyContinue)) {
+        New-PSDrive -Name HKU -PSProvider Registry -Root HKEY_USERS -Scope Script | Out-Null
+    }
     # Target the .DEFAULT hive plus any loaded interactive user hive (S-1-5-21-*)
     $targets = @('.DEFAULT')
     $targets += (Get-ChildItem 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue |
