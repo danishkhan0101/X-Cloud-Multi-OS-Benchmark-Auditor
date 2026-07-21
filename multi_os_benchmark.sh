@@ -1350,18 +1350,23 @@ fi
 if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
     for ip in "${WINDOWS_MACHINES[@]}"; do
         (
-            # Refresh the SG rule for port 22 to the CURRENT runner IP —
-            # closes the gap where a stale/mismatched SG rule silently
-            # drops SSH before it ever reaches the host (network-layer
-            # block, indistinguishable from a hung VM without this).
             cloud_add_port_rule "$ip" 22 "Allow_SSH_Runner_Only_Win"
 
-            wait_for_ssh "$ip" "$WIN_SSH_USER" || {
-                echo -e "${RED}❌ [Win Bootstrap] SSH unreachable: $ip${NC}"
-                exit 1
-            }
-            ensure_windows_ghost_user "$ip" || \
-                echo -e "${RED}❌ [Win Bootstrap] Ghost user provisioning failed: $ip${NC}"
+            # Try the ghost user first — it's what every phase after this one
+            # actually uses, and it's usually already provisioned. Only fall
+            # back to Administrator if svc_audit is genuinely unreachable.
+            if ssh -n -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+                   "${WIN_GHOST_USER}@${ip}" "echo SSH_OK" 2>/dev/null | grep -q SSH_OK; then
+                echo -e "${GREEN}✅ [Win Bootstrap] ${WIN_GHOST_USER} already reachable on ${ip} — skipping Administrator bootstrap${NC}"
+            else
+                echo -e "${YELLOW}⚠️  [Win Bootstrap] ${WIN_GHOST_USER} unreachable on ${ip} — falling back to ${WIN_SSH_USER}${NC}"
+                wait_for_ssh "$ip" "$WIN_SSH_USER" || {
+                    echo -e "${RED}❌ [Win Bootstrap] SSH unreachable via both ${WIN_GHOST_USER} and ${WIN_SSH_USER}: $ip${NC}"
+                    exit 1
+                }
+                ensure_windows_ghost_user "$ip" || \
+                    echo -e "${RED}❌ [Win Bootstrap] Ghost user provisioning failed: $ip${NC}"
+            fi
         ) &
     done
 fi
