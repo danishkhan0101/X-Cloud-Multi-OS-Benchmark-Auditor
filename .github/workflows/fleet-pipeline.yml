@@ -559,21 +559,41 @@ jobs:
         if: matrix.os_target.os == 'Windows'
         run: |
           RB_FILE="window-default-cis/window-baseline/controls/cis_ws2022_v5_0_0_benchmark.rb"
-          echo "Total controls in file:"
-          grep -c "^control " "$RB_FILE"
-          echo "---"
-          echo "L1 controls (tag match):"
-          grep -c "tag level: \['L1'\]" "$RB_FILE"
-          echo "---"
-          echo "L2 controls (tag match):"
-          grep -c "tag level: \['L2'\]" "$RB_FILE"
-          echo "---"
-          echo "First 10 lines from get_win_cis_controls_for_level (level=2):"
-          source multi_os_benchmark.sh 2>/dev/null || true
-          get_win_cis_controls_for_level "$RB_FILE" "2" | head -10
-          echo "---"
-          echo "Total count from function (level=2):"
+      
+          get_win_cis_controls_for_level() {
+              local rb_file="$1"
+              local level="$2"
+              if [ "$level" == "1" ]; then
+                  awk '
+                      /^control / {
+                          cur = $2
+                          gsub(/[\x27"]/, "", cur)
+                      }
+                      /tag level:/ && /\x27L1\x27/ {
+                          print cur
+                      }
+                  ' "$rb_file"
+              else
+                  awk '
+                      /^control / {
+                          cur = $2
+                          gsub(/[\x27"]/, "", cur)
+                      }
+                      /tag level:/ && (/\x27L1\x27/ || /\x27L2\x27/) {
+                          print cur
+                      }
+                  ' "$rb_file"
+              fi
+          }
+      
+          echo "=== Level 1 extraction ==="
+          get_win_cis_controls_for_level "$RB_FILE" "1" | wc -l
+      
+          echo "=== Level 2 extraction (should be L1+L2 superset) ==="
           get_win_cis_controls_for_level "$RB_FILE" "2" | wc -l
+      
+          echo "=== First 10 controls at level 2 ==="
+          get_win_cis_controls_for_level "$RB_FILE" "2" | head -10
 
       # ── MAIN EXECUTION ──────────────────────────────────────────────────
       - name: '🚀 Execute Fleet Commander'
