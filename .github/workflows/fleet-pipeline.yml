@@ -164,6 +164,27 @@ jobs:
             echo 'matrix=[{"profile":"tm","level":"Standard","name":"TM-Baseline"}]' >> $GITHUB_OUTPUT
           fi
 
+      - name: '🐞 DEBUG: Verify control extraction'
+        if: matrix.os_target.os == 'Windows'
+        run: |
+          RB_FILE="window-default-cis/window-baseline/controls/cis_ws2022_v5_0_0_benchmark.rb"
+          echo "Total controls in file:"
+          grep -c "^control " "$RB_FILE"
+          echo "---"
+          echo "L1 controls (tag match):"
+          grep -c "tag level: \['L1'\]" "$RB_FILE"
+          echo "---"
+          echo "L2 controls (tag match):"
+          grep -c "tag level: \['L2'\]" "$RB_FILE"
+          echo "---"
+          echo "First 10 lines from get_win_cis_controls_for_level (level=2):"
+          source multi_os_benchmark.sh 2>/dev/null || true
+          get_win_cis_controls_for_level "$RB_FILE" "2" | head -10
+          echo "---"
+          echo "Total count from function (level=2):"
+          get_win_cis_controls_for_level "$RB_FILE" "2" | wc -l
+
+          
       # ── Azure auth ──────────────────────────────────────────────────────
       - name: '🔐 [Azure] Login'
         if: steps.set-cloud.outputs.cloud == 'azure'
