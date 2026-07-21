@@ -1351,7 +1351,7 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
     for ip in "${WINDOWS_MACHINES[@]}"; do
         (
             cloud_add_port_rule "$ip" 22 "Allow_SSH_Runner_Only_Win"
-
+            sleep 5 # let the SG rule propagate before probing
             # Try the ghost user first — it's what every phase after this one
             # actually uses, and it's usually already provisioned. Only fall
             # back to Administrator if svc_audit is genuinely unreachable.
