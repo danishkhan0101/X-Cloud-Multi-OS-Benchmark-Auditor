@@ -474,7 +474,7 @@ function Set-CISAdminTemplatesComputer {
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization' -Name 'NoLockScreenSlideshow' -Type DWord -Value 1  # 18.1.1.2
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\InputPersonalization' -Name 'AllowInputPersonalization' -Type DWord -Value 0  # 18.1.2.2
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Name 'AllowOnlineTips' -Type DWord -Value 0 -ControlId '18.1.3'  # 18.1.3
-    if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'LocalAccountTokenFilterPolicy' -Type DWord -Value 0 }  # 18.4.1
+    # if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'LocalAccountTokenFilterPolicy' -Type DWord -Value 0 }  # 18.4.1
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\mrxsmb10' -Name 'Start' -Type DWord -Value 4  # 18.4.2
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' -Name 'SMB1' -Type DWord -Value 0  # 18.4.3
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Cryptography\Wintrust\Config' -Name 'EnableCertPaddingCheck' -Type DWord -Value 1  # 18.4.4
@@ -516,13 +516,13 @@ function Set-CISAdminTemplatesComputer {
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit' -Name 'ProcessCreationIncludeCmdLine_Enabled' -Type DWord -Value 1  # 18.9.3.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters' -Name 'AllowEncryptionOracle' -Type DWord -Value 0  # 18.9.4.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CredentialsDelegation' -Name 'AllowProtectedCreds' -Type DWord -Value 1  # 18.9.4.2
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'EnableVirtualizationBasedSecurity' -Type DWord -Value 1  # 18.9.5.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'RequirePlatformSecurityFeatures' -Type DWord -Value 1  # 18.9.5.2
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'HypervisorEnforcedCodeIntegrity' -Type DWord -Value 1  # 18.9.5.3
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'HVCIMATRequired' -Type DWord -Value 1  # 18.9.5.4
-    if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'LsaCfgFlags' -Type DWord -Value 1 }  # 18.9.5.5
-    if ($ServerRole -eq 'domain_controller') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'LsaCfgFlags' -Type DWord -Value 0 }  # 18.9.5.6
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'ConfigureSystemGuardLaunch' -Type DWord -Value 1  # 18.9.5.7
+    # Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'EnableVirtualizationBasedSecurity' -Type DWord -Value 1  # 18.9.5.1
+    # Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'RequirePlatformSecurityFeatures' -Type DWord -Value 1  # 18.9.5.2
+    # Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'HypervisorEnforcedCodeIntegrity' -Type DWord -Value 1  # 18.9.5.3
+    # Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'HVCIMATRequired' -Type DWord -Value 1  # 18.9.5.4
+    # if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'LsaCfgFlags' -Type DWord -Value 1 }  # 18.9.5.5
+    # if ($ServerRole -eq 'domain_controller') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'LsaCfgFlags' -Type DWord -Value 0 }  # 18.9.5.6
+    # Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'ConfigureSystemGuardLaunch' -Type DWord -Value 1  # 18.9.5.7
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceMetadata' -Name 'PreventDeviceMetadataFromNetwork' -Type DWord -Value 1  # 18.9.7.2
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Policies\EarlyLaunch' -Name 'DriverLoadPolicy' -Type DWord -Value 3  # 18.9.13.1
     Set-CISRegValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Policies' -Name 'ClfsAuthenticationChecking' -Type DWord -Value 1  # 18.9.17.1
@@ -550,7 +550,7 @@ function Set-CISAdminTemplatesComputer {
     if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS' -Name 'PostAuthenticationResetDelay' -Type DWord -Value 1 }  # 18.9.26.7
     if ($ServerRole -eq 'member_server') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS' -Name 'PostAuthenticationActions' -Type DWord -Value 3 }  # 18.9.26.8
     if ($ServerRole -eq 'domain_controller') { Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' -Name 'AllowCustomSSPsAPs' -Type DWord -Value 0 }  # 18.9.27.1
-    Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' -Name 'RunAsPPL' -Type DWord -Value 1  # 18.9.27.2
+    # Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' -Name 'RunAsPPL' -Type DWord -Value 1  # 18.9.27.2
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\ControlPanel\International' -Name 'BlockUserInputMethodsForSignIn' -Type DWord -Value 1 -ControlId '18.9.28.1'  # 18.9.28.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' -Name 'BlockUserFromShowingAccountDetailsOnSignin' -Type DWord -Value 1  # 18.9.29.1
     Set-CISRegValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' -Name 'DontDisplayNetworkSelectionUI' -Type DWord -Value 1  # 18.9.29.2
@@ -819,3 +819,23 @@ finally { Stop-Transcript | Out-Null }
 #   MANUAL  18.10.59.2     Ensure 'Allow Cloud Search' is set to 'Enabled: Disable Cloud Search' (Automated)
 #   MANUAL  18.10.63.1     Ensure 'Turn off KMS Client Online AVS Validation' is set to 'Enabled' (Automated)
 #   MANUAL  18.10.93.2.1   Ensure 'Prevent users from modifying settings' is set to 'Enabled' (Automated)
+
+# ===========================================================================
+# EXCLUDED — hardware/architecture incompatible with this fleet's VM class
+# (no nested-virtualization/hypervisor exposure to guest, Secure Boot
+# reports "Unsupported") and with the SSH-based ghost-user audit model.
+# Applying the UEFI-locked settings (18.9.5.3/.5/18.9.27.2) to a VM whose
+# firmware cannot complete the UEFI-lock handshake caused an unrecoverable
+# boot failure on ecs-audit-window on 2026-07-21. Do not re-enable without
+# first gating on hardware capability (Confirm-SecureBootUEFI +
+# Get-CimInstance Win32_DeviceGuard -Property VirtualizationBasedSecurityStatus).
+# ===========================================================================
+#   EXCLUDED  18.4.1        LocalAccountTokenFilterPolicy — breaks local-account SSH pubkey auth (svc_audit)
+#   EXCLUDED  18.9.5.1      EnableVirtualizationBasedSecurity
+#   EXCLUDED  18.9.5.2      RequirePlatformSecurityFeatures
+#   EXCLUDED  18.9.5.3      HypervisorEnforcedCodeIntegrity (UEFI lock)
+#   EXCLUDED  18.9.5.4      HVCIMATRequired
+#   EXCLUDED  18.9.5.5      LsaCfgFlags — Credential Guard, MS role (UEFI lock)
+#   EXCLUDED  18.9.5.6      LsaCfgFlags — Credential Guard, DC role
+#   EXCLUDED  18.9.5.7      ConfigureSystemGuardLaunch — Secure Launch
+#   EXCLUDED  18.9.27.2     RunAsPPL — LSA process protection (UEFI lock)
