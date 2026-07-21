@@ -1351,15 +1351,27 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
     for ip in "${WINDOWS_MACHINES[@]}"; do
         (
             cloud_add_port_rule "$ip" 22 "Allow_SSH_Runner_Only_Win"
-            sleep 5 # let the SG rule propagate before probing
+
             # Try the ghost user first — it's what every phase after this one
-            # actually uses, and it's usually already provisioned. Only fall
-            # back to Administrator if svc_audit is genuinely unreachable.
-            if ssh -n -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
-                   "${WIN_GHOST_USER}@${ip}" "echo SSH_OK" 2>/dev/null | grep -q SSH_OK; then
+            # actually uses, and it's usually already provisioned. Retry a
+            # few times since the SG rule may still be propagating right
+            # after cloud_add_port_rule returns. Only fall back to
+            # Administrator if svc_audit is genuinely unreachable after
+            # giving it a real chance.
+            svc_audit_ok=false
+            for _attempt in 1 2 3 4; do
+                if ssh -n -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+                       "${WIN_GHOST_USER}@${ip}" "echo SSH_OK" 2>/dev/null | grep -q SSH_OK; then
+                    svc_audit_ok=true
+                    break
+                fi
+                sleep 5
+            done
+
+            if [ "$svc_audit_ok" == true ]; then
                 echo -e "${GREEN}✅ [Win Bootstrap] ${WIN_GHOST_USER} already reachable on ${ip} — skipping Administrator bootstrap${NC}"
             else
-                echo -e "${YELLOW}⚠️  [Win Bootstrap] ${WIN_GHOST_USER} unreachable on ${ip} — falling back to ${WIN_SSH_USER}${NC}"
+                echo -e "${YELLOW}⚠️  [Win Bootstrap] ${WIN_GHOST_USER} unreachable on ${ip} after retries — falling back to ${WIN_SSH_USER}${NC}"
                 wait_for_ssh "$ip" "$WIN_SSH_USER" || {
                     echo -e "${RED}❌ [Win Bootstrap] SSH unreachable via both ${WIN_GHOST_USER} and ${WIN_SSH_USER}: $ip${NC}"
                     exit 1
