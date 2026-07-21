@@ -81,7 +81,7 @@ prefetch_scap_packages() {
     echo -e "\n${BOLD}${CYAN}📦 PHASE 0.2b: SCAP PACKAGE PRE-FETCH (runner has internet)${NC}"
 
     if [[ "${H_TARGET_OS,,}" == "windows" ]]; then
-        echo -e "${GREEN}   ✅ Windows-only run — cinc-auditor runs from runner via WinRM. No SCAP packages needed. Skipping.${NC}"
+        echo -e "${GREEN}   ✅ Windows-only run — cinc-auditor runs from runner via SSH. No SCAP packages needed. Skipping.${NC}"
         return 0
     fi
 
@@ -382,6 +382,43 @@ prefetch_scap_packages() {
     fi
     return $failed
 }
+# ======================================================
+# HELPER: get_win_cis_controls_for_level
+# Extracts control IDs matching the requested CIS level from the
+# combined L1+L2 benchmark file, since profile_level is report
+# metadata only — cinc-auditor doesn't filter controls by it natively.
+#   level=1 → only tag level: ['L1']
+#   level=2 → tag level: ['L1'] OR ['L2']  (L2 scan = full L1+L2 superset)
+# ======================================================
+
+get_win_cis_controls_for_level() {
+    local rb_file="$1"
+    local level="$2"
+
+    if [ "$level" == "1" ]; then
+        awk '
+            /^control / {
+                cur = $2
+                gsub(/[\x27"]/, "", cur)
+            }
+            /tag level:/ && /\x27L1\x27/ {
+                print cur
+            }
+        ' "$rb_file"
+    else
+        awk '
+            /^control / {
+                cur = $2
+                gsub(/[\x27"]/, "", cur)
+            }
+            /tag level:/ && (/\x27L1\x27/ || /\x27L2\x27/) {
+                print cur
+            }
+        ' "$rb_file"
+    fi
+}
+
+
 
 # ======================================================
 # GUARD: validate_win_cis_profile
@@ -1754,17 +1791,32 @@ run_phase_1() {
                     }
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/CIS L${WIN_INSPEC_LVL}] Scanning $IP${NC}"
-                        timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
-                            -t "ssh://${WIN_GHOST_USER}@${IP}" \
-                            --input "server_role=${WIN_SERVER_ROLE}" \
-                            --input "profile_level=${WIN_INSPEC_LVL}" \
-                            --reporter "json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
-                        rc=$?
-                        case $rc in
-                            0|100|101) echo -e "${GREEN}✅ [Phase1/Win/CIS L${WIN_INSPEC_LVL}] $IP scan complete (rc=$rc)${NC}" ;;
-                            124)       echo -e "${RED}❌ [Phase1/Win/CIS L${WIN_INSPEC_LVL}] scan TIMED OUT on $IP after ${WIN_SCAN_TIMEOUT_SEC}s${NC}" ;;
-                            *)         echo -e "${RED}❌ [Phase1/Win/CIS L${WIN_INSPEC_LVL}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
-                        esac
+                    
+                        WIN_RB_FILE="${WIN_CIS_BENCHMARK}/controls/cis_ws2022_v5_0_0_benchmark.rb"
+                        mapfile -t WIN_LEVEL_CONTROLS < <(get_win_cis_controls_for_level "$WIN_RB_FILE" "$WIN_INSPEC_LVL")
+                    
+                        if [ ${#WIN_LEVEL_CONTROLS[@]} -eq 0 ]; then
+                            echo -e "${RED}❌ [Phase1/Win/CIS] No controls matched level ${WIN_INSPEC_LVL} in ${WIN_RB_FILE} — aborting scan for ${IP}${NC}"
+                        else
+                            echo -e "${CYAN}   ${#WIN_LEVEL_CONTROLS[@]} controls selected for CIS L${WIN_INSPEC_LVL}${NC}"
+                            CONTROL_ARGS=()
+                            for c in "${WIN_LEVEL_CONTROLS[@]}"; do
+                                CONTROL_ARGS+=(--controls "$c")
+                            done
+                    
+                            timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
+                                -t "ssh://${WIN_GHOST_USER}@${IP}" \
+                                --input "server_role=${WIN_SERVER_ROLE}" \
+                                --input "profile_level=${WIN_INSPEC_LVL}" \
+                                "${CONTROL_ARGS[@]}" \
+                                --reporter "json:heimdall_before_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
+                            rc=$?
+                            case $rc in
+                                0|100|101) echo -e "${GREEN}✅ [Phase1/Win/CIS L${WIN_INSPEC_LVL}] $IP scan complete (rc=$rc)${NC}" ;;
+                                124)       echo -e "${RED}❌ [Phase1/Win/CIS L${WIN_INSPEC_LVL}] scan TIMED OUT on $IP after ${WIN_SCAN_TIMEOUT_SEC}s${NC}" ;;
+                                *)         echo -e "${RED}❌ [Phase1/Win/CIS L${WIN_INSPEC_LVL}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
+                            esac
+                        fi
                     fi
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}🔎 [Phase1/Win/${ORG_PREFIX^^}] Scanning $IP...${NC}"
@@ -2400,17 +2452,32 @@ run_phase_4() {
                     }
                     if [ "$RUN_CIS" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] Verifying $IP...${NC}"
-                        timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
-                            -t "ssh://${WIN_GHOST_USER}@${IP}" \
-                            --input "server_role=${WIN_SERVER_ROLE}" \
-                            --input "profile_level=${WIN_INSPEC_LVL}" \
-                            --reporter "json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
-                        rc=$?
-                        case $rc in
-                            0|100|101) echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] $IP verify complete (rc=$rc)${NC}" ;;
-                            124)       echo -e "${RED}❌ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] scan TIMED OUT on $IP after ${WIN_SCAN_TIMEOUT_SEC}s${NC}" ;;
-                            *)         echo -e "${RED}❌ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
-                        esac
+                    
+                        WIN_RB_FILE="${WIN_CIS_BENCHMARK}/controls/cis_ws2022_v5_0_0_benchmark.rb"
+                        mapfile -t WIN_LEVEL_CONTROLS < <(get_win_cis_controls_for_level "$WIN_RB_FILE" "$WIN_INSPEC_LVL")
+                    
+                        if [ ${#WIN_LEVEL_CONTROLS[@]} -eq 0 ]; then
+                            echo -e "${RED}❌ [Phase4/Win/CIS] No controls matched level ${WIN_INSPEC_LVL} in ${WIN_RB_FILE} — aborting verify scan for ${IP}${NC}"
+                        else
+                            echo -e "${CYAN}   ${#WIN_LEVEL_CONTROLS[@]} controls selected for CIS L${WIN_INSPEC_LVL} verify scan${NC}"
+                            CONTROL_ARGS=()
+                            for c in "${WIN_LEVEL_CONTROLS[@]}"; do
+                                CONTROL_ARGS+=(--controls "$c")
+                            done
+                    
+                            timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CIS_BENCHMARK}" \
+                                -t "ssh://${WIN_GHOST_USER}@${IP}" \
+                                --input "server_role=${WIN_SERVER_ROLE}" \
+                                --input "profile_level=${WIN_INSPEC_LVL}" \
+                                "${CONTROL_ARGS[@]}" \
+                                --reporter "json:heimdall_after_CIS_L${WIN_INSPEC_LVL}_WIN_${IP}.json"
+                            rc=$?
+                            case $rc in
+                                0|100|101) echo -e "${GREEN}✅ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] $IP verify complete (rc=$rc)${NC}" ;;
+                                124)       echo -e "${RED}❌ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] scan TIMED OUT on $IP after ${WIN_SCAN_TIMEOUT_SEC}s${NC}" ;;
+                                *)         echo -e "${RED}❌ [Phase4/Win/CIS L${WIN_INSPEC_LVL}] cinc-auditor failed on $IP (rc=$rc)${NC}" ;;
+                            esac
+                        fi
                     fi
                     if [ "$RUN_ORG" == true ]; then
                         echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] Verifying $IP...${NC}"
