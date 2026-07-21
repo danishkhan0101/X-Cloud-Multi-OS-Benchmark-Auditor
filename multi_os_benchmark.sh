@@ -1011,6 +1011,27 @@ reassert_ssh_rule_all_linux() {
 }
 
 
+reassert_ssh_rule_all_windows() {
+    [ "${CLOUD_PROVIDER}" != "huaweicloud" ] && return 0
+    [ ${#WINDOWS_MACHINES[@]} -eq 0 ] && return 0
+
+    local runner_ip
+    runner_ip="${RUNNER_IP:-$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null)}"
+    echo -e "${CYAN}🔁 [SG-Reassert] Refreshing port-22 rule for ${#WINDOWS_MACHINES[@]} Windows host(s) → runner ${runner_ip}${NC}"
+
+    for ip in "${WINDOWS_MACHINES[@]}"; do
+        local sg_id="${IP_TO_SG_ID[$ip]:-}"
+        if [ -z "$sg_id" ]; then
+            echo -e "${YELLOW}⚠️  [SG-Reassert] No SG ID for ${ip} — skipping${NC}"
+            continue
+        fi
+        HW_VPC_ENDPOINT="${HW_VPC_ENDPOINT}" \
+        python3 "${SCRIPT_DIR}/hw_sg_rule_manage.py" \
+            --sg-id "$sg_id" --port 22 --remote-ip "$runner_ip" --protocol tcp
+    done
+}
+
+
 # ======================================================
 # HELPER: cloud_vm_run_shell
 # NOTE (SSH key migration): For huaweicloud this is a plain keyed SSH call
@@ -1857,6 +1878,7 @@ run_remediation() {
     echo -e "\n${BOLD}🛠️  PHASE 2 & 3: Executing Remediation (Hardened SSH)...${NC}"
 
     reassert_ssh_rule_all_linux
+    reassert_ssh_rule_all_windows
 
     if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "ubuntu" ]]; then
         if [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && [ "$RUN_CIS" == true ]; then
@@ -2188,6 +2210,8 @@ run_remediation() {
 # ======================================================
 run_phase_4() {
     echo -e "\n${BOLD}🔄 PHASE 4: Verification Scans (SCP install → scan)...${NC}"
+
+    reassert_ssh_rule_all_windows
 
     local SCAN_SSH_OPTS="-n -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
