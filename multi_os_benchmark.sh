@@ -464,17 +464,23 @@ run_win_ps1_remediation() {
         return 1
     fi
 
-    echo -e "${CYAN}📤 [WinPS1/${ip}] Uploading + running via SSH${NC}"
+    local ps1_level="L1"
+    [ "$cis_level" == "Level 2" ] && ps1_level="L2"
+
+    local sections_arg=""
+    [ -n "$sections" ] && sections_arg=" -Sections ${sections}"
+
+    echo -e "${CYAN}📤 [WinPS1/${ip}] Uploading + running via SSH (CIS ${ps1_level})${NC}"
     scp -o BatchMode=yes -o StrictHostKeyChecking=no \
         "$WIN_PS1_REMEDIATE" "$WIN_GHOST_USER@${ip}:C:/Windows/Temp/Invoke-CISRemediation-Combined.ps1"
 
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "$WIN_GHOST_USER@${ip}" \
-        "powershell -NoProfile -File C:\\Windows\\Temp\\Invoke-CISRemediation-Combined.ps1 -ServerRole '${WIN_SERVER_ROLE}'"
+        "powershell -NoProfile -File C:\\Windows\\Temp\\Invoke-CISRemediation-Combined.ps1 -ServerRole '${WIN_SERVER_ROLE}' -CisLevel '${ps1_level}'${sections_arg}"
 
     local rc=$?
     ssh -n "$WIN_GHOST_USER@${ip}" "Remove-Item C:\\Windows\\Temp\\Invoke-CISRemediation-Combined.ps1 -Force -ErrorAction SilentlyContinue" 2>/dev/null
 
-    [ $rc -eq 0 ] && echo -e "${GREEN}✅ [WinPS1/${ip}] Remediation complete${NC}" \
+    [ $rc -eq 0 ] && echo -e "${GREEN}✅ [WinPS1/${ip}] Remediation complete (${ps1_level})${NC}" \
                   || echo -e "${RED}❌ [WinPS1/${ip}] Remediation failed (rc=${rc})${NC}"
     return $rc
 }
