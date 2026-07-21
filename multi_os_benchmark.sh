@@ -1194,13 +1194,17 @@ azure)
 
 huaweicloud)
     echo -e "${CYAN}📡 [HuaweiCloud] Querying ECS instances via SDK [endpoint: ${HW_ECS_ENDPOINT}]...${NC}"
+    # Wire the --targets flag into the tag filter. "all" flows straight through —
+    # hw_ecs_discover.py's tag_matches() already treats tag_val=="all" as
+    # "match everything", so no special-casing needed here.
+    _hw_tag_val="${H_TARGETS}"
     HW_RAW=$(
         HUAWEICLOUD_ACCESS_KEY="${HUAWEICLOUD_ACCESS_KEY}" \
         HUAWEICLOUD_SECRET_KEY="${HUAWEICLOUD_SECRET_KEY}" \
         HW_PROJECT_ID="${HW_PROJECT_ID}" \
         HW_ECS_ENDPOINT="${HW_ECS_ENDPOINT}" \
         HW_ECS_TAG_KEY="${HW_ECS_TAG_KEY}" \
-        HW_ECS_TAG_VAL="${HW_ECS_TAG_VAL}" \
+        HW_ECS_TAG_VAL="${_hw_tag_val}" \
         HW_EPS_ID="${HW_EPS_ID}" \
         python3 "${SCRIPT_DIR}/hw_ecs_discover.py" --tsv
     )
