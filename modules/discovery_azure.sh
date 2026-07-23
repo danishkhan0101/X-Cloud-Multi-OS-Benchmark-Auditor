@@ -99,9 +99,67 @@ azure_add_port_rule() {
 }
 
 # ------------------------------------------------------
+# azure_vm_bootstrap_ssh
+# Repair-only fallback: installs/starts OpenSSH Server and
+# trusts the runner's public key via the run-command channel.
+# Call this ONLY when wait_for_ssh has already failed — SSH
+# is the primary path (parity with CAE Windows); run-command
+# stays as the thing Huawei doesn't have when SSH breaks.
+# Args: ip [pubkey_path]
+# ------------------------------------------------------
+azure_vm_bootstrap_ssh() {
+    local ip="$1"
+    local pubkey_path="${2:-$HOME/.ssh/id_rsa.pub}"
+    local vm_name="${IP_TO_VM_NAME[$ip]:-}"
+
+    if [ -z "$vm_name" ]; then
+        log_warn "[Azure] No VM name resolved for ${ip} — cannot bootstrap SSH"
+        return 1
+    fi
+
+    if [ ! -f "$pubkey_path" ]; then
+        log_error "[Azure] Public key not found at ${pubkey_path} — cannot bootstrap SSH for ${vm_name}"
+        return 1
+    fi
+
+    local pubkey
+    pubkey=$(cat "$pubkey_path")
+
+    log_warn "[Azure] SSH unreachable on ${vm_name} (${ip}) — attempting repair via run-command"
+
+    local script
+    script=$(cat <<PS1
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Start-Service sshd
+Set-Service -Name sshd -StartupType Automatic
+New-NetFirewallRule -Name sshd -DisplayName "OpenSSH Server (sshd)" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction SilentlyContinue
+New-Item -Force -ItemType Directory -Path "\$env:ProgramData\ssh" | Out-Null
+Add-Content -Path "\$env:ProgramData\ssh\administrators_authorized_keys" -Value "${pubkey}"
+icacls "\$env:ProgramData\ssh\administrators_authorized_keys" /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
+PS1
+)
+
+    timeout 180 az vm run-command invoke \
+        -g "$RG_NAME" -n "$vm_name" \
+        --command-id RunPowerShellScript \
+        --scripts "$script" \
+        -o none >/dev/null 2>&1
+
+    local rc=$?
+    if [ $rc -eq 0 ]; then
+        log_ok "[Azure] SSH bootstrap command sent to ${vm_name} — re-checking connectivity"
+    else
+        log_error "[Azure] SSH bootstrap run-command failed for ${vm_name} (rc=${rc})"
+    fi
+    return $rc
+}
+
+# ------------------------------------------------------
 # azure_vm_run_shell
 # Executes a shell script on the VM via az vm run-command
 # (out-of-band control plane, doesn't require SSH access).
+# Retained as a REPAIR-ONLY path now that SSH is primary for
+# Windows — do not use this for routine scan/remediate calls.
 # ------------------------------------------------------
 azure_vm_run_shell() {
     local ip="$1"
