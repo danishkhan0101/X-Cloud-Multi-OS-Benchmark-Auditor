@@ -2170,7 +2170,31 @@ run_remediation() {
                 wait
             fi
             if [ "$RUN_ORG" == true ]; then
-                echo -e "${YELLOW}⚠️  [Remediation/Win/${ORG_PREFIX^^}] Windows ORG remediation via Ansible is not yet migrated to SSH — skipping.${NC}"
+                echo -e "${CYAN}🛠️  [Remediation/Win/${ORG_PREFIX^^}] Running ${WIN_CUSTOM_PLAYBOOK} over SSH...${NC}"
+
+                if [ ! -f "$WIN_CUSTOM_PLAYBOOK" ]; then
+                    echo -e "${RED}❌ [Remediation/Win/${ORG_PREFIX^^}] Playbook not found: ${WIN_CUSTOM_PLAYBOOK}${NC}"
+                else
+                    for IP in "${WINDOWS_MACHINES[@]}"; do
+                        wait_for_ssh "$IP" "$WIN_GHOST_USER" || \
+                            echo -e "${YELLOW}⚠️  [Remediation/Win/${ORG_PREFIX^^}] ${IP} not responding yet — Ansible will retry/timeout on it${NC}"
+                    done
+
+                    ANSIBLE_HOST_KEY_CHECKING=False \
+                    ansible-playbook \
+                        -i inventory.ini \
+                        "$WIN_CUSTOM_PLAYBOOK" \
+                        --limit windows_nodes \
+                        --ssh-extra-args="-o StrictHostKeyChecking=no -o BatchMode=yes" \
+                        -v
+                    ANSIBLE_RC=$?
+
+                    if [ $ANSIBLE_RC -ne 0 ]; then
+                        echo -e "${RED}❌ [Remediation/Win/${ORG_PREFIX^^}] Playbook FAILED (rc=${ANSIBLE_RC})${NC}"
+                    else
+                        echo -e "${GREEN}✅ [Remediation/Win/${ORG_PREFIX^^}] Playbook complete (rc=${ANSIBLE_RC})${NC}"
+                    fi
+                fi
             fi
 
             if [ "$RUN_CIS" == true ] && [ "${WIN_REBOOT_AFTER_REMEDIATION}" == "true" ]; then
