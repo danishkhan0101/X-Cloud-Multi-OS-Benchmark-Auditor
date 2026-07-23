@@ -325,7 +325,7 @@ function Set-CISUserRights {
         "SeDebugPrivilege = *S-1-5-32-544"   # 2.2.19
         "SeDenyBatchLogonRight = *S-1-5-32-546"   # 2.2.22
         "SeDenyInteractiveLogonRight = *S-1-5-32-546"   # 2.2.24
-        "SeDenyNetworkLogonRight = *S-1-5-32-546,*S-1-5-114"   # 2.2.21
+        "SeDenyNetworkLogonRight = *S-1-5-32-546"   # 2.2.21 — *S-1-5-114 dropped: blocks svc_audit (local admin) SSH logon (S4U network-logon), see incident 2026-07-23
         "SeDenyRemoteInteractiveLogonRight = *S-1-5-32-546,*S-1-5-113"   # 2.2.26
         "SeDenyServiceLogonRight = *S-1-5-32-546"   # 2.2.23
         "SeEnableDelegationPrivilege = "   # 2.2.28
