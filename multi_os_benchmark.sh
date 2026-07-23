@@ -2537,7 +2537,7 @@ run_phase_4() {
                         echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] Verifying $IP...${NC}"
                         timeout "${WIN_SCAN_TIMEOUT_SEC}" cinc-auditor exec "${WIN_CUSTOM_BENCHMARK}" \
                             -t "ssh://${WIN_GHOST_USER}@${IP}" \
-                            --reporter "json:heimdall_before_${ORG_PREFIX^^}_WIN_${IP}.json"
+                            --reporter "json:heimdall_after_${ORG_PREFIX^^}_WIN_${IP}.json"
                         rc=$?
                         case $rc in
                             0|100|101) echo -e "${GREEN}✅ [Phase4/Win/${ORG_PREFIX^^}] $IP verify complete (rc=$rc)${NC}" ;;
