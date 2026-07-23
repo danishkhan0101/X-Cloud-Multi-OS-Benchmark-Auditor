@@ -271,7 +271,7 @@ function Set-CISUserRights {
 
     if ($ServerRole -eq "domain_controller") {
         $rights = @(
-        "SeAssignPrimaryTokenPrivilege = *S-1-5-19,*S-1-5-20"   # 2.2.44
+        "SeAssignPrimaryTokenPrivilege = *S-1-5-18,*S-1-5-19,*S-1-5-20"   # 2.2.44
         "SeAuditPrivilege = *S-1-5-19,*S-1-5-20"   # 2.2.30
         "SeBackupPrivilege = *S-1-5-32-544"   # 2.2.11
         "SeBatchLogonRight = *S-1-5-32-544"   # 2.2.36
@@ -289,7 +289,7 @@ function Set-CISUserRights {
         "SeEnableDelegationPrivilege = *S-1-5-32-544"   # 2.2.27
         "SeImpersonatePrivilege = *S-1-5-32-544,*S-1-5-19,*S-1-5-20,*S-1-5-6"   # 2.2.31
         "SeIncreaseBasePriorityPrivilege = *S-1-5-32-544,*S-1-5-90-0"   # 2.2.33
-        "SeIncreaseQuotaPrivilege = *S-1-5-32-544,*S-1-5-19,*S-1-5-20"   # 2.2.6
+        "SeIncreaseQuotaPrivilege = *S-1-5-18,*S-1-5-32-544,*S-1-5-19,*S-1-5-20"   # 2.2.6
         "SeInteractiveLogonRight = *S-1-5-32-544,*S-1-5-9"   # 2.2.7
         "SeLoadDriverPrivilege = *S-1-5-32-544"   # 2.2.34
         "SeLockMemoryPrivilege = "   # 2.2.35
@@ -313,7 +313,7 @@ function Set-CISUserRights {
         )
     } else {
         $rights = @(
-        "SeAssignPrimaryTokenPrivilege = *S-1-5-19,*S-1-5-20"   # 2.2.44
+        "SeAssignPrimaryTokenPrivilege = *S-1-5-18,*S-1-5-19,*S-1-5-20"   # 2.2.44
         "SeAuditPrivilege = *S-1-5-19,*S-1-5-20"   # 2.2.30
         "SeBackupPrivilege = *S-1-5-32-544"   # 2.2.11
         "SeBatchLogonRight = *S-1-5-32-544"   # 2.2.36
@@ -331,7 +331,7 @@ function Set-CISUserRights {
         "SeEnableDelegationPrivilege = "   # 2.2.28
         "SeImpersonatePrivilege = *S-1-5-32-544,*S-1-5-19,*S-1-5-20,*S-1-5-6"   # 2.2.32
         "SeIncreaseBasePriorityPrivilege = *S-1-5-32-544,*S-1-5-90-0"   # 2.2.33
-        "SeIncreaseQuotaPrivilege = *S-1-5-32-544,*S-1-5-19,*S-1-5-20"   # 2.2.6
+        "SeIncreaseQuotaPrivilege = *S-1-5-18,*S-1-5-32-544,*S-1-5-19,*S-1-5-20"   # 2.2.6
         "SeInteractiveLogonRight = *S-1-5-32-544"   # 2.2.8
         "SeLoadDriverPrivilege = *S-1-5-32-544"   # 2.2.34
         "SeLockMemoryPrivilege = "   # 2.2.35
