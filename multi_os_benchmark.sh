@@ -142,6 +142,18 @@ cloud_vm_restart() {
     esac
 }
 
+# Repair-only fallback for when SSH is unreachable on a Windows host.
+# Azure can push OpenSSH via the run-command control-plane channel;
+# Huawei Cloud has no equivalent out-of-band channel for Windows, so
+# this is intentionally a no-op there — the caller must treat that as
+# "no automated recovery available" rather than retrying forever.
+cloud_vm_bootstrap_ssh() {
+    case "${CLOUD_PROVIDER}" in
+        azure)       azure_vm_bootstrap_ssh "$@" ;;
+        huaweicloud) log_warn "[HW] No out-of-band SSH-repair channel for Windows — manual intervention required"; return 1 ;;
+    esac
+}
+
 cloud_vm_get_power_state() {
     case "${CLOUD_PROVIDER}" in
         azure)       azure_vm_get_power_state "$@" ;;
@@ -365,10 +377,15 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
                 log_ok "[Win Bootstrap] ${WIN_GHOST_USER} already reachable on ${ip} — skipping Administrator bootstrap"
             else
                 log_warn "[Win Bootstrap] ${WIN_GHOST_USER} unreachable on ${ip} after retries — falling back to ${WIN_SSH_USER}"
-                wait_for_ssh "$ip" "$WIN_SSH_USER" || {
-                    log_error "[Win Bootstrap] SSH unreachable via both ${WIN_GHOST_USER} and ${WIN_SSH_USER}: $ip"
-                    exit 1
-                }
+                if ! wait_for_ssh "$ip" "$WIN_SSH_USER"; then
+                    log_warn "[Win Bootstrap] SSH unreachable via ${WIN_SSH_USER} on ${ip} — attempting repair"
+                    if cloud_vm_bootstrap_ssh "$ip" && wait_for_ssh "$ip" "$WIN_SSH_USER" 6 10; then
+                        log_ok "[Win Bootstrap] SSH repaired on ${ip} — continuing"
+                    else
+                        log_error "[Win Bootstrap] SSH unreachable via both ${WIN_GHOST_USER} and ${WIN_SSH_USER}, and repair failed/unavailable: $ip"
+                        exit 1
+                    fi
+                fi
                 ensure_windows_ghost_user "$ip" || \
                     log_error "[Win Bootstrap] Ghost user provisioning failed: $ip"
             fi
