@@ -140,12 +140,18 @@ hw_add_port_rule() {
         return 1
     fi
 
-    HW_VPC_ENDPOINT="${HW_VPC_ENDPOINT}" \
-    python3 "${SCRIPT_DIR}/scripts/hw_sg_rule_manage.py" \
-        --sg-id "$sg_id" \
-        --port "$port" \
-        --remote-ip "$runner_ip" \
-        --protocol "$protocol"
+    # Serialize rule management per-SG to avoid races when multiple
+    # VMs share the same security group and run in parallel.
+    local lock_file="/tmp/hw_sg_lock_${sg_id}.lock"
+    (
+        flock -w 30 200 || { log_error "[HW] Timed out waiting for SG lock on ${sg_id}"; exit 1; }
+        HW_VPC_ENDPOINT="${HW_VPC_ENDPOINT}" \
+        python3 "${SCRIPT_DIR}/scripts/hw_sg_rule_manage.py" \
+            --sg-id "$sg_id" \
+            --port "$port" \
+            --remote-ip "$runner_ip" \
+            --protocol "$protocol"
+    ) 200>"$lock_file"
 }
 
 # ------------------------------------------------------
