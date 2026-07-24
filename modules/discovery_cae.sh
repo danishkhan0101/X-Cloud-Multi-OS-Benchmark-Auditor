@@ -17,9 +17,6 @@ __DISCOVERY_CAE_SH_LOADED=1
 
 # ------------------------------------------------------
 # hw_check_prereqs
-# Verifies the Python SDK is installed and credentials are
-# present, then does a live auth/connectivity check via
-# hw_ecs_discover.py before any real work starts.
 # ------------------------------------------------------
 hw_check_prereqs() {
     if ! python3 -c "import huaweicloudsdkecs" 2>/dev/null; then
@@ -50,9 +47,6 @@ hw_check_prereqs() {
 
 # ------------------------------------------------------
 # hw_discover_vms
-# Populates IP_TO_VM_ID / IP_TO_SG_ID and calls _map_vm
-# (defined in the orchestrator) for each running instance.
-# Args: tag_val ("all" or a specific Environment tag value)
 # ------------------------------------------------------
 hw_discover_vms() {
     local tag_val="$1"
@@ -79,8 +73,6 @@ hw_discover_vms() {
         return 1
     fi
 
-    # hw_ecs_discover.py --tsv emits: os_type, offer, name, ip, srv_id, sg_id
-    # (already filtered to ACTIVE/RUNNING, so we pass a literal "running")
     while IFS=$'\t' read -r os_type offer vm_name ip srv_id sg_id; do
         IP_TO_VM_ID["$ip"]="$srv_id"
         IP_TO_SG_ID["$ip"]="$sg_id"
@@ -90,8 +82,6 @@ hw_discover_vms() {
 
 # ------------------------------------------------------
 # hw_resolve_vm_by_ip
-# Used by the matrix-sharding path (--target-ip) to resolve
-# name/id/sg for a single IP not yet in the maps.
 # ------------------------------------------------------
 hw_resolve_vm_by_ip() {
     local target_ip="$1"
@@ -123,6 +113,14 @@ hw_resolve_vm_by_ip() {
 # Adds/refreshes an SG rule allowing the runner's IP on the
 # given port. Requires IP_TO_SG_ID[$ip] to already be set
 # by hw_discover_vms/hw_resolve_vm_by_ip.
+#
+# Rule management for a given SG is serialized via flock,
+# keyed on sg_id, so that multiple VMs sharing the same
+# security group (common in parallel multi-VM bootstrap
+# runs) don't race on list/delete/create against the same
+# SG at the same time. VMs on different SGs still run in
+# parallel — only the same-SG critical section is
+# serialized.
 # Args: ip port [protocol]
 # ------------------------------------------------------
 hw_add_port_rule() {
@@ -140,11 +138,9 @@ hw_add_port_rule() {
         return 1
     fi
 
-    # Serialize rule management per-SG to avoid races when multiple
-    # VMs share the same security group and run in parallel.
     local lock_file="/tmp/hw_sg_lock_${sg_id}.lock"
     (
-        flock -w 30 200 || { log_error "[HW] Timed out waiting for SG lock on ${sg_id}"; exit 1; }
+        flock -w 30 200 || { log_error "[HW] Timed out waiting for SG lock on ${sg_id} (${ip})"; exit 1; }
         HW_VPC_ENDPOINT="${HW_VPC_ENDPOINT}" \
         python3 "${SCRIPT_DIR}/scripts/hw_sg_rule_manage.py" \
             --sg-id "$sg_id" \
@@ -156,10 +152,6 @@ hw_add_port_rule() {
 
 # ------------------------------------------------------
 # hw_reassert_ssh_rule_all
-# Re-applies the port-22 SG rule for a list of IPs. Guards
-# against the SG rule being overwritten/expired between
-# discovery and the remediation phase actually running.
-# Args: ip1 [ip2 ...]
 # ------------------------------------------------------
 hw_reassert_ssh_rule_all() {
     local ips=("$@")
@@ -177,12 +169,6 @@ hw_reassert_ssh_rule_all() {
 
 # ------------------------------------------------------
 # hw_vm_run_shell
-# Runs a shell command over keyed SSH. Unlike Azure, there
-# is no out-of-band run-command channel here — this assumes
-# LINUX_ADMIN_USER's key is already trusted on the instance
-# (baked into the image or injected via cloud-init/user-data
-# at creation time). This function cannot bootstrap trust
-# from zero.
 # ------------------------------------------------------
 hw_vm_run_shell() {
     local ip="$1"
@@ -195,7 +181,6 @@ hw_vm_run_shell() {
 
 # ------------------------------------------------------
 # hw_vm_restart
-# Fire-and-forget hard reboot via the hcloud CLI.
 # ------------------------------------------------------
 hw_vm_restart() {
     local ip="$1"
@@ -215,9 +200,6 @@ hw_vm_restart() {
 
 # ------------------------------------------------------
 # hw_vm_get_power_state
-# Prints "running" or a lowercased status string, or
-# "unknown" on failure. Verbose SDK errors go to stderr
-# rather than getting silently swallowed.
 # ------------------------------------------------------
 hw_vm_get_power_state() {
     local ip="$1"
