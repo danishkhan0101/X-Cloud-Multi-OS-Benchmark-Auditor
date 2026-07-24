@@ -3,8 +3,10 @@
 hw_sg_rule_manage.py
 ─────────────────────
 Idempotent security-group ingress rule refresh for Alpha Edge (private HW Cloud).
-Deletes any existing ingress rule matching (security_group_id, port) then
-creates a fresh one scoped to the given remote IP.
+Deletes any existing ingress rule matching (security_group_id, port) that does
+NOT already match the target (protocol, remote_ip), then creates a fresh one
+scoped to the given remote IP. If a rule already matches exactly, this is a
+no-op — nothing is deleted or recreated.
 
 Usage:
   python3 hw_sg_rule_manage.py --sg-id <SG_ID> --port <PORT> --remote-ip <IP>
@@ -75,14 +77,25 @@ def main():
         log(f"❌ list_security_group_rules failed: {e.status_code} {e.error_code} {e.error_msg}")
         sys.exit(1)
 
-    # ── Step 2: delete any stale ingress rule for this exact port ────────
+    # ── Step 2: delete stale ingress rules for this port, skip if a
+    #            matching rule already exists (idempotent no-op) ────────
+    target_prefix = f"{args.remote_ip}/32"
+    already_correct = False
+
     for r in rules:
         d = r.to_dict() if hasattr(r, "to_dict") else {}
         if (
             d.get("direction") == "ingress"
             and str(d.get("port_range_min")) == str(args.port)
             and str(d.get("port_range_max")) == str(args.port)
+            and str(d.get("protocol")) == str(args.protocol)
         ):
+            if d.get("remote_ip_prefix") == target_prefix:
+                # Exactly the rule we want already exists — don't touch it.
+                already_correct = True
+                log(f"✅ Rule already correct: {args.protocol}/{args.port} ← {target_prefix} on SG {args.sg_id} (no-op)")
+                continue
+
             rule_id = d.get("id")
             log(f"🗑️  Deleting stale rule {rule_id} (port {args.port}, was {d.get('remote_ip_prefix')})")
             try:
@@ -91,6 +104,9 @@ def main():
                 client.delete_security_group_rule(del_req)
             except exceptions.ClientRequestException as e:
                 log(f"⚠️  delete failed (continuing): {e.status_code} {e.error_code} {e.error_msg}")
+
+    if already_correct:
+        sys.exit(0)
 
     # ── Step 3: create fresh rule scoped to current runner IP ────────────
     try:
@@ -101,12 +117,12 @@ def main():
             protocol=args.protocol,
             port_range_min=args.port,
             port_range_max=args.port,
-            remote_ip_prefix=f"{args.remote_ip}/32",
+            remote_ip_prefix=target_prefix,
         )
         body = CreateSecurityGroupRuleRequestBody(security_group_rule=option)
         create_req = CreateSecurityGroupRuleRequest(body=body)
         client.create_security_group_rule(create_req)
-        log(f"✅ Rule created: {args.protocol}/{args.port} ← {args.remote_ip}/32 on SG {args.sg_id}")
+        log(f"✅ Rule created: {args.protocol}/{args.port} ← {target_prefix} on SG {args.sg_id}")
     except exceptions.ClientRequestException as e:
         log(f"❌ create_security_group_rule failed: {e.status_code} {e.error_code} {e.error_msg}")
         sys.exit(1)
