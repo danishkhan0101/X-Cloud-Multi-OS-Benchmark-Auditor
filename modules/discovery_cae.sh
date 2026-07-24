@@ -135,6 +135,11 @@ hw_add_port_rule() {
         return 1
     fi
 
+    if [ -z "$runner_ip" ]; then
+        log_error "[HW] Failed to resolve runner IP — refusing to add SG rule for ${ip}"
+        return 1
+    fi
+
     HW_VPC_ENDPOINT="${HW_VPC_ENDPOINT}" \
     python3 "${SCRIPT_DIR}/scripts/hw_sg_rule_manage.py" \
         --sg-id "$sg_id" \
