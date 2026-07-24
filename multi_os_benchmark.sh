@@ -122,9 +122,15 @@ SCAP_CACHE_DIR="/tmp/scap_runner_cache"
 # need to know about each other.
 # ======================================================
 cloud_add_port_rule() {
+    # Azure's 3rd positional arg is a rule LABEL (e.g. "Allow_SSH_Runner_Only_Win").
+    # Huawei's 3rd positional arg is a PROTOCOL (e.g. "tcp"). These are NOT the
+    # same parameter — forwarding "$@" blindly sends the Azure-style label into
+    # Huawei's protocol slot, which the VPC API rejects (SecurityGroupRuleInvalidProtocol).
+    # Route explicitly per provider instead of assuming a shared signature.
+    local ip="$1" port="$2" label="${3:-}"
     case "${CLOUD_PROVIDER}" in
-        azure)       azure_add_port_rule "$@" ;;
-        huaweicloud) hw_add_port_rule "$@" ;;
+        azure)       azure_add_port_rule "$ip" "$port" "$label" ;;
+        huaweicloud) hw_add_port_rule "$ip" "$port" ;;  # protocol defaults to tcp inside hw_add_port_rule
     esac
 }
 
