@@ -289,13 +289,39 @@
         - { name: 'NoLMHash', data: 1 }
         - { name: 'LmCompatibilityLevel', data: 5 }
 
-    - name: WSB54-56 - Restrict Anonymous Pipes
+    # ====================================================================
+    # WSB54, WSB55, WSB56 - Anonymous Pipes & Shares (COMPLETE FIX)
+    # rb checks THREE separate things:
+    #   - NullSessionPipes       must be empty  (WSB54)
+    #   - RestrictNullSessAccess must be 1      (WSB55)
+    #   - NullSessionShares      must be empty  (WSB56)
+    # Original task only cleared NullSessionPipes — RestrictNullSessAccess
+    # and NullSessionShares were never remediated, so WSB55/56 would fail
+    # audit even after this playbook ran.
+    # ====================================================================
+    - name: WSB54 - Clear NullSessionPipes (no anonymous named pipe access)
       ansible.windows.win_regedit:
         path: HKLM:\System\CurrentControlSet\Services\LanmanServer\Parameters
         name: NullSessionPipes
-        data: "" # We will try a different value here
+        data: ""
         type: multistring
-      tags: test_fix
+      tags: wsb54
+
+    - name: WSB55 - Restrict anonymous access to named pipes and shares
+      ansible.windows.win_regedit:
+        path: HKLM:\System\CurrentControlSet\Services\LanmanServer\Parameters
+        name: RestrictNullSessAccess
+        data: 1
+        type: dword
+      tags: wsb55
+
+    - name: WSB56 - Clear NullSessionShares (no anonymous share access)
+      ansible.windows.win_regedit:
+        path: HKLM:\System\CurrentControlSet\Services\LanmanServer\Parameters
+        name: NullSessionShares
+        data: ""
+        type: multistring
+      tags: wsb56
 
     # =======================================================
     # SECTION 5: Active Directory Domain Member Settings
@@ -404,6 +430,32 @@
       when: >
         (av_result.rc | default(1) == 0) or 
         (av_verify.stdout is defined and 'True' in av_verify.stdout)
+
+    # ====================================================================
+    # WSB16 - Antivirus: verify the actual WinDefend SERVICE
+    # rb audits the service directly (installed + running), not the
+    # Set-MpPreference flag alone. The tasks above only toggle the
+    # preference; this ensures the service itself is enabled and started,
+    # which is what the InSpec control actually checks.
+    # ====================================================================
+    - name: WSB16 - Ensure Windows Defender service (WinDefend) is running
+      ansible.windows.win_service:
+        name: WinDefend
+        start_mode: auto
+        state: started
+      register: defender_service_result
+      ignore_errors: yes
+      tags: wsb16
+
+    - name: WSB16 - Warn if WinDefend service could not be started (Tamper Protection / 3rd-party AV)
+      debug:
+        msg: >
+          WARNING: WinDefend service is not running and could not be started.
+          This will FAIL the WSB16 audit control. Common causes: Tamper Protection
+          is enabled, or a third-party AV (which owns AV compliance instead) is installed.
+          Manual verification required.
+      when: defender_service_result is failed
+      tags: wsb16
 
     - name: WSB63 - Restrict RDP Remote Addresses (Remove 'Any')
       ansible.windows.win_shell: |
