@@ -325,8 +325,6 @@ When running in GitHub Actions, provide the following through repository setting
 | `GHOST_USER` | Name of the temporary JIT access-recovery account. |
 | `CUSTOM_XCCDF_PROFILE` | XCCDF profile ID for the custom TM baseline. |
 
-> `HW_CSMS_SECRET`, `AUDIT_PASS`, `AZURE_KV_NAME`, and `AZURE_KV_SECRET` are no longer used by this pipeline and should be removed from repository secrets/variables if still present. Windows access no longer depends on a stored password from Key Vault or a Cloud Secret Management Service lookup — both clouds now authenticate Windows over SSH, the same as Linux.
-
 ---
 
 *Engineered for continuous compliance and zero-trust automation across a cross-cloud, multi-OS fleet.*
