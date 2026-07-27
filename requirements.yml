@@ -1,4 +1,0 @@
-# requirements.yml
-roles:
-  - name: ansible-lockdown.windows_2022_cis
-    version: "3.0.0"
