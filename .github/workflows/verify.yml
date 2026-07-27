@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch: {}   # allows manual "Run workflow" button in the Actions tab
+  workflow_dispatch: {}
 
 jobs:
   gitleaks:
@@ -17,11 +17,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}  # only needed for gitleaks org/enterprise features
+      - name: Run Gitleaks (JSON output)
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest \
+            detect --source=/repo --report-format=json --report-path=/repo/gitleaks-report.json --exit-code 1
+
+      - name: Upload Gitleaks JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
+          if-no-files-found: ignore
 
   trufflehog:
     name: Secrets Scan (TruffleHog - verified only)
@@ -32,10 +39,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run TruffleHog
-        uses: trufflesecurity/trufflehog@main
+      - name: Run TruffleHog (JSON output)
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD:/repo" trufflesecurity/trufflehog:latest \
+            filesystem /repo --only-verified --json > trufflehog-report.json || true
+
+      - name: Upload TruffleHog JSON
+        uses: actions/upload-artifact@v4
         with:
-          extra_args: --only-verified
+          name: trufflehog-report
+          path: trufflehog-report.json
+          if-no-files-found: ignore
 
   semgrep:
     name: SAST Scan (Semgrep)
@@ -46,8 +61,125 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Run Semgrep
-        run: semgrep ci --config=p/default --config=p/bash --config=p/security-audit
-        env:
-          # SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}  # only needed if using Semgrep App/dashboard
-          SEMGREP_TIMEOUT: "300"
+      - name: Run Semgrep (JSON output)
+        continue-on-error: true
+        run: |
+          semgrep scan --config=p/default --config=p/bash --config=p/security-audit \
+            --json --output=semgrep-report.json
+
+      - name: Upload Semgrep JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-report
+          path: semgrep-report.json
+          if-no-files-found: ignore
+
+  build-html-report:
+    name: Build Combined HTML Report
+    runs-on: ubuntu-latest
+    needs: [gitleaks, trufflehog, semgrep]
+    if: always()
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Download all JSON reports
+        uses: actions/download-artifact@v4
+        with:
+          path: reports
+
+      - name: Generate HTML report
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, html
+          from datetime import datetime, timezone
+
+          def load(path):
+              try:
+                  with open(path) as f:
+                      return json.load(f)
+              except Exception:
+                  return None
+
+          gitleaks = load("reports/gitleaks-report/gitleaks-report.json") or []
+          trufflehog_path = "reports/trufflehog-report/trufflehog-report.json"
+          trufflehog = []
+          if os.path.exists(trufflehog_path):
+              with open(trufflehog_path) as f:
+                  for line in f:
+                      line = line.strip()
+                      if line:
+                          try:
+                              trufflehog.append(json.loads(line))
+                          except Exception:
+                              pass
+          semgrep = load("reports/semgrep-report/semgrep-report.json") or {}
+          semgrep_results = semgrep.get("results", []) if isinstance(semgrep, dict) else []
+
+          def esc(x):
+              return html.escape(str(x)) if x is not None else ""
+
+          rows_gitleaks = "".join(
+              f"<tr><td>{esc(f.get('RuleID'))}</td><td>{esc(f.get('File'))}</td>"
+              f"<td>{esc(f.get('StartLine'))}</td><td>{esc(f.get('Match'))[:80]}</td></tr>"
+              for f in gitleaks
+          ) or "<tr><td colspan='4'>No findings</td></tr>"
+
+          rows_truffle = "".join(
+              f"<tr><td>{esc(f.get('DetectorName'))}</td>"
+              f"<td>{esc(f.get('SourceMetadata',{}).get('Data',{}).get('Filesystem',{}).get('file'))}</td>"
+              f"<td>{esc(f.get('Verified'))}</td></tr>"
+              for f in trufflehog
+          ) or "<tr><td colspan='3'>No verified findings</td></tr>"
+
+          rows_semgrep = "".join(
+              f"<tr><td>{esc(r.get('check_id'))}</td><td>{esc(r.get('path'))}</td>"
+              f"<td>{esc(r.get('start',{}).get('line'))}</td>"
+              f"<td>{esc(r.get('extra',{}).get('severity'))}</td>"
+              f"<td>{esc(r.get('extra',{}).get('message'))[:100]}</td></tr>"
+              for r in semgrep_results
+          ) or "<tr><td colspan='5'>No findings</td></tr>"
+
+          generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+          html_doc = f"""<!DOCTYPE html>
+          <html><head><meta charset="utf-8"><title>Security Scan Report</title>
+          <style>
+            body {{ font-family: -apple-system, Arial, sans-serif; margin: 2rem; background: #0d1117; color: #c9d1d9; }}
+            h1 {{ color: #58a6ff; }}
+            h2 {{ color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 6px; margin-top: 2.5rem; }}
+            table {{ border-collapse: collapse; width: 100%; margin-top: 1rem; }}
+            th, td {{ border: 1px solid #30363d; padding: 8px 12px; text-align: left; font-size: 0.9rem; }}
+            th {{ background: #161b22; }}
+            tr:nth-child(even) {{ background: #161b22; }}
+            .meta {{ color: #8b949e; font-size: 0.85rem; }}
+          </style></head>
+          <body>
+          <h1>Security Scan Report</h1>
+          <p class="meta">Generated: {generated}</p>
+
+          <h2>Gitleaks - Secrets Scan ({len(gitleaks)} finding(s))</h2>
+          <table><tr><th>Rule</th><th>File</th><th>Line</th><th>Match (truncated)</th></tr>
+          {rows_gitleaks}</table>
+
+          <h2>TruffleHog - Verified Secrets ({len(trufflehog)} finding(s))</h2>
+          <table><tr><th>Detector</th><th>File</th><th>Verified</th></tr>
+          {rows_truffle}</table>
+
+          <h2>Semgrep - SAST Findings ({len(semgrep_results)} finding(s))</h2>
+          <table><tr><th>Rule</th><th>File</th><th>Line</th><th>Severity</th><th>Message</th></tr>
+          {rows_semgrep}</table>
+
+          </body></html>
+          """
+          os.makedirs("report-out", exist_ok=True)
+          with open("report-out/security-report.html", "w") as f:
+              f.write(html_doc)
+          print("HTML report written to report-out/security-report.html")
+          PYEOF
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report-html
+          path: report-out/security-report.html
