@@ -154,7 +154,6 @@ The repository maintains strict separation of logic, baselines, and cloud-specif
 📦 Cloud-Compliance-Auditor
 ├── 📂 .github/workflows/                                # CI/CD pipelines
 │   ├── 📜 cloud-compliance-auditor.yml                  # Main orchestrator workflow
-│   ├── 📜 fleet-pipeline.yml                            # Fleet execution pipeline
 │   ├── 📜 verify.yml                                    # Verification tasks
 │   └── 📜 verifyClean.yml                               # Verification cleanup workflow
 ├── 📂 modules/                                          # Sourced by the orchestrator at runtime
