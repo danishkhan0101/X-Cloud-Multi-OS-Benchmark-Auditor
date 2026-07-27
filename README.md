@@ -31,39 +31,53 @@ The same pipeline runs on **Azure** and **Huawei Cloud** through a small provide
 
 ```mermaid
 graph TD
-    A[Trigger Pipeline<br/>Schedule or Manual] --> P{Cloud Provider}
-    P -->|Azure| B(Resource Discovery)
-    P -->|Huawei Cloud| B
-    B -->|Query by Environment Tag| C{Target OS}
+    A[Trigger Pipeline] --> B[Discover VMs by Tag<br/>Azure or Huawei Cloud]
 
-    C -->|Linux Fleets| D[SSH Access Check]
-    C -->|Windows| E[WinRM Access Check]
+    B -->|Linux Fleet| D[Check Ghost User SSH<br/>GHOST_USER@host]
+    B -->|Windows Fleet| E[Check svc_audit SSH<br/>WIN_GHOST_USER@host]
 
-    D -- Locked --> F[Inject Ghost User<br/>Fix SELinux / Crypto Policy]
-    D -- Open --> G[Bootstrap OpenSCAP]
+    D -- Not Reachable --> F[Open SSH Rule<br/>Inject Ghost User]
+    D -- Reachable --> G[Ready for OpenSCAP]
     F --> G
 
-    E -- Broken --> H[Agent Channel<br/>Repair WinRM Provider]
-    E -- Open --> I[Bootstrap Cinc Auditor]
-    H --> I
+    E -- Not Reachable --> H[Fall Back to<br/>Administrator via SSH]
+    E -- Reachable --> I[Ready for Cinc Auditor]
+    H -- Still Unreachable --> H2[Azure Run-Command<br/>Repairs SSH]
+    H2 --> I
 
-    G --> J[Run XCCDF Baselines<br/>tm / cis / all]
-    I --> K[Run Ruby Baselines<br/>CIS WS2022 L1 / L2]
+    G --> J[Build Ansible Inventory]
+    I --> J
 
-    J --> L{Remediation Mode?}
-    K --> L
+    J --> K[Select Profile<br/>tm / cis / all]
 
-    L -- Yes --> M[Ansible Playbooks<br/>PowerShell Fallback]
-    M --> V[Verification Re-Scan]
-    L -- No --> N[Generate Heimdall Report]
-    V --> N
+    K --> L{Profile = all?}
+    L -- Yes --> M1[Step 1/3: CIS Level 1<br/>scan/remediate/verify]
+    M1 --> M2[Step 2/3: CIS Level 2<br/>stricter profile]
+    M2 --> M3[Step 3/3: Org Baseline<br/>TM custom XCCDF/Ruby]
+    L -- No --> M4[Run Once<br/>tm or cis only]
 
-    N --> O((Phase 5<br/>Zero-Trust Cleanup))
+    M3 --> N[Execute Phase&#40;s&#41;<br/>scan / remediate+verify / full]
+    M4 --> N
 
-    style O fill:#ff4d4d,stroke:#333,stroke-width:2px,color:#fff
-    style F fill:#ffd24d,stroke:#333,color:#000
-    style H fill:#ffd24d,stroke:#333,color:#000
-    style M fill:#4da96b,stroke:#333,color:#fff
+    N --> O[Generate Reports<br/>HTML Linux, Heimdall JSON Windows]
+    O --> P((Zero-Trust Cleanup<br/>if --cleanup true))
+
+    style B fill:#5b4fc4,stroke:#333,color:#fff
+    style D fill:#1a5f8f,stroke:#333,color:#fff
+    style E fill:#1a5f8f,stroke:#333,color:#fff
+    style F fill:#b8860b,stroke:#333,color:#fff
+    style H fill:#b8860b,stroke:#333,color:#fff
+    style H2 fill:#8b2020,stroke:#333,color:#fff
+    style G fill:#0f6b5c,stroke:#333,color:#fff
+    style I fill:#0f6b5c,stroke:#333,color:#fff
+    style K fill:#5b4fc4,stroke:#333,color:#fff
+    style M1 fill:#7a3010,stroke:#333,color:#fff
+    style M2 fill:#7a3010,stroke:#333,color:#fff
+    style M3 fill:#7a3010,stroke:#333,color:#fff
+    style M4 fill:#7a3010,stroke:#333,color:#fff
+    style N fill:#3d7a1f,stroke:#333,color:#fff
+    style O fill:#0f6b5c,stroke:#333,color:#fff
+    style P fill:#8b2020,stroke:#333,color:#fff
 ```
 
 ---
