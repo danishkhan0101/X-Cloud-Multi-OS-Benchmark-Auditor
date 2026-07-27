@@ -29,8 +29,8 @@ name: 🛡️ Cloud Compliance Auditor
 #            (an out-of-band control-plane channel; see cloud_vm_run_shell
 #            in multi_os_benchmark.sh) — works even on a brand-new VM.
 #   Huawei → has no such channel in this pipeline, so the runner's public
-#            key (secrets.UBUNTU_SSH_KEY) must already be authorized for
-#            LINUX_ADMIN_USER on the ECS instance — provision it via
+#            key (secrets.SSH_KEY) must already be authorized for
+#            LINUX_USER on the ECS instance — provision it via
 #            cloud-init/user-data at instance creation (baked into the
 #            golden image), not at pipeline runtime.
 
@@ -358,7 +358,7 @@ jobs:
       # Threaded from prepare-queue's single computation — no re-derivation here.
       HW_ECS_ENDPOINT:        ${{ needs.prepare-queue.outputs.hw_ecs_endpoint }}
       # ── Shared ─────────────────────────────────────────────────────────
-      LINUX_ADMIN_USER:     ${{ vars.LINUX_ADMIN_USER }}
+      LINUX_SSH_USER:     ${{ vars.LINUX_SSH_USER }}
       WIN_SSH_USER:         ${{ vars.WIN_SSH_USER || 'Administrator' }}
       WIN_SERVER_ROLE:      ${{ vars.WIN_SERVER_ROLE || 'member_server' }}
       ORG_NAME:             ${{ vars.ORG_NAME }}
@@ -401,7 +401,7 @@ jobs:
         if: matrix.os_target.os == 'Windows'
         uses: webfactory/ssh-agent@v0.9.0
         with:
-          ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
+          ssh-private-key: ${{ secrets.SSH_KEY }}
 
       # ── SSH (Linux only) ────────────────────────────────────────────────
       # Key-only, for both clouds. Azure trusts the runner's public key via
@@ -409,13 +409,13 @@ jobs:
       # cloud_vm_run_shell in multi_os_benchmark.sh), which works even on a
       # brand-new VM with no prior SSH access. Huawei Cloud has no such
       # channel, so its VMs must already trust this same public key for
-      # LINUX_ADMIN_USER — provisioned via cloud-init/user-data at ECS
+      # LINUX_SSH_USER — provisioned via cloud-init/user-data at ECS
       # creation time (baked into the golden image), not injected here.
       - name: '🔑 Setup SSH Key'
         if: matrix.os_target.os != 'Windows'
         uses: webfactory/ssh-agent@v0.9.0
         with:
-          ssh-private-key: ${{ secrets.UBUNTU_SSH_KEY }}
+          ssh-private-key: ${{ secrets.SSH_KEY }}
 
       - name: '🔓 Extract Public Key'
         run: |
