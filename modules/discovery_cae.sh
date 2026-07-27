@@ -173,7 +173,7 @@ hw_reassert_ssh_rule_all() {
 hw_vm_run_shell() {
     local ip="$1"
     local script="$2"
-    local user="${3:-${LINUX_ADMIN_USER:-root}}"
+    local user="${3:-${LINUX_SSH_USER:-root}}"
 
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
         "${user}@${ip}" "$script" >/dev/null 2>&1
