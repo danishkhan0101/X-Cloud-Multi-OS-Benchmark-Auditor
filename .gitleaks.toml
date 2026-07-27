@@ -1,0 +1,10 @@
+title = "gitleaks config for multi-os-benchmark-auditor"
+
+[allowlist]
+description = "Reduce false positives on non-secret compliance content"
+paths = [
+  '''ubuntu-custom/.*\.xml''',
+  '''rhel-custom/.*\.xml''',
+  '''windows-custom/.*\.rb''',
+  '''windows-default-cis/.*\.rb''',
+]
