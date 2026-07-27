@@ -602,7 +602,7 @@ jobs:
           tag_name: Audit-Run-${{ github.run_number }}
           name: "🛡️ Compliance Audit: ${{ env.DISPLAY_PROFILE }} [${{ env.DISPLAY_CLOUD }}] (#${{ github.run_number }})"
           body: |
-            ## 📊 Fleet-Wide Security Compliance Audit
+            ## 📊 Cloud Security Compliance Audit
             **Date:** `${{ env.DATE_TAG }}`
             **Cloud Provider:** `${{ env.DISPLAY_CLOUD }}`
             **Ticket ID:** `${{ github.event.inputs.ticket_id || 'N/A' }}`
