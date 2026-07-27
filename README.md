@@ -31,43 +31,39 @@ The same pipeline runs on **Azure** and **Huawei Cloud** through a small provide
 
 ```mermaid
 graph TD
-    A[Trigger Pipeline<br/>Schedule or Manual Dispatch] --> JOB_1
+    A[Trigger Pipeline<br/>Schedule or Manual] --> P{Cloud Provider}
+    P -->|Azure| B(Resource Discovery)
+    P -->|Huawei Cloud| B
+    B -->|Query by Environment Tag| C{Target OS}
 
-    subgraph JOB_1 [Job 1: Matrix Factory & Discovery]
-        direction TB
-        C{Cloud Provider} -->|Azure| D(az vm list)
-        C -->|Huawei Cloud| E(Huawei Python SDK)
-        D --> F[Build OS & IP Matrix<br/>os-grouped or per-node]
-        E --> F
-        F --> G[Safety Gate<br/>Forces 'scan' mode if profile is 'all']
-    end
+    C -->|Linux Fleets| D[SSH Access Check]
+    C -->|Windows| E[WinRM Access Check]
 
-    G -- "Fan-Out (Matrix Strategy)" --> JOB_2
+    D -- Locked --> F[Inject Ghost User<br/>Fix SELinux / Crypto Policy]
+    D -- Open --> G[Bootstrap OpenSCAP]
+    F --> G
 
-    subgraph JOB_2 [Job 2: Execution Engine]
-        direction TB
-        H[Setup Toolchain & SSH Agent] --> I[Execute multi_os_benchmark.sh]
-        I -->|Linux| J(OpenSCAP / Ansible)
-        I -->|Windows| K(Cinc Auditor / Ansible)
-        J --> L[Generate Reports]
-        K --> L
-        L --> M[Upload Workflow Artifacts<br/>HTML & JSON]
-    end
+    E -- Broken --> H[Agent Channel<br/>Repair WinRM Provider]
+    E -- Open --> I[Bootstrap Cinc Auditor]
+    H --> I
 
-    M -- "Fan-In (Wait for completion)" --> JOB_3
+    G --> J[Run XCCDF Baselines<br/>tm / cis / all]
+    I --> K[Run Ruby Baselines<br/>CIS WS2022 L1 / L2]
 
-    subgraph JOB_3 [Job 3: Aggregate & Release]
-        direction TB
-        N[Download All Artifacts] --> O[Organize Reports by Machine IP]
-        O --> P[Zip Evidence Package]
-        P --> Q((Publish GitHub Release))
-    end
+    J --> L{Remediation Mode?}
+    K --> L
 
-    %% Styling
-    style A fill:#2088FF,stroke:#333,stroke-width:2px,color:#fff
-    style Q fill:#4da96b,stroke:#333,stroke-width:2px,color:#fff
-    style G fill:#ffd24d,stroke:#333,color:#000
-    style I fill:#333,stroke:#fff,color:#fff
+    L -- Yes --> M[Ansible Playbooks<br/>PowerShell Fallback]
+    M --> V[Verification Re-Scan]
+    L -- No --> N[Generate Heimdall Report]
+    V --> N
+
+    N --> O((Phase 5<br/>Zero-Trust Cleanup))
+
+    style O fill:#ff4d4d,stroke:#333,stroke-width:2px,color:#fff
+    style F fill:#ffd24d,stroke:#333,color:#000
+    style H fill:#ffd24d,stroke:#333,color:#000
+    style M fill:#4da96b,stroke:#333,color:#fff
 ```
 
 ---
