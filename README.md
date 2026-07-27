@@ -1,19 +1,8 @@
-<div align="center">
-
 # 🛡️ Cloud Compliance Auditor
+
 **Enterprise Multi-OS DevSecOps Compliance Orchestrator**
 
-[![Bash](https://img.shields.io/badge/Scripting-Bash-4EAA25?style=flat-square&logo=gnu-bash&logoColor=white)](#)
-[![Microsoft Azure](https://img.shields.io/badge/Cloud-Azure-0089D6?style=flat-square&logo=microsoft-azure&logoColor=white)](#)
-[![Huawei Cloud](https://img.shields.io/badge/Cloud-Huawei_Cloud-FF0000?style=flat-square&logo=huawei&logoColor=white)](#)
-[![Ansible](https://img.shields.io/badge/Automation-Ansible-EE0000?style=flat-square&logo=ansible&logoColor=white)](#)
-[![OpenSCAP](https://img.shields.io/badge/Auditing-OpenSCAP-323330?style=flat-square)](#)
-[![InSpec](https://img.shields.io/badge/Auditing-Cinc_Auditor-00A698?style=flat-square)](#)
-[![GitHub Actions](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?style=flat-square&logo=github-actions&logoColor=white)](#)
-
 > A zero-trust CI/CD pipeline that automatically discovers, audits, remediates, verifies, and reports on virtual machine fleets (Ubuntu, RHEL, Rocky, AlmaLinux, Windows Server) running in Microsoft Azure and Huawei Cloud.
-
-</div>
 
 ---
 
@@ -84,7 +73,7 @@ graph TD
 Cloud Compliance Auditor supports three profile selections through the `--profile` flag.
 
 | Profile | Meaning |
-| :--- | :--- |
+| --- | --- |
 | `tm` | Custom TM organisational baseline only. |
 | `cis` | Standard CIS benchmark only. |
 | `all` | Custom TM baseline **and** the standard CIS benchmark, run together. |
@@ -110,13 +99,6 @@ Make sure your runner or local machine has the following toolchain.
 * 🔍 **`cinc-auditor`** or Chef InSpec for Windows compliance scanning.
 * 📈 **`saf`** the MITRE SAF CLI for converting results into the Heimdall format.
 * 🐍 **`python3`** for unpacking SCAP packages dynamically and for the Huawei Cloud SDK calls.
-
-**Bootstrap Ansible dependencies.** Before running the orchestrator, install the third-party roles and collections from the requirements file.
-
-```bash
-ansible-galaxy collection install -r requirements.yml
-ansible-galaxy role install -r requirements.yml
-```
 
 ### 2️⃣ Configuration (`.env`)
 
@@ -152,36 +134,47 @@ WINDOWS_ADMIN_USER="Windows_Admin"
 
 ### 3️⃣ Directory Structure
 
-The repository keeps organisational rules separate from the standard CIS content, and separates orchestration logic from cloud-specific discovery code.
+The repository maintains strict separation of logic, baselines, and cloud-specific handlers:
 
 ```text
 📦 Cloud-Compliance-Auditor
-├── 📂 .github/workflows/                            # CI/CD pipeline (Cloud Compliance Auditor)
-├── 📂 modules/                                      # Sourced by the orchestrator at runtime
-│   ├── 📜 utils.sh                                  # Shared logging, SSH helpers (no cloud/OS logic)
-│   ├── 📜 discovery_azure.sh                        # Azure VM discovery, NSG rules, run-command helpers
-│   └── 📜 discovery_cae.sh                          # Huawei Cloud (CAE) discovery, SG rules, power state
-├── 📂 scripts/                                      # Python helpers invoked by the modules above
-│   ├── 📜 hw_ecs_discover.py                        # Huawei ECS discovery via SDK (AK/SK, private endpoint)
-│   ├── 📜 hw_sg_rule_manage.py                      # Huawei security-group rule add/refresh
-│   └── 📜 hw_verify_auth.py                         # Single source of truth for the Huawei SDK auth check
-├── 📂 rhel-custom/                                  # Custom TM RHEL rules and playbooks
-├── 📂 ubuntu-custom/                                # Custom TM Ubuntu rules and playbooks
-├── 📂 windows-custom/                                # Custom TM Windows rules and playbooks
-├── 📂 windows-default-cis/                           # Standard CIS Windows content
-│   └── 📂 windows-baseline/
-│       ├── 📜 inspec.yml                            # Profile metadata and inputs
-│       ├── 📂 controls/
-│       │   └── 📜 cis_ws2022_v5_0_0_benchmark.rb    # CIS WS2022 v5.0.0, 433 controls (L1 and L2)
-│       └── 📜 Invoke-CISRemediation-Combined.ps1    # PowerShell remediation fallback
-├── 📂 tests/                                        # Unit tests for scripts/*.py and control-file linting
-├── 📜 azure_rm.yml                                  # Dynamic Ansible inventory (Azure)
-├── 📜 universal_remediate.yml                       # Shared remediation playbook
-├── 📜 multi_os_benchmark.sh                         # Core Bash orchestrator
-├── 📜 audit_runner.sh                               # Per-host audit execution
-├── 📜 requirements.yml                              # Ansible collections and roles
-├── 📜 requirements.txt                              # Pinned Python dependencies
-└── 📜 .env.example                                  # Configuration template
+├── 📂 .github/workflows/                                # CI/CD pipelines
+│   ├── 📜 cloud-compliance-auditor.yml                  # Main orchestrator workflow
+│   ├── 📜 fleet-pipeline.yml                            # Fleet execution pipeline
+│   ├── 📜 verify.yml                                    # Verification tasks
+│   └── 📜 verifyClean.yml                               # Verification cleanup workflow
+├── 📂 modules/                                          # Sourced by the orchestrator at runtime
+│   ├── 📜 audit_runner.sh                               # Per-host audit execution
+│   ├── 📜 discovery_azure.sh                            # Azure VM discovery, NSG rules, run-command helpers
+│   ├── 📜 discovery_cae.sh                              # Huawei Cloud (CAE) discovery, SG rules, power state
+│   └── 📜 utils.sh                                      # Shared logging, SSH helpers
+├── 📂 rhel-custom/                                      # Custom TM RHEL rules and playbooks
+│   ├── 📜 rhel_custom_playbook.yml                      # RHEL remediation playbook
+│   ├── 📜 tm_rhel_rules.xml                             # Custom TM RHEL rules
+│   └── 📜 tm_rhel_xccdf.xml                             # Custom TM RHEL XCCDF baseline
+├── 📂 scripts/                                          # Python helpers invoked by modules
+│   ├── 📜 hw_ecs_discover.py                            # Huawei ECS discovery via SDK
+│   ├── 📜 hw_sg_rule_manage.py                          # Huawei SG rule management
+│   └── 📜 hw_verify_auth.py                             # Huawei SDK auth check
+├── 📂 ubuntu-custom/                                    # Custom TM Ubuntu rules and playbooks
+│   ├── 📜 tm_ubuntu_rules.xml                           # Custom TM Ubuntu rules
+│   ├── 📜 tm_xccdf.xml                                  # Custom TM Ubuntu XCCDF baseline
+│   └── 📜 ubuntu_custom_playbook.yml                    # Ubuntu remediation playbook
+├── 📂 windows-custom/                                   # Custom TM Windows rules and playbooks
+│   ├── 📜 tm_baseline.rb                                # Windows custom baseline
+│   └── 📜 tm_remediate.yml                              # Windows custom remediation
+├── 📂 windows-default-cis/                              # Standard CIS Windows content
+│   └── 📂 windows-baseline/                             # Windows baseline configuration
+│       ├── 📂 controls/                                 # Control profiles
+│       │   └── 📜 cis_ws2022_v5_0_0_benchmark.rb        # CIS WS2022 v5.0.0 benchmark
+│       ├── 📜 Invoke-CISRemediation-Combined.ps1        # PowerShell remediation fallback
+│       └── 📜 inspec.yml                                # Profile metadata and inputs
+├── 📜 .env.example                                      # Configuration template
+├── 📜 .gitignore                                        # Git ignore definitions
+├── 📜 .gitleaks.toml                                    # Secret scanning configuration
+├── 📜 README.md                                         # Project documentation
+├── 📜 multi_os_benchmark.sh                             # Core Bash orchestrator
+└── 📜 verify_cleanup.sh                                 # Zero-trust cleanup script
 ```
 
 ---
@@ -202,22 +195,26 @@ chmod +x multi_os_benchmark.sh
 Pass parameters to automate the pipeline in GitHub Actions, GitLab CI, or Jenkins.
 
 **Base syntax**
+
 ```bash
 ./multi_os_benchmark.sh --headless --cloud <azure|huaweicloud> --profile <tm|cis|all> --mode <scan|remediate|full> --targets <Tag|all>
 ```
 
 **🎯 Example 1: Full audit on the Prod tag (Azure)**
+
 ```bash
 ./multi_os_benchmark.sh --headless --cloud azure --profile all --mode scan --targets Prod
 ```
 
 **🎯 Example 2: CIS Level 1 scan and auto-fix with cleanup (Azure)**
+
 ```bash
 export CIS_LEVEL="Level 1"
 ./multi_os_benchmark.sh --headless --cloud azure --profile cis --mode full --targets all --cleanup true
 ```
 
 **🎯 Example 3: Scan a single Windows host on Huawei Cloud**
+
 ```bash
 ./multi_os_benchmark.sh --headless --cloud huaweicloud --profile cis --mode scan --target-os windows --targets Dev
 ```
@@ -227,7 +224,7 @@ export CIS_LEVEL="Level 1"
 ## ⚙️ Command-Line Options
 
 | Flag | Values | Description |
-| :--- | :--- | :--- |
+| --- | --- | --- |
 | `--headless` | none | Run without prompts, taking settings from the flags. |
 | `--cloud` | `azure`, `huaweicloud` | Select the cloud provider (Azure is the default). |
 | `--profile` | `tm`, `cis`, `all` | Select the baseline to apply. |
@@ -246,7 +243,7 @@ export CIS_LEVEL="Level 1"
 Linux and Windows results are kept in their own native formats rather than forced into one shared format:
 
 | OS family | Scanner | Report format | How it's produced |
-| :--- | :--- | :--- | :--- |
+| --- | --- | --- | --- |
 | Ubuntu, RHEL, Rocky, Alma | OpenSCAP | `.html` | OpenSCAP's built-in HTML report generator (`oscap xccdf generate report`) — no conversion step |
 | Windows | Cinc Auditor | `.json` | Converted into the MITRE Heimdall/SAF format via `saf convert`, viewable in the **Heimdall** viewer |
 
@@ -262,8 +259,8 @@ The provider is chosen with `--cloud`. Each provider-specific action sits behind
 * **Huawei Cloud** uses the official Python SDK (`huaweicloudsdkcore` + `huaweicloudsdkecs`) for discovery and security-group operations, signing requests locally with an AK/SK pair against a private ECS endpoint.
 
 > **Windows access model.** Both clouds now use SSH as the primary path for Windows, matching the Linux flow. The difference is what happens when SSH is unreachable:
-> - **Azure** falls back to `az vm run-command invoke` (`azure_vm_bootstrap_ssh`) — an out-of-band control-plane call that installs/starts OpenSSH Server and trusts the runner's key, without needing any existing remote-access session. This repair path only runs after `wait_for_ssh` has already failed; it is not used for routine scan/remediate calls.
-> - **Huawei Cloud** has no equivalent out-of-band channel for Windows, so if SSH is unreachable there is no automated recovery — the runner's public key must already be trusted (baked into the image at creation time, same as Linux), and a broken SSH config requires manual intervention.
+> * **Azure** falls back to `az vm run-command invoke` (`azure_vm_bootstrap_ssh`) — an out-of-band control-plane call that installs/starts OpenSSH Server and trusts the runner's key, without needing any existing remote-access session. This repair path only runs after `wait_for_ssh` has already failed; it is not used for routine scan/remediate calls.
+> * **Huawei Cloud** has no equivalent out-of-band channel for Windows, so if SSH is unreachable there is no automated recovery — the runner's public key must already be trusted (baked into the image at creation time, same as Linux), and a broken SSH config requires manual intervention.
 >
 > This means Azure keeps a self-healing advantage over Huawei Cloud for Windows, even though day-to-day operation is identical (SSH) on both.
 
@@ -288,7 +285,7 @@ When running in GitHub Actions, provide the following through repository setting
 **Secrets**
 
 | Secret | Purpose |
-| :--- | :--- |
+| --- | --- |
 | `AZURE_CLIENT_ID` | Azure service principal client ID. |
 | `AZURE_CLIENT_SECRET` | Azure service principal client secret. |
 | `AZURE_SUBSCRIPTION_ID` | Azure subscription ID. |
@@ -300,7 +297,7 @@ When running in GitHub Actions, provide the following through repository setting
 **Variables**
 
 | Variable | Purpose |
-| :--- | :--- |
+| --- | --- |
 | `AZURE_RG_NAME` | Target Azure resource group. |
 | `HW_REGION` | Huawei Cloud region (e.g. `my-kualalumpur-1`). |
 | `HW_PROJECT_ID` | Huawei Cloud project identifier. |
@@ -319,8 +316,4 @@ When running in GitHub Actions, provide the following through repository setting
 
 ---
 
-<div align="center">
-
 *Engineered for continuous compliance and zero-trust automation across a cross-cloud, multi-OS fleet.*
-
-</div>
