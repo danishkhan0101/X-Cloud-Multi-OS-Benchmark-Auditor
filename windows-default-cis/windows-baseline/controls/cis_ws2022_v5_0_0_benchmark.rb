@@ -2253,7 +2253,7 @@ control 'cis-17.3.1' do
   tag mechanism: 'audit_policy'
   ref 'CIS Microsoft Windows Server 2022 Benchmark v5.0.0', url: 'https://www.cisecurity.org/benchmark/microsoft_windows_server'
   describe audit_policy do
-    its('PNP Activity') { should match /Success/ }
+    its('Plug and Play Events') { should match /Success/ }
   end
 end
 
