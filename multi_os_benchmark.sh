@@ -106,6 +106,7 @@ export INSPEC_SSH_CONFIG_NO_SECURE=true
 # REMEDIATION CONSTANTS
 # ======================================================
 REMEDIATION_TIMEOUT_SEC=1800
+ALLOW_OPENSSL_AUTO_UPDATE="${ALLOW_OPENSSL_AUTO_UPDATE:-false}"
 REMEDIATION_SSH_OPTS="-n -o BatchMode=yes -o StrictHostKeyChecking=no \
     -o ControlMaster=no -o ControlPath=none \
     -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
