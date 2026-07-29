@@ -383,6 +383,7 @@ _prefetch_verify_caches() {
 # ------------------------------------------------------
 ensure_linux_scap_tools() {
     local user="$1" ip="$2" pkg_mgr="$3"
+    : "${ALLOW_OPENSSL_AUTO_UPDATE:=false}"
 
     if ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
            -o ConnectTimeout=10 \
@@ -439,11 +440,13 @@ ensure_linux_scap_tools() {
 
     log_info "[Tool Guard] Pushing ${cache_key} packages -> ${ip} (SCP/port 22)"
 
-    # Never let openssl/openssl-libs RPMs leave the runner's cache dir —
-    # the rpm -Uvh fallback below has no --exclude of its own.
-    find "${cache_dir}" -maxdepth 1 -name '*.rpm' \
-        \( -iname 'openssl-[0-9]*' -o -iname 'openssl-libs-*' \) \
-        -exec echo "   Excluding from push: {}" \; -exec rm -f {} \;
+    # NOTE: openssl/openssl-libs RPMs are now DELIBERATELY KEPT in the
+    # pushed set (previously stripped here, which broke dnf's ability
+    # to resolve openscap-scanner's dependency on them offline and
+    # caused a silent skip -> "command not found"). sshd safety is
+    # instead handled by validating sshd -t / restarting + health
+    # checking sshd only in the explicit ALLOW_OPENSSL_AUTO_UPDATE
+    # recovery path below, never as a side effect of the main install.
 
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
         "${user}@${ip}" \
@@ -488,8 +491,11 @@ ensure_linux_scap_tools() {
             fi
         '
     else
+        # NOTE: --exclude=openssl/--exclude=openssl-libs removed — they are
+        # now part of the pushed set and required for dependency resolution
+        # with --disablerepo='*'. --allowerasing lets dnf upgrade the
+        # locally-installed openssl/openssl-libs using the bundled RPMs.
         install_cmd="sudo dnf install -y --disablerepo='*' --allowerasing \
-                         --exclude=openssl-libs --exclude=openssl \
                          /tmp/scap_offline/*.rpm 2>/dev/null || \
                      sudo rpm -Uvh --nodeps --replacepkgs \
                          /tmp/scap_offline/*.rpm 2>/dev/null || true"
@@ -500,6 +506,11 @@ ensure_linux_scap_tools() {
         set +e
         ${install_cmd}
         sudo rm -rf /tmp/scap_offline 2>/dev/null || true
+
+        if ! command -v oscap >/dev/null 2>&1; then
+            echo '[FATAL] oscap missing after offline install'
+            exit 10
+        fi
 
         oscap --version >/dev/null 2>&1
         if [ \$? -ne 0 ]; then
@@ -515,9 +526,6 @@ ensure_linux_scap_tools() {
             fi
         fi
 
-        command -v oscap >/dev/null 2>&1 \
-            || { echo '[FATAL] oscap missing after offline install'; exit 10; }
-
         ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1 \
             || { echo '[FATAL] SCAP content datastreams missing'; exit 11; }
         echo '[OK] SCAP tools installed offline successfully'
@@ -526,13 +534,15 @@ ensure_linux_scap_tools() {
 
     # ------------------------------------------------------
     # Openssl auto-recovery (opt-in, ALLOW_OPENSSL_AUTO_UPDATE=true)
-    # Runs as a SEPARATE ssh call — kept out of the giant heredoc
-    # above to avoid nested-quoting bugs. ALLOW_OPENSSL_AUTO_UPDATE
-    # is a local pipeline variable, evaluated here in local bash.
+    # Fires on rc=10 (oscap missing) — the case that was previously
+    # unreachable because "command not found" was being misclassified
+    # as rc=13 ("broken for an unrelated reason"). That misclassification
+    # is now fixed by the explicit `command -v oscap` check above,
+    # which runs BEFORE the `oscap --version` libltdl-grep branch.
     # ------------------------------------------------------
     if [ $rc -eq 10 ]; then
         if [ "${ALLOW_OPENSSL_AUTO_UPDATE:-false}" != "true" ]; then
-            log_error "[Tool Guard] oscap missing on ${ip} (likely openssl version mismatch — set ALLOW_OPENSSL_AUTO_UPDATE=true to enable auto-recovery)"
+            log_error "[Tool Guard] oscap missing on ${ip} (likely openssl/dependency mismatch — set ALLOW_OPENSSL_AUTO_UPDATE=true to enable auto-recovery)"
             return $rc
         fi
 
