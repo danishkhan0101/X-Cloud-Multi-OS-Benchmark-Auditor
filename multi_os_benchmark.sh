@@ -339,7 +339,7 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" =~ ^(ubuntu|rhel|rocky|alma)
                     "echo SSH_OK" 2>/dev/null)" != "SSH_OK" ]; then
                 cloud_add_port_rule "$ip" 22 "Allow_SSH_Runner_Only"
                 PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
-                cloud_vm_run_shell "$ip" "useradd -m -s /bin/bash ${GHOST_USER} || true
+                if ! cloud_vm_run_shell "$ip" "useradd -m -s /bin/bash ${GHOST_USER} || true
                                echo '${GHOST_USER} ALL=(ALL) NOPASSWD:ALL' \
                                    > /etc/sudoers.d/99-${GHOST_USER}
                                chmod 440 /etc/sudoers.d/99-${GHOST_USER}
@@ -350,7 +350,9 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" =~ ^(ubuntu|rhel|rocky|alma)
                                chmod 600 /home/${GHOST_USER}/.ssh/authorized_keys
                                command -v restorecon &>/dev/null && \
                                    restorecon -Rv /home/${GHOST_USER}/.ssh >/dev/null 2>&1 || true
-                               systemctl restart sshd" || true
+                               systemctl restart sshd"; then
+                    log_error "[Bootstrap] cloud_vm_run_shell FAILED provisioning ${GHOST_USER} on ${ip} — check Huawei run-command output above"
+                fi
                 sleep 15
             fi
 
