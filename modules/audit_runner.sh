@@ -501,46 +501,6 @@ ensure_linux_scap_tools() {
         ${install_cmd}
         sudo rm -rf /tmp/scap_offline 2>/dev/null || true
 
-        if ! command -v oscap >/dev/null 2>&1; then
-            if [ "${ALLOW_OPENSSL_AUTO_UPDATE:-false}" != "true" ]; then
-                echo '[FATAL] oscap missing after offline install (likely openssl version mismatch — set ALLOW_OPENSSL_AUTO_UPDATE=true to enable auto-recovery)'
-                exit 10
-            fi
-
-            echo '[WARN] oscap missing after offline install — attempting openssl auto-recovery (ALLOW_OPENSSL_AUTO_UPDATE=true)'
-            INSTALLED_SSL=$(rpm -q --qf '%{VERSION}-%{RELEASE}' openssl 2>/dev/null)
-            echo "[Recovery] Installed openssl: ${INSTALLED_SSL:-unknown}"
-            echo "[Recovery] Attempting safe openssl/openssl-libs update from VM's own repos (not pushed RPMs)..."
-
-            sudo dnf update -y openssl openssl-libs 2>&1
-            UPDATE_RC=$?
-
-            if [ $UPDATE_RC -ne 0 ]; then
-                echo '[FATAL] openssl/openssl-libs update failed — aborting, not retrying oscap install'
-                exit 14
-            fi
-
-            echo '[Recovery] Verifying sshd config integrity after openssl update...'
-            if ! sudo sshd -t 2>&1; then
-                echo '[FATAL] sshd -t failed after openssl update — refusing to restart sshd, manual intervention required'
-                exit 15
-            fi
-
-            sudo systemctl restart sshd
-            sleep 2
-            if ! sudo sshd -T >/dev/null 2>&1; then
-                echo '[FATAL] sshd did not come back healthy after restart — manual intervention required'
-                exit 16
-            fi
-            echo '[Recovery] sshd verified healthy after openssl update'
-
-            echo '[Recovery] Retrying SCAP tool install now that openssl is current...'
-            ${install_cmd}
-
-            command -v oscap >/dev/null 2>&1 \
-                || { echo '[FATAL] oscap still missing after openssl recovery + retry'; exit 10; }
-            echo '[Recovery] oscap now available after openssl update + retry'
-        fi
         oscap --version >/dev/null 2>&1
         if [ \$? -ne 0 ]; then
             echo '[WARN] oscap present but failed to run — checking for missing shared libs...'
@@ -555,11 +515,74 @@ ensure_linux_scap_tools() {
             fi
         fi
 
+        command -v oscap >/dev/null 2>&1 \
+            || { echo '[FATAL] oscap missing after offline install'; exit 10; }
+
         ls /usr/share/xml/scap/ssg/content/ssg-*-ds.xml >/dev/null 2>&1 \
             || { echo '[FATAL] SCAP content datastreams missing'; exit 11; }
         echo '[OK] SCAP tools installed offline successfully'
     "
     local rc=$?
+
+    # ------------------------------------------------------
+    # Openssl auto-recovery (opt-in, ALLOW_OPENSSL_AUTO_UPDATE=true)
+    # Runs as a SEPARATE ssh call — kept out of the giant heredoc
+    # above to avoid nested-quoting bugs. ALLOW_OPENSSL_AUTO_UPDATE
+    # is a local pipeline variable, evaluated here in local bash.
+    # ------------------------------------------------------
+    if [ $rc -eq 10 ]; then
+        if [ "${ALLOW_OPENSSL_AUTO_UPDATE:-false}" != "true" ]; then
+            log_error "[Tool Guard] oscap missing on ${ip} (likely openssl version mismatch — set ALLOW_OPENSSL_AUTO_UPDATE=true to enable auto-recovery)"
+            return $rc
+        fi
+
+        log_warn "[Tool Guard] oscap missing on ${ip} — attempting openssl auto-recovery (ALLOW_OPENSSL_AUTO_UPDATE=true)"
+
+        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "${user}@${ip}" '
+            set +e
+            INSTALLED_SSL=$(rpm -q --qf "%{VERSION}-%{RELEASE}" openssl 2>/dev/null)
+            echo "[Recovery] Installed openssl: ${INSTALLED_SSL:-unknown}"
+            echo "[Recovery] Attempting safe openssl/openssl-libs update from VM own repos..."
+
+            sudo dnf update -y openssl openssl-libs 2>&1
+            UPDATE_RC=$?
+            if [ $UPDATE_RC -ne 0 ]; then
+                echo "[FATAL] openssl/openssl-libs update failed — aborting"
+                exit 14
+            fi
+
+            echo "[Recovery] Verifying sshd config integrity after openssl update..."
+            if ! sudo sshd -t 2>&1; then
+                echo "[FATAL] sshd -t failed after openssl update — refusing to restart sshd"
+                exit 15
+            fi
+
+            sudo systemctl restart sshd
+            sleep 2
+            if ! sudo sshd -T >/dev/null 2>&1; then
+                echo "[FATAL] sshd did not come back healthy after restart"
+                exit 16
+            fi
+            echo "[Recovery] sshd verified healthy after openssl update"
+        '
+        local recovery_rc=$?
+
+        if [ $recovery_rc -ne 0 ]; then
+            log_error "[Tool Guard] openssl recovery failed on ${ip} (rc=${recovery_rc}) — manual intervention required"
+            return $recovery_rc
+        fi
+
+        log_info "[Tool Guard] Retrying SCAP tool install on ${ip} now that openssl is current..."
+        ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "${user}@${ip}" "
+            set +e
+            ${install_cmd}
+            command -v oscap >/dev/null 2>&1 \
+                || { echo '[FATAL] oscap still missing after openssl recovery + retry'; exit 10; }
+            echo '[OK] oscap now available after openssl update + retry'
+        "
+        rc=$?
+    fi
+
     if [ $rc -ne 0 ]; then
         log_error "[Tool Guard] Offline install failed on ${ip} (rc=${rc})"
         return $rc
