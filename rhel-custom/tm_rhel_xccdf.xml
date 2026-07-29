@@ -272,4 +272,24 @@
     </Rule>
   </Group>
 
+  <!-- ============================================= -->
+  <!-- GROUP 8: Manual Verification Required          -->
+  <!-- ============================================= -->
+  <Group id="xccdf_com.tm_group_manual">
+    <title>Manual Verification Required</title>
+    <description>Baseline items requiring human verification. Not auto-remediated or auto-checked by this profile.</description>
+  
+    <Rule id="xccdf_com.tm_rule_16" selected="true" severity="medium" role="unscored">
+      <title>LSB16: XDR / Endpoint Security Agent</title>
+      <description>Install TM Extended Detection Response (XDR) or approved endpoint security agent via Self Service Portal or av.taskforce@tm.com.my. Manual verification required — not auto-remediated.</description>
+      <ident system="http://cce.mitre.org">CCE-TM-16</ident>
+    </Rule>
+  
+    <Rule id="xccdf_com.tm_rule_40" selected="true" severity="medium" role="unscored">
+      <title>LSB40: Event Log Retention (1 year minimum)</title>
+      <description>Configure event/audit log retention method and size for minimum 1-year retention, per LSB12 capacity planning. Manual verification required — not auto-remediated.</description>
+      <ident system="http://cce.mitre.org">CCE-TM-40</ident>
+    </Rule>
+  </Group>
+
 </Benchmark>
