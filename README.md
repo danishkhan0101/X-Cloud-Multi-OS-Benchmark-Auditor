@@ -18,7 +18,7 @@ The same pipeline runs on **Azure** and **Huawei Cloud** through a small provide
 * ☁️ **Cross-Cloud:** Runs on Microsoft Azure or Huawei Cloud through a provider abstraction layer, selected with a single flag.
 * 💉 **JIT Auto-Healing:** Temporarily injects a privileged "Ghost User" through the cloud command channel to bypass broken cloud-init locks and fix SELinux or crypto policy on the fly.
 * 📊 **Multi-OS Scanning:** Routes Linux targets to **OpenSCAP** and Windows targets to **Cinc Auditor** automatically.
-* 🪟 **Full Windows CIS Profile:** Ships the CIS Windows Server 2022 v5.0.0 benchmark as a single InSpec profile (Level 1 and Level 2), with role-aware controls for member servers and domain controllers.
+* 🪟 **Full Windows CIS Profile:** Ships the CIS Windows Server 2022 v5.0.0 benchmark as a single InSpec profile (Level 1 and Level 2), with role-aware controls for member servers controllers.
 * 🛠️ **Dual Remediation:** Applies the ansible-lockdown CIS roles as the primary path, with a self-contained PowerShell script as a Windows fallback when the remote connection cannot be made.
 * ✅ **Verification Re-Scan:** Re-scans after remediation so the before and after scores can be compared, not just asserted.
 * 📈 **Heimdall Reporting:** Converts OpenSCAP and Cinc Auditor results into the MITRE SAF format so Linux and Windows results read side by side on one dashboard.
