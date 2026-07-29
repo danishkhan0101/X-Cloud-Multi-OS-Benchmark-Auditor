@@ -256,7 +256,7 @@ jobs:
                 [ -z "$probe_user" ] && continue
                 distro_raw=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
                     -o ConnectTimeout=5 "${probe_user}@${ip}" \
-                    '. /etc/os-release && echo "$ID"' 2>/dev/null)
+                    '. /etc/os-release && echo "$ID"' 2>/dev/null) || true
                 [ -n "$distro_raw" ] && break
               done
 
