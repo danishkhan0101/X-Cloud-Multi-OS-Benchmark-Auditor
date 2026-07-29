@@ -396,7 +396,7 @@ ensure_linux_scap_tools() {
         -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o ConnectTimeout=10 \
         "${user}@${ip}" \
-        '. /etc/os-release && echo "$ID ${VERSION_ID%%.*}"' 2>&1)"
+        '. /etc/os-release && echo "$ID ${VERSION_ID%%.*}"' 2>/dev/null)"
     distro_err=$?
     read -r distro_id distro_ver <<< "$distro_raw"
 
