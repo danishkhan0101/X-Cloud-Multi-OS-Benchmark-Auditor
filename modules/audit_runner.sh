@@ -45,15 +45,18 @@ prefetch_scap_packages() {
         return 0
     fi
 
+    # Derive actual needs from the (post-reclassification) arrays rather than
+    # trusting H_TARGET_OS alone — a host can be reclassified into a different
+    # bucket than the CLI flag implied (e.g. --target-os rocky on a host that
+    # turns out to be Alma), and prefetch must match reality, not the guess.
     local need_rhel=false need_alma=false need_rocky=false need_ubuntu=false
 
-    case "${H_TARGET_OS,,}" in
-        rhel)   need_rhel=true ;;
-        alma)   need_alma=true ;;
-        rocky)  need_rocky=true ;;
-        ubuntu) need_ubuntu=true ;;
-        all)    need_rhel=true; need_alma=true; need_rocky=true; need_ubuntu=true ;;
-    esac
+    [ ${#RHEL_MACHINES[@]}   -gt 0 ] && need_rhel=true
+    [ ${#ALMA_MACHINES[@]}   -gt 0 ] && need_alma=true
+    [ ${#ROCKY_MACHINES[@]}  -gt 0 ] && need_rocky=true
+    [ ${#UBUNTU_MACHINES[@]} -gt 0 ] && need_ubuntu=true
+
+    log_info "[Phase0.2b] Prefetch needs (derived from actual host buckets): rhel=${need_rhel} alma=${need_alma} rocky=${need_rocky} ubuntu=${need_ubuntu}"
 
     $need_rhel   && mkdir -p "${SCAP_CACHE_DIR}"/{rhel9,rhel10}
     $need_rocky  && mkdir -p "${SCAP_CACHE_DIR}"/{rocky9,rocky10}
