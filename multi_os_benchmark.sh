@@ -248,6 +248,136 @@ declare -A IP_TO_VM_NAME
 declare -A IP_TO_VM_ID
 declare -A IP_TO_SG_ID
 
+# ------------------------------------------------------
+# reclassify_hosts_by_actual_os
+# _map_vm's initial bucketing is a best-effort guess based
+# on VM name / image offer string, which can be wrong (e.g.
+# a VM named "ecs-audit-rocky" that's actually AlmaLinux, or
+# a cloud API reporting an ambiguous/incorrect OS family).
+# This corrects EVERY bucket — Linux distro AND Windows —
+# using live detection against the host itself, now that
+# GHOST_USER / WIN_GHOST_USER are provisioned and reachable
+# post-bootstrap. Must run AFTER Phase 0.3, before inventory
+# is built or any phase logic runs.
+# ------------------------------------------------------
+reclassify_hosts_by_actual_os() {
+    log_info "PHASE 0.4: VERIFYING ACTUAL OS PER HOST (live detection, overriding name-based guess)"
+
+    local all_linux_ips=(
+        "${UBUNTU_MACHINES[@]}" "${RHEL_MACHINES[@]}"
+        "${ROCKY_MACHINES[@]}"  "${ALMA_MACHINES[@]}"
+    )
+    local all_win_ips=( "${WINDOWS_MACHINES[@]}" )
+
+    local NEW_UBUNTU=() NEW_RHEL=() NEW_ROCKY=() NEW_ALMA=() NEW_WINDOWS=()
+
+    # ---------- Verify hosts currently bucketed as Linux ----------
+    local ip
+    for ip in "${all_linux_ips[@]}"; do
+        local old_bucket=""
+        for b in "${UBUNTU_MACHINES[@]}"; do [ "$b" == "$ip" ] && old_bucket="ubuntu"; done
+        for b in "${RHEL_MACHINES[@]}";   do [ "$b" == "$ip" ] && old_bucket="rhel";   done
+        for b in "${ROCKY_MACHINES[@]}";  do [ "$b" == "$ip" ] && old_bucket="rocky";  done
+        for b in "${ALMA_MACHINES[@]}";   do [ "$b" == "$ip" ] && old_bucket="alma";   done
+
+        local distro_raw distro_id distro_ver
+        distro_raw="$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=10 \
+            "${GHOST_USER}@${ip}" \
+            '. /etc/os-release && echo "$ID ${VERSION_ID%%.*}"' 2>/dev/null)"
+        read -r distro_id distro_ver <<< "$distro_raw"
+
+        if [ -n "$distro_id" ]; then
+            local new_bucket=""
+            case "${distro_id,,}" in
+                ubuntu)      new_bucket="ubuntu" ;;
+                rhel|redhat) new_bucket="rhel"    ;;
+                rocky)       new_bucket="rocky"   ;;
+                almalinux)   new_bucket="alma"    ;;
+                *)
+                    log_warn "[Phase0.4] Unrecognized live distro_id='${distro_id}' on ${ip} — keeping original bucket '${old_bucket}'"
+                    new_bucket="$old_bucket"
+                    ;;
+            esac
+
+            if [ "$old_bucket" != "$new_bucket" ]; then
+                log_warn "[Phase0.4] RECLASSIFIED ${ip}: name suggested '${old_bucket}' but actual OS is '${new_bucket}' (${distro_id}${distro_ver})"
+            else
+                log_ok "[Phase0.4] ${ip} confirmed as '${new_bucket}' (${distro_id}${distro_ver})"
+            fi
+
+            case "$new_bucket" in
+                ubuntu) NEW_UBUNTU+=("$ip") ;;
+                rhel)   NEW_RHEL+=("$ip")   ;;
+                rocky)  NEW_ROCKY+=("$ip")  ;;
+                alma)   NEW_ALMA+=("$ip")   ;;
+            esac
+            continue
+        fi
+
+        # /etc/os-release check failed — see if this is secretly a Windows host
+        # (mapped wrong at the fabric/name level) before giving up.
+        if ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
+                "${WIN_GHOST_USER}@${ip}" "echo WIN_PROBE_OK" 2>/dev/null | grep -q WIN_PROBE_OK; then
+            log_warn "[Phase0.4] RECLASSIFIED ${ip}: was bucketed as Linux ('${old_bucket}') but responds as Windows over SSH — moving to Windows"
+            NEW_WINDOWS+=("$ip")
+        else
+            log_warn "[Phase0.4] Could not verify OS on ${ip} (neither Linux os-release nor Windows SSH responded) — keeping original bucket '${old_bucket}', may fail later"
+            case "$old_bucket" in
+                ubuntu) NEW_UBUNTU+=("$ip") ;;
+                rhel)   NEW_RHEL+=("$ip")   ;;
+                rocky)  NEW_ROCKY+=("$ip")  ;;
+                alma)   NEW_ALMA+=("$ip")   ;;
+            esac
+        fi
+    done
+
+    # ---------- Verify hosts currently bucketed as Windows ----------
+    for ip in "${all_win_ips[@]}"; do
+        local win_caption win_ver
+        win_caption=$(ssh -n -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+            "${WIN_GHOST_USER}@${ip}" \
+            "powershell -NoProfile -Command \"(Get-CimInstance Win32_OperatingSystem).Caption\"" 2>/dev/null)
+
+        if [ -n "$win_caption" ]; then
+            win_ver=$(detect_windows_version "$ip")
+            log_ok "[Phase0.4] ${ip} confirmed as Windows (${win_caption} -> WS${win_ver})"
+            NEW_WINDOWS+=("$ip")
+            continue
+        fi
+
+        # PowerShell probe failed — check if it's secretly a Linux host instead.
+        local linux_check
+        linux_check="$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
+            "${GHOST_USER}@${ip}" '. /etc/os-release && echo "$ID"' 2>/dev/null)"
+
+        if [ -n "$linux_check" ]; then
+            log_warn "[Phase0.4] RECLASSIFIED ${ip}: was bucketed as Windows but reports Linux distro_id='${linux_check}' — moving to appropriate Linux bucket"
+            case "${linux_check,,}" in
+                ubuntu)      NEW_UBUNTU+=("$ip") ;;
+                rhel|redhat) NEW_RHEL+=("$ip")   ;;
+                rocky)       NEW_ROCKY+=("$ip")  ;;
+                almalinux)   NEW_ALMA+=("$ip")   ;;
+                *)
+                    log_error "[Phase0.4] ${ip} reports unrecognized distro_id='${linux_check}' — dropping from this run, needs manual triage"
+                    ;;
+            esac
+        else
+            log_warn "[Phase0.4] Could not verify OS on ${ip} (neither Windows PowerShell nor Linux os-release responded) — keeping as Windows, may fail later"
+            NEW_WINDOWS+=("$ip")
+        fi
+    done
+
+    UBUNTU_MACHINES=("${NEW_UBUNTU[@]}")
+    RHEL_MACHINES=("${NEW_RHEL[@]}")
+    ROCKY_MACHINES=("${NEW_ROCKY[@]}")
+    ALMA_MACHINES=("${NEW_ALMA[@]}")
+    WINDOWS_MACHINES=("${NEW_WINDOWS[@]}")
+
+    log_ok "[Phase0.4] Reclassification complete — Ubuntu:${#UBUNTU_MACHINES[@]} RHEL:${#RHEL_MACHINES[@]} Rocky:${#ROCKY_MACHINES[@]} Alma:${#ALMA_MACHINES[@]} Windows:${#WINDOWS_MACHINES[@]}"
+}
+
+
 # _map_vm is called BY the discovery modules (azure_discover_vms,
 # hw_discover_vms) for each host they find, so it must be defined
 # here before those functions run.
@@ -402,7 +532,7 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
     done
 fi
 wait
-
+reclassify_hosts_by_actual_os
 # ======================================================
 # INVENTORY BUILDER
 # ======================================================
