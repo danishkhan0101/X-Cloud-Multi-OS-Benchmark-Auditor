@@ -565,3 +565,21 @@ control "WBS90-uninstall-snmp" do
     it { should_not be_installed }
   end
 end
+
+control "WSB15-dns-configuration" do
+  impact 0.0
+  title "Configure DNS client with official TM DNS servers"
+  desc "Manual verification required — not auto-remediated by this profile."
+  describe "WSB15 - DNS client configuration" do
+    skip "Manual verification required: confirm DNS client points to official TM DNS server IPs. Not auto-checked or auto-remediated."
+  end
+end
+
+control "WSB75-log-forwarding" do
+  impact 0.0
+  title "Forward server logs to centralized log server (NGSIEM)"
+  desc "Manual verification required — not auto-remediated by this profile."
+  describe "WSB75 - Log forwarding to NGSIEM" do
+    skip "Manual verification required: confirm server logs are forwarded to and received by NGSIEM. Not auto-checked or auto-remediated."
+  end
+end
