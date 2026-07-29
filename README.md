@@ -97,7 +97,6 @@ Cloud Compliance Auditor supports three profile selections through the `--profil
 For Windows, the CIS profile is the full **CIS Windows Server 2022 v5.0.0** benchmark held in one InSpec profile. Two inputs change its behaviour at scan time.
 
 * **`profile_level`** selects Level 1 (the default baseline) or Level 2 (stricter, defence in depth). Set the level with the `CIS_LEVEL` environment variable, for example `Level 1` or `Level 2`.
-* **`server_role`** selects `member_server` or `domain_controller`, so role-scoped controls skip on a host they do not apply to.
 
 ---
 
