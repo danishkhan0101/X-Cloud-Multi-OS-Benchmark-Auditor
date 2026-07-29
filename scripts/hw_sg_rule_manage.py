@@ -2,14 +2,25 @@
 """
 hw_sg_rule_manage.py
 ─────────────────────
-Idempotent security-group ingress rule refresh for Alpha Edge (private HW Cloud).
-Deletes any existing ingress rule matching (security_group_id, port) that does
-NOT already match the target (protocol, remote_ip), then creates a fresh one
-scoped to the given remote IP. If a rule already matches exactly, this is a
-no-op — nothing is deleted or recreated.
+Idempotent, concurrency-safe security-group ingress rule refresh for Alpha
+Edge (private HW Cloud).
+
+Each rule this script creates is tagged in its `description` field with an
+owner id (defaults to --remote-ip, i.e. the runner's own IP, but can be
+overridden with --owner-tag for a stable per-runner identity across IP
+changes). On each run, the script:
+  1. Skips silently if a rule already matches (protocol, port, remote_ip)
+     exactly — true no-op.
+  2. Deletes ONLY prior rules that carry this runner's own owner tag but
+     have a stale IP (e.g. runner's IP changed between runs).
+  3. NEVER deletes or touches rules belonging to a different owner tag —
+     this is what previously caused parallel runners to delete each
+     other's freshly-created rules for the same port.
+  4. Creates the fresh rule, tagged with the owner id.
 
 Usage:
-  python3 hw_sg_rule_manage.py --sg-id <SG_ID> --port <PORT> --remote-ip <IP>
+  python3 hw_sg_rule_manage.py --sg-id <SG_ID> --port <PORT> --remote-ip <IP> \
+      [--owner-tag <STABLE_ID>] [--protocol tcp]
 
 Required env vars:
   HUAWEICLOUD_ACCESS_KEY, HUAWEICLOUD_SECRET_KEY, HW_PROJECT_ID, HW_VPC_ENDPOINT
@@ -19,9 +30,15 @@ import argparse
 import os
 import sys
 
+TAG_PREFIX = "sgmgr-owner"
+
 
 def log(msg):
     print(f"[hw_sg_rule_manage] {msg}", file=sys.stderr)
+
+
+def owner_tag_string(owner_id: str) -> str:
+    return f"{TAG_PREFIX}:{owner_id}"
 
 
 def main():
@@ -30,7 +47,20 @@ def main():
     parser.add_argument("--port", required=True, type=int)
     parser.add_argument("--remote-ip", required=True)
     parser.add_argument("--protocol", default="tcp")
+    parser.add_argument(
+        "--owner-tag",
+        default=None,
+        help=(
+            "Stable identifier for this runner/VM, used to scope which rules "
+            "this invocation is allowed to delete. Defaults to --remote-ip if "
+            "not given — but pass a stable value (e.g. VM name/hostname) if "
+            "the runner's IP can change between runs, so old-IP rules from "
+            "the SAME runner still get cleaned up correctly."
+        ),
+    )
     args = parser.parse_args()
+    owner_id = args.owner_tag or args.remote_ip
+    tag = owner_tag_string(owner_id)
 
     ak         = os.environ.get("HUAWEICLOUD_ACCESS_KEY", "")
     sk         = os.environ.get("HUAWEICLOUD_SECRET_KEY", "")
@@ -77,38 +107,54 @@ def main():
         log(f"❌ list_security_group_rules failed: {e.status_code} {e.error_code} {e.error_msg}")
         sys.exit(1)
 
-    # ── Step 2: delete stale ingress rules for this port, skip if a
-    #            matching rule already exists (idempotent no-op) ────────
+    # ── Step 2: check for exact match (true no-op), and separately find
+    #            ONLY this owner's stale rules to delete. Rules belonging
+    #            to other owners on the same port are left completely
+    #            untouched — this is the fix for the parallel-runner
+    #            deletion race. ─────────────────────────────────────────
     target_prefix = f"{args.remote_ip}/32"
     already_correct = False
+    own_stale_rule_ids = []
 
     for r in rules:
         d = r.to_dict() if hasattr(r, "to_dict") else {}
-        if (
+        if not (
             d.get("direction") == "ingress"
             and str(d.get("port_range_min")) == str(args.port)
             and str(d.get("port_range_max")) == str(args.port)
             and str(d.get("protocol")) == str(args.protocol)
         ):
-            if d.get("remote_ip_prefix") == target_prefix:
-                # Exactly the rule we want already exists — don't touch it.
-                already_correct = True
-                log(f"✅ Rule already correct: {args.protocol}/{args.port} ← {target_prefix} on SG {args.sg_id} (no-op)")
-                continue
+            continue
 
-            rule_id = d.get("id")
-            log(f"🗑️  Deleting stale rule {rule_id} (port {args.port}, was {d.get('remote_ip_prefix')})")
-            try:
-                del_req = DeleteSecurityGroupRuleRequest()
-                del_req.security_group_rule_id = rule_id
-                client.delete_security_group_rule(del_req)
-            except exceptions.ClientRequestException as e:
-                log(f"⚠️  delete failed (continuing): {e.status_code} {e.error_code} {e.error_msg}")
+        description = d.get("description") or ""
+
+        if d.get("remote_ip_prefix") == target_prefix and tag in description:
+            # Exactly the rule we want, owned by us — no-op.
+            already_correct = True
+            log(f"✅ Rule already correct: {args.protocol}/{args.port} ← {target_prefix} "
+                f"(owner={owner_id}) on SG {args.sg_id} (no-op)")
+            continue
+
+        if tag in description:
+            # Stale rule, but it's OURS (same owner tag, different/old IP).
+            # Safe to delete — no other runner can own a rule with our tag.
+            own_stale_rule_ids.append((d.get("id"), d.get("remote_ip_prefix")))
+        # else: belongs to a different owner (or untagged legacy rule) —
+        # deliberately left alone.
 
     if already_correct:
         sys.exit(0)
 
-    # ── Step 3: create fresh rule scoped to current runner IP ────────────
+    for rule_id, old_ip in own_stale_rule_ids:
+        log(f"🗑️  Deleting own stale rule {rule_id} (port {args.port}, owner={owner_id}, was {old_ip})")
+        try:
+            del_req = DeleteSecurityGroupRuleRequest()
+            del_req.security_group_rule_id = rule_id
+            client.delete_security_group_rule(del_req)
+        except exceptions.ClientRequestException as e:
+            log(f"⚠️  delete failed (continuing): {e.status_code} {e.error_code} {e.error_msg}")
+
+    # ── Step 3: create fresh rule, tagged with this owner's id ───────────
     try:
         option = CreateSecurityGroupRuleOption(
             security_group_id=args.sg_id,
@@ -118,11 +164,13 @@ def main():
             port_range_min=args.port,
             port_range_max=args.port,
             remote_ip_prefix=target_prefix,
+            description=tag,
         )
         body = CreateSecurityGroupRuleRequestBody(security_group_rule=option)
         create_req = CreateSecurityGroupRuleRequest(body=body)
         client.create_security_group_rule(create_req)
-        log(f"✅ Rule created: {args.protocol}/{args.port} ← {target_prefix} on SG {args.sg_id}")
+        log(f"✅ Rule created: {args.protocol}/{args.port} ← {target_prefix} "
+            f"(owner={owner_id}) on SG {args.sg_id}")
     except exceptions.ClientRequestException as e:
         log(f"❌ create_security_group_rule failed: {e.status_code} {e.error_code} {e.error_msg}")
         sys.exit(1)
