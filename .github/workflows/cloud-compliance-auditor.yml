@@ -202,6 +202,11 @@ jobs:
           echo "🔍 Verifying AK/SK against private ECS endpoint..."
           python3 scripts/hw_verify_auth.py
 
+      - name: '🔑 Setup SSH Key'
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_KEY }}
+      
       # ── VM Discovery ────────────────────────────────────────────────────
       - name: '📡 Discover Online VMs'
         id: discover-vms
@@ -217,6 +222,8 @@ jobs:
           HW_ECS_TAG_KEY:         ${{ vars.HW_ECS_TAG_KEY || '' }}
           HW_ECS_TAG_VAL:         ${{ github.event.inputs.environment_tag == 'all' && '' || github.event.inputs.environment_tag }}
           HW_EPS_ID:              ${{ vars.HW_EPS_ID }}
+          GHOST_USER:             ${{ vars.GHOST_USER }}
+          LINUX_SSH_USER:         ${{ vars.LINUX_SSH_USER }}
         run: |
           set -uo pipefail
           HAS_UBUNTU=false; HAS_RHEL=false; HAS_ROCKY=false
@@ -230,14 +237,51 @@ jobs:
             local name_lower="${name,,}" NODE_OS=""
             if [[ "$os" == *"Linux"* ]] || [[ "$os" == *"Ubuntu"* ]] || [[ "$os" == *"linux"* ]]; then
               if   [[ "$offer" == *"rocky"* ]] || [[ "$name_lower" == *"rocky"* ]]; then
-                HAS_ROCKY=true; NODE_OS="Rocky"
+                NODE_OS="Rocky"
               elif [[ "$offer" == *"alma"* ]] || [[ "$name_lower" == *"alma"* ]]; then
-                HAS_ALMA=true;  NODE_OS="Alma"
+                NODE_OS="Alma"
               elif [[ "$offer" == *"rhel"* ]] || [[ "$name_lower" == *"rhel"* ]]; then
-                HAS_RHEL=true;  NODE_OS="RHEL"
+                NODE_OS="RHEL"
               else
-                HAS_UBUNTU=true; NODE_OS="Ubuntu"
+                NODE_OS="Ubuntu"
               fi
+
+              # ── Live override: name/offer is just a best-effort guess.
+              # SSH probe (GHOST_USER first, falling back to LINUX_SSH_USER,
+              # since GHOST_USER may not be provisioned yet on a brand-new
+              # host at this early stage) and trust /etc/os-release instead,
+              # when reachable.
+              local distro_raw distro_id probe_user
+              for probe_user in "${GHOST_USER:-}" "${LINUX_SSH_USER:-}"; do
+                [ -z "$probe_user" ] && continue
+                distro_raw=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+                    -o ConnectTimeout=5 "${probe_user}@${ip}" \
+                    '. /etc/os-release && echo "$ID"' 2>/dev/null)
+                [ -n "$distro_raw" ] && break
+              done
+
+              if [ -n "$distro_raw" ]; then
+                local LIVE_OS=""
+                case "${distro_raw,,}" in
+                  ubuntu)      LIVE_OS="Ubuntu" ;;
+                  rhel|redhat) LIVE_OS="RHEL"   ;;
+                  rocky)       LIVE_OS="Rocky"  ;;
+                  almalinux)   LIVE_OS="Alma"   ;;
+                esac
+                if [ -n "$LIVE_OS" ] && [ "$LIVE_OS" != "$NODE_OS" ]; then
+                  echo "⚠️  Reclassified ${ip}: name/offer suggested '${NODE_OS}' but live probe found '${LIVE_OS}' (${distro_raw})"
+                  NODE_OS="$LIVE_OS"
+                fi
+              else
+                echo "ℹ️  Could not live-probe ${ip} (SSH not yet reachable) — using name/offer guess '${NODE_OS}'"
+              fi
+
+              case "$NODE_OS" in
+                Rocky)  HAS_ROCKY=true   ;;
+                Alma)   HAS_ALMA=true    ;;
+                RHEL)   HAS_RHEL=true    ;;
+                Ubuntu) HAS_UBUNTU=true  ;;
+              esac
             elif [[ "$os" == *"Windows"* ]] || [[ "$os" == *"windows"* ]]; then
               HAS_WINDOWS=true; NODE_OS="Windows"
             fi
