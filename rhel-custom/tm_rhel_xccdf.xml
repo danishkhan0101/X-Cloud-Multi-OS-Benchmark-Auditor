@@ -10,6 +10,7 @@
     <description>Evaluates 20 Technical LSB rules across 7 categories.</description>
     <select idref="xccdf_com.tm_rule_14" selected="true"/>
     <select idref="xccdf_com.tm_rule_15" selected="true"/>
+    <select idref="xccdf_com.tm_rule_16" selected="true"/>
     <select idref="xccdf_com.tm_rule_19" selected="true"/>
     <select idref="xccdf_com.tm_rule_20" selected="true"/>
     <select idref="xccdf_com.tm_rule_25" selected="true"/>
@@ -27,6 +28,7 @@
     <select idref="xccdf_com.tm_rule_37" selected="true"/>
     <select idref="xccdf_com.tm_rule_38" selected="true"/>
     <select idref="xccdf_com.tm_rule_39" selected="true"/>
+    <select idref="xccdf_com.tm_rule_40" selected="true"/>
     <select idref="xccdf_com.tm_rule_41" selected="true"/>
   </Profile>
 
