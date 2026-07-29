@@ -501,9 +501,46 @@ ensure_linux_scap_tools() {
         ${install_cmd}
         sudo rm -rf /tmp/scap_offline 2>/dev/null || true
 
-        command -v oscap >/dev/null 2>&1 \
-            || { echo '[FATAL] oscap missing after offline install'; exit 10; }
+        if ! command -v oscap >/dev/null 2>&1; then
+            if [ "${ALLOW_OPENSSL_AUTO_UPDATE:-false}" != "true" ]; then
+                echo '[FATAL] oscap missing after offline install (likely openssl version mismatch — set ALLOW_OPENSSL_AUTO_UPDATE=true to enable auto-recovery)'
+                exit 10
+            fi
 
+            echo '[WARN] oscap missing after offline install — attempting openssl auto-recovery (ALLOW_OPENSSL_AUTO_UPDATE=true)'
+            INSTALLED_SSL=$(rpm -q --qf '%{VERSION}-%{RELEASE}' openssl 2>/dev/null)
+            echo "[Recovery] Installed openssl: ${INSTALLED_SSL:-unknown}"
+            echo "[Recovery] Attempting safe openssl/openssl-libs update from VM's own repos (not pushed RPMs)..."
+
+            sudo dnf update -y openssl openssl-libs 2>&1
+            UPDATE_RC=$?
+
+            if [ $UPDATE_RC -ne 0 ]; then
+                echo '[FATAL] openssl/openssl-libs update failed — aborting, not retrying oscap install'
+                exit 14
+            fi
+
+            echo '[Recovery] Verifying sshd config integrity after openssl update...'
+            if ! sudo sshd -t 2>&1; then
+                echo '[FATAL] sshd -t failed after openssl update — refusing to restart sshd, manual intervention required'
+                exit 15
+            fi
+
+            sudo systemctl restart sshd
+            sleep 2
+            if ! sudo sshd -T >/dev/null 2>&1; then
+                echo '[FATAL] sshd did not come back healthy after restart — manual intervention required'
+                exit 16
+            fi
+            echo '[Recovery] sshd verified healthy after openssl update'
+
+            echo '[Recovery] Retrying SCAP tool install now that openssl is current...'
+            ${install_cmd}
+
+            command -v oscap >/dev/null 2>&1 \
+                || { echo '[FATAL] oscap still missing after openssl recovery + retry'; exit 10; }
+            echo '[Recovery] oscap now available after openssl update + retry'
+        fi
         oscap --version >/dev/null 2>&1
         if [ \$? -ne 0 ]; then
             echo '[WARN] oscap present but failed to run — checking for missing shared libs...'
