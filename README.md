@@ -304,7 +304,7 @@ When running in GitHub Actions, provide the following through repository setting
 | `AZURE_TENANT_ID` | Azure tenant ID. |
 | `HW_ACCESS_KEY` | Huawei Cloud IAM access key. |
 | `HW_SECRET_KEY` | Huawei Cloud IAM secret key. |
-| `UBUNTU_SSH_KEY` | Private SSH key used for Linux hosts (both clouds) and the Windows agent channel. |
+| `SSH_KEY` | Private SSH key used for Linux hosts (both clouds) and the Windows agent channel. |
 
 **Variables**
 
@@ -317,9 +317,9 @@ When running in GitHub Actions, provide the following through repository setting
 | `HW_VPC_ID` | Huawei Cloud VPC used for security-group rules. |
 | `HW_EPS_ID` | Optional Huawei Cloud enterprise project ID. |
 | `HW_VPC_ENDPOINT` | Huawei Cloud VPC API endpoint (auto-derived from `HW_REGION` if unset). |
-| `LINUX_ADMIN_USER` | SSH user for Linux targets. |
+| `LINUX_SSH_USER` | SSH user for Linux targets. |
 | `WIN_SSH_USER` | SSH user for Windows targets (default `Administrator`). |
-| `WIN_SERVER_ROLE` | `member_server` or `domain_controller`. |
+| `WIN_SERVER_ROLE` | `member_server`. |
 | `ORG_NAME`, `ORG_PREFIX` | Organisation name and prefix for custom content. |
 | `GHOST_USER` | Name of the temporary JIT access-recovery account. |
 | `CUSTOM_XCCDF_PROFILE` | XCCDF profile ID for the custom TM baseline. |
