@@ -167,6 +167,47 @@ hw_reassert_ssh_rule_all() {
     done
 }
 
+hw_revoke_port_rule() {
+    local ip="$1" port="$2" protocol="${3:-tcp}"
+    local sg_id="${IP_TO_SG_ID[$ip]:-}"
+    local runner_ip="${RUNNER_IP:-$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null)}"
+
+    if [ -z "$sg_id" ]; then
+        log_warn "[HW] No SG ID resolved for ${ip} — skipping rule revoke"
+        return 0
+    fi
+    if [ -z "$runner_ip" ]; then
+        log_warn "[HW] Failed to resolve runner IP — skipping rule revoke for ${ip}"
+        return 0
+    fi
+
+    local lock_file="/tmp/hw_sg_lock_${sg_id}.lock"
+    (
+        flock -w 30 200 || { log_error "[HW] Timed out waiting for SG lock on ${sg_id} (revoke, ${ip})"; exit 1; }
+        HW_VPC_ENDPOINT="${HW_VPC_ENDPOINT}" \
+        python3 "${SCRIPT_DIR}/scripts/hw_sg_rule_manage.py" \
+            --sg-id "$sg_id" \
+            --port "$port" \
+            --remote-ip "$runner_ip" \
+            --protocol "$protocol" \
+            --action delete
+    ) 200>"$lock_file"
+}
+
+hw_revoke_ssh_rule_all() {
+    local ips=("$@")
+    [ ${#ips[@]} -eq 0 ] && return 0
+
+    local runner_ip
+    runner_ip="${RUNNER_IP:-$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null)}"
+    log_info "[SG-Revoke] Removing port-22 rule for ${#ips[@]} host(s) -> runner ${runner_ip}"
+
+    local ip
+    for ip in "${ips[@]}"; do
+        hw_revoke_port_rule "$ip" 22 tcp
+    done
+}
+
 # ------------------------------------------------------
 # hw_vm_run_shell
 # ------------------------------------------------------
