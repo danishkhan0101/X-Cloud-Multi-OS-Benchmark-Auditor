@@ -183,6 +183,20 @@ reassert_ssh_rule_all_windows() {
     hw_reassert_ssh_rule_all "${WINDOWS_MACHINES[@]}"
 }
 
+revoke_ssh_rule_all_linux() {
+    [ "${CLOUD_PROVIDER}" != "huaweicloud" ] && return 0
+    local all_linux_ips=(
+        "${UBUNTU_MACHINES[@]}" "${RHEL_MACHINES[@]}"
+        "${ROCKY_MACHINES[@]}"  "${ALMA_MACHINES[@]}"
+    )
+    hw_revoke_ssh_rule_all "${all_linux_ips[@]}"
+}
+
+revoke_ssh_rule_all_windows() {
+    [ "${CLOUD_PROVIDER}" != "huaweicloud" ] && return 0
+    hw_revoke_ssh_rule_all "${WINDOWS_MACHINES[@]}"
+}
+
 # ======================================================
 # HEADLESS MODE PARSER
 # ======================================================
@@ -628,6 +642,9 @@ if [ "$HEADLESS" == true ]; then
 
     if [ "$H_CLEANUP" == "true" ]; then run_cleanup; fi
 
+    revoke_ssh_rule_all_linux
+    revoke_ssh_rule_all_windows
+
     chmod 755 ./*.json ./*.html 2>/dev/null || true
     log_ok "CI/CD Pipeline complete. All reports generated."
     exit 0
@@ -648,9 +665,9 @@ while true; do
     echo -e "5) ${BOLD}EXIT${NC}"
     read -r -p "Choose an option [1-5]: " choice
     case $choice in
-        1) run_phase_1 ;;
-        2) run_remediation; run_phase_4 ;;
-        3) run_phase_1; run_remediation; run_phase_4 ;;
+        1) run_phase_1; revoke_ssh_rule_all_linux; revoke_ssh_rule_all_windows ;;
+        2) run_remediation; run_phase_4; revoke_ssh_rule_all_linux; revoke_ssh_rule_all_windows ;;
+        3) run_phase_1; run_remediation; run_phase_4; revoke_ssh_rule_all_linux; revoke_ssh_rule_all_windows ;;
         4) run_cleanup ;;
         5) exit 0 ;;
         *) echo -e "${RED}Invalid choice.${NC}" ;;
