@@ -15,13 +15,13 @@ The same pipeline runs on **Azure** and **Huawei Cloud** through a small provide
 ## ✨ Core Features
 
 * 🧠 **Dynamic Discovery:** Queries the cloud by Environment Tag to build a real-time inventory of running nodes, with no manual target lists.
-* ☁️ **Cross-Cloud:** Runs on Microsoft Azure or Huawei Cloud through a provider abstraction layer, selected with a single flag.
+* ☁️ **Cross-Cloud:** Runs on Microsoft Azure or Cloud Alpha Edge through a provider abstraction layer, selected with a single flag.
 * 💉 **JIT Auto-Healing:** Temporarily injects a privileged "Ghost User" through the cloud command channel to bypass broken cloud-init locks and fix SELinux or crypto policy on the fly.
 * 📊 **Multi-OS Scanning:** Routes Linux targets to **OpenSCAP** and Windows targets to **Cinc Auditor** automatically.
 * 🪟 **Full Windows CIS Profile:** Ships the CIS Windows Server 2022 v5.0.0 benchmark as a single InSpec profile (Level 1 and Level 2), with role-aware controls for member servers controllers.
-* 🛠️ **Dual Remediation:** Applies the ansible-lockdown CIS roles as the primary path, with a self-contained PowerShell script as a Windows fallback when the remote connection cannot be made.
+* 🛠️ **Remediation:** Select the desired remediation baseline to apply which are Custom TM Baseline, CIS Level 1, CIS Level 2, or all applicable baselines for Windows and Linux.
 * ✅ **Verification Re-Scan:** Re-scans after remediation so the before and after scores can be compared, not just asserted.
-* 📈 **Heimdall Reporting:** Converts OpenSCAP and Cinc Auditor results into the MITRE SAF format so Linux and Windows results read side by side on one dashboard.
+* 📈 **Reporting:** Converts Cinc Auditor results into the MITRE SAF format, allowing them to be viewed in a single Heimdall dashboard. For Linux OpenSCAP scans, reporting is provided through the built-in HTML report.
 * 🧷 **Built-In Safety:** Opens firewall/NSG rules only from the runner address, checks host health before any reboot, bounds every remote call with a timeout so a single bad host cannot stall the run, and keeps the hardening while removing all temporary access.
 * 🧹 **Zero-Trust Cleanup:** Removes temporary firewall rules, uninstalls scanner dependencies, and deletes the injected user after the audit.
 
