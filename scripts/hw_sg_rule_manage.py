@@ -58,6 +58,13 @@ def main():
             "the SAME runner still get cleaned up correctly."
         ),
     )
+    parser.add_argument(
+        "--action",
+        choices=["ensure", "delete"],
+        default="ensure",
+        help="ensure (default): create/refresh the rule. delete: remove this "
+             "owner's rule for this port and exit — no create.",
+    )
     args = parser.parse_args()
     owner_id = args.owner_tag or args.remote_ip
     tag = owner_tag_string(owner_id)
@@ -107,6 +114,34 @@ def main():
         log(f"❌ list_security_group_rules failed: {e.status_code} {e.error_code} {e.error_msg}")
         sys.exit(1)
 
+    if args.action == "delete":
+        deleted_any = False
+        for r in rules:
+            d = r.to_dict() if hasattr(r, "to_dict") else {}
+            if not (
+                d.get("direction") == "ingress"
+                and str(d.get("port_range_min")) == str(args.port)
+                and str(d.get("port_range_max")) == str(args.port)
+                and str(d.get("protocol")) == str(args.protocol)
+            ):
+                continue
+            description = d.get("description") or ""
+            if tag not in description:
+                continue  # not ours — leave it alone
+
+            rule_id = d.get("id")
+            log(f"🗑️  Deleting rule {rule_id} ({args.protocol}/{args.port}, owner={owner_id})")
+            try:
+                del_req = DeleteSecurityGroupRuleRequest()
+                del_req.security_group_rule_id = rule_id
+                client.delete_security_group_rule(del_req)
+                deleted_any = True
+            except exceptions.ClientRequestException as e:
+                log(f"⚠️  delete failed (continuing): {e.status_code} {e.error_code} {e.error_msg}")
+
+        if not deleted_any:
+            log(f"ℹ️  No matching owned rule found to delete — no-op")
+        sys.exit(0)
     # ── Step 2: check for exact match (true no-op), and separately find
     #            ONLY this owner's stale rules to delete. Rules belonging
     #            to other owners on the same port are left completely
