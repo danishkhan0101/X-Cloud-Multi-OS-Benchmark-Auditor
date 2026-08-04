@@ -548,6 +548,21 @@ if [[ "$H_TARGET_OS" == "all" || "${H_TARGET_OS,,}" == "windows" ]]; then
 fi
 wait
 reclassify_hosts_by_actual_os
+
+# If we were targeting a specific OS and the host got reclassified into a
+# different bucket, H_TARGET_OS must follow it — otherwise every phase's
+# OS-gate check (which still tests the ORIGINAL --target-os string) will
+# skip the host's new bucket entirely and silently do nothing all run.
+if [ "$H_TARGET_OS" != "all" ]; then
+    if   [ ${#UBUNTU_MACHINES[@]}  -gt 0 ]; then H_TARGET_OS="ubuntu"
+    elif [ ${#RHEL_MACHINES[@]}    -gt 0 ]; then H_TARGET_OS="rhel"
+    elif [ ${#ROCKY_MACHINES[@]}   -gt 0 ]; then H_TARGET_OS="rocky"
+    elif [ ${#ALMA_MACHINES[@]}    -gt 0 ]; then H_TARGET_OS="alma"
+    elif [ ${#WINDOWS_MACHINES[@]} -gt 0 ]; then H_TARGET_OS="windows"
+    fi
+    log_info "H_TARGET_OS re-synced to actual bucket after reclassification: ${H_TARGET_OS}"
+fi
+
 # ======================================================
 # INVENTORY BUILDER
 # ======================================================
