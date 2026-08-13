@@ -56,11 +56,11 @@ graph TD
     M2 --> M3[Step 3/3: Org Baseline<br/>TM custom XCCDF/Ruby]
     L -- No --> M4[Run Once<br/>tm or cis only]
 
-    M3 --> N[Execute Phase&#40;s&#41;<br/>scan / remediate+verify / full]
+    M3 --> N[Execute Phases<br/>scan / remediate plus verify / full]
     M4 --> N
 
     N --> O[Generate Reports<br/>HTML Linux, Heimdall JSON Windows]
-    O --> P((Zero-Trust Cleanup<br/>if --cleanup true))
+    O --> P((Zero-Trust Cleanup<br/>if cleanup true))
 
     style B fill:#5b4fc4,stroke:#333,color:#fff
     style D fill:#1a5f8f,stroke:#333,color:#fff
